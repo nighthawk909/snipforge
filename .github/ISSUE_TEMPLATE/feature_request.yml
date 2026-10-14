@@ -1,0 +1,15 @@
+name: Feature idea
+description: Suggest something SnipForge should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What are you trying to do?
+      description: Describe the task or problem; it helps more than a specific solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could SnipForge help?

@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snipforge"
+version = "0.4.0"
+description = "Open-source SnagIt-style screenshot and markup tool for Windows"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "nighthawk909" }]
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6-Essentials>=6.6",
+    "pywin32>=306",
+    "winrt-runtime>=2.0",
+    "winrt-Windows.Media.Ocr>=2.0",
+    "winrt-Windows.Graphics.Imaging>=2.0",
+    "winrt-Windows.Storage.Streams>=2.0",
+    "winrt-Windows.Foundation>=2.0",
+    "winrt-Windows.Foundation.Collections>=2.0",
+    "winrt-Windows.Globalization>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/nighthawk909/snipforge"
+Issues = "https://github.com/nighthawk909/snipforge/issues"
+Changelog = "https://github.com/nighthawk909/snipforge/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.14", "pyinstaller>=6.10", "cyclonedx-bom>=7"]
+
+[project.gui-scripts]
+snipforge = "snipforge.app:main"
+
+[tool.setuptools.packages.find]
+include = ["snipforge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["packaging/*.spec"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = [
+    "S603", "S607",  # subprocess with fixed args (explorer, taskkill) is intentional
+    "S101",          # asserts are fine in tests
+    "S110", "S112",  # try/except/pass is deliberate around flaky shell extensions; each is commented
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "E731"]
+# Inline SVG artwork and Qt style sheets read better unwrapped.
+"snipforge/icons.py" = ["E501"]
+"snipforge/editor/stamps.py" = ["E501"]
+"snipforge/editor/window.py" = ["E501"]

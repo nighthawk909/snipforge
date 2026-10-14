@@ -1,0 +1,306 @@
+"""Text annotations: free text, and callouts (a shape with text inside and an optional pointer)."""
+from __future__ import annotations
+
+import math
+
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextOption
+from PySide6.QtWidgets import QGraphicsTextItem, QStyle, QStyleOptionGraphicsItem
+
+from .items import Annotation, BoxItem, make_pen, readable_on
+from .style import Style
+
+
+class EditableText(QGraphicsTextItem):
+    """Editable text that reports to its owning annotation when an edit finishes.
+
+    The owner exposes `on_edit_finished(owner, before_state | None)` (set by the
+    canvas) and `is_new`. `before_state` is None for an item that isn't in the
+    undo history yet.
+    """
+
+    def __init__(self, parent=None) -> None:
+        QGraphicsTextItem.__init__(self, parent)
+        self._edit_before: dict | None = None
+
+    def owner(self):
+        return self
+
+    def is_editing(self) -> bool:
+        return bool(self.textInteractionFlags() & Qt.TextEditorInteraction)
+
+    def start_editing(self) -> None:
+        if self.is_editing():
+            return  # keep the original undo baseline when re-entered (e.g. double-click mid-edit)
+        owner = self.owner()
+        if not getattr(owner, "is_new", False):
+            self._edit_before = owner.get_state()
+        self.setTextInteractionFlags(Qt.TextEditorInteraction)
+        self.setAcceptedMouseButtons(Qt.LeftButton | Qt.RightButton)
+        self.setFocus(Qt.MouseFocusReason)
+        cursor = self.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.setTextCursor(cursor)
+
+    def finish_editing(self) -> None:
+        if not self.is_editing():
+            return
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+        cursor = self.textCursor()
+        cursor.clearSelection()
+        self.setTextCursor(cursor)
+        self._after_editing()
+        before, self._edit_before = self._edit_before, None
+        owner = self.owner()
+        callback = getattr(owner, "on_edit_finished", None)
+        if callback:
+            callback(owner, before)
+
+    def _after_editing(self) -> None:
+        pass
+
+    def focusOutEvent(self, event) -> None:
+        super().focusOutEvent(event)
+        if event.reason() != Qt.PopupFocusReason:  # right-click menu: keep editing so Paste works
+            self.finish_editing()
+
+    def paint(self, p: QPainter, option, widget=None) -> None:
+        opt = QStyleOptionGraphicsItem(option)  # our overlay draws selection, not Qt
+        opt.state = opt.state & ~QStyle.State_Selected & ~QStyle.State_HasFocus
+        super().paint(p, opt, widget)
+
+
+def _font(size: int, weight: QFont.Weight) -> QFont:
+    font = QFont("Segoe UI", int(size))
+    font.setWeight(weight)
+    return font
+
+
+# ---------------------------------------------------------------------------
+# Free text
+# ---------------------------------------------------------------------------
+class TextItem(Annotation, EditableText):
+    """Text, optionally on a filled background."""
+
+    kind = "text"
+
+    def __init__(self, style: Style, text: str = "") -> None:
+        EditableText.__init__(self)
+        self.on_edit_finished = None
+        self.is_new = False
+        self.document().setDocumentMargin(8)
+        self.setPlainText(text)
+        self.init_annotation(style)
+        self._apply_text_style()
+
+    def set_style(self, style: Style) -> None:
+        super().set_style(style)
+        self._apply_text_style()
+
+    def _apply_text_style(self) -> None:
+        self.setFont(_font(self.style.font_size, QFont.Bold))
+        color = QColor(self.style.color)
+        self.setDefaultTextColor(readable_on(color) if self.style.fill else color)
+
+    def _geometry(self) -> dict:
+        return {"text": self.toPlainText()}
+
+    def _set_geometry(self, state: dict) -> None:
+        self.setPlainText(state["text"])
+
+    def is_degenerate(self) -> bool:
+        return not self.toPlainText().strip()
+
+    def start_text_editing(self) -> None:
+        self.start_editing()
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if not self.is_editing():
+            self.start_editing()
+        super().mouseDoubleClickEvent(event)
+
+    def paint(self, p: QPainter, option, widget=None) -> None:
+        if self.style.fill:
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(self.style.color))
+            p.drawRoundedRect(self.boundingRect(), 7, 7)
+        super().paint(p, option, widget)
+
+
+# ---------------------------------------------------------------------------
+# Callout
+# ---------------------------------------------------------------------------
+class _CalloutText(EditableText):
+    def __init__(self, callout: CalloutItem) -> None:
+        super().__init__(callout)
+        self.setAcceptedMouseButtons(Qt.NoButton)  # clicks go to the callout unless editing
+        option = QTextOption(Qt.AlignHCenter)
+        option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.document().setDefaultTextOption(option)
+        self.document().setDocumentMargin(2)
+
+    def owner(self):
+        return self.parentItem()
+
+    def _after_editing(self) -> None:
+        self.setAcceptedMouseButtons(Qt.NoButton)
+
+
+class CalloutItem(BoxItem):
+    """A box, rounded box, ellipse or pill with centred text and a draggable pointer."""
+
+    kind = "callout"
+    PAD = 12.0
+    MIN_SIZE = 24.0
+    min_size = (MIN_SIZE, MIN_SIZE)
+
+    def __init__(self, style: Style, text: str = "") -> None:
+        self._tail = QPointF(0, 0)
+        self._laying_out = False
+        self.text: _CalloutText | None = None
+        self.on_edit_finished = None
+        self.is_new = False
+        super().__init__(style)
+        self.text = _CalloutText(self)
+        self.text.setPlainText(text)
+        self.text.document().contentsChanged.connect(self._relayout)
+        self._apply_text_style()
+
+    # -- text --------------------------------------------------------------
+    def start_text_editing(self) -> None:
+        self.text.start_editing()
+
+    def plain_text(self) -> str:
+        return self.text.toPlainText() if self.text else ""
+
+    def set_style(self, style: Style) -> None:
+        super().set_style(style)
+        self._apply_text_style()
+
+    def _apply_text_style(self) -> None:
+        if self.text is None:
+            return
+        self.text.setFont(_font(self.style.font_size, QFont.DemiBold))
+        color = QColor(self.style.color)
+        self.text.setDefaultTextColor(readable_on(color) if self.style.fill else QColor("#1c1c1e"))
+        self._relayout()
+
+    def _insets(self) -> tuple[float, float]:
+        r = self._rect
+        if self.style.shape == "ellipse":
+            return max(self.PAD, r.width() * 0.15), max(self.PAD * 0.6, r.height() * 0.15)
+        if self.style.shape == "pill":
+            return max(self.PAD, r.height() * 0.35), self.PAD * 0.6
+        return self.PAD, self.PAD * 0.75
+
+    def _relayout(self) -> None:
+        if self.text is None or self._laying_out:
+            return
+        self._laying_out = True
+        try:
+            ix, iy = self._insets()
+            self.text.setTextWidth(max(20.0, self._rect.width() - 2 * ix))
+            text_h = self.text.boundingRect().height()
+            needed = text_h + 2 * iy
+            if needed > self._rect.height():  # grow to fit what you type
+                self.prepareGeometryChange()
+                self._rect.setHeight(needed)
+            self.text.setPos(ix, (self._rect.height() - text_h) / 2)
+        finally:
+            self._laying_out = False
+
+    # -- geometry ------------------------------------------------------------
+    def _geometry_changed(self) -> None:
+        self._relayout()
+
+    def reset_tail(self) -> None:
+        """Default pointer: down and to the left, outside the box."""
+        self.prepareGeometryChange()
+        self._tail = QPointF(self._rect.width() * 0.22, self._rect.height() + max(28.0, self._rect.height() * 0.6))
+        self.update()
+
+    def set_scene_rect(self, rect: QRectF) -> None:
+        tail_scene = self.mapToScene(self._tail)  # resizing keeps the pointer where it points
+        super().set_scene_rect(rect)
+        self._tail = self.mapFromScene(tail_scene)
+
+    def _geometry(self) -> dict:
+        return {"size": [self._rect.width(), self._rect.height()],
+                "tail": [self._tail.x(), self._tail.y()], "text": self.plain_text()}
+
+    def _set_geometry(self, state: dict) -> None:
+        self._rect = QRectF(0, 0, *state["size"])
+        self._tail = QPointF(*state.get("tail", [0, self._rect.height() + 30]))
+        if self.text is not None:
+            self.text.setPlainText(state.get("text", ""))
+        self._relayout()
+
+    def is_degenerate(self) -> bool:
+        return self._rect.width() < self.MIN_SIZE or self._rect.height() < self.MIN_SIZE
+
+    def handle_points(self) -> dict[str, QPointF]:
+        points = super().handle_points()
+        if self.style.tail:
+            points["tail"] = self.mapToScene(self._tail)
+        return points
+
+    def drag_handle(self, name: str, scene_pos: QPointF, shift: bool) -> None:
+        if name == "tail":
+            self.prepareGeometryChange()
+            self._tail = self.mapFromScene(scene_pos)
+            self.update()
+        else:
+            super().drag_handle(name, scene_pos, shift)
+
+    # -- painting ------------------------------------------------------------
+    def _body(self) -> QPainterPath:
+        r, shape = self._rect, self.style.shape
+        path = QPainterPath()
+        if shape == "ellipse":
+            path.addEllipse(r)
+        elif shape == "pill":
+            radius = min(r.width(), r.height()) / 2
+            path.addRoundedRect(r, radius, radius)
+        elif shape == "rect":
+            path.addRect(r)
+        else:
+            path.addRoundedRect(r, 10, 10)
+        if not self.style.tail or path.contains(self._tail):
+            return path
+        center, tip = r.center(), self._tail
+        dx, dy = tip.x() - center.x(), tip.y() - center.y()
+        length = math.hypot(dx, dy)
+        if length < 1:
+            return path
+        half = max(6.0, min(r.width(), r.height()) * 0.16)
+        nx, ny = -dy / length * half, dx / length * half
+        wedge = QPainterPath(QPointF(center.x() + nx, center.y() + ny))
+        wedge.lineTo(tip)
+        wedge.lineTo(QPointF(center.x() - nx, center.y() - ny))
+        wedge.closeSubpath()
+        return path.united(wedge)
+
+    def boundingRect(self) -> QRectF:
+        m = self.style.width + 3
+        area = QRectF(self._rect)
+        if self.style.tail:  # QRectF.united() ignores zero-size rects, so give the tip some area
+            area = area.united(QRectF(self._tail.x() - 1, self._tail.y() - 1, 2, 2))
+        return area.adjusted(-m, -m, m, m)
+
+    def shape(self) -> QPainterPath:
+        return self._body()
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        color = QColor(self.style.color)
+        p.setRenderHint(QPainter.Antialiasing)
+        if self.style.fill:
+            p.setPen(make_pen(color.darker(125), max(1.0, self.style.width)))
+            p.setBrush(color)
+        else:
+            p.setPen(make_pen(color, max(1.0, self.style.width)))
+            p.setBrush(QColor("#ffffff"))
+        p.drawPath(self._body())
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.start_text_editing()

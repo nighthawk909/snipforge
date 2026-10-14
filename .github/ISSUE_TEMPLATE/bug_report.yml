@@ -1,0 +1,32 @@
+name: Bug report
+description: Something isn't working right
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Press Win+Shift+S\n2. ...\n3. ..."
+  - type: input
+    id: version
+    attributes:
+      label: SnipForge version
+      description: Tray icon → About SnipForge
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and display setup
+      placeholder: "Windows 11 24H2, two monitors at 150% and 100%"
+  - type: markdown
+    attributes:
+      value: "Please don't attach screenshots that contain private or company information."
