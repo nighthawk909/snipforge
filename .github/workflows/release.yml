@@ -42,12 +42,18 @@ jobs:
       # Workflows on a bot-opened release PR wait for approval ("action_required"). Approve them so
       # CI runs as a normal PR check, which the "Protect main" ruleset requires before merging.
       - name: Approve CI on the release PR
-        # `pr` is empty on the run that publishes a release, so check both.
-        if: ${{ steps.release.outputs.prs_created == 'true' && steps.release.outputs.pr != '' }}
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          # Raw JSON, parsed below: step env is evaluated even when the step is skipped, and
+          # `pr` is empty on most runs, so fromJSON() here would fail the workflow.
+          PR_JSON: ${{ steps.release.outputs.pr }}
         run: |
+          BRANCH=$(printf '%s' "$PR_JSON" | jq -r '.headBranchName // empty' 2>/dev/null || true)
+          if [ -z "$BRANCH" ]; then
+            echo "No release PR on this run."
+            exit 0
+          fi
           for attempt in $(seq 1 12); do
             ids=$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$BRANCH" --event pull_request \
                     --status action_required --json databaseId --jq '.[].databaseId')
