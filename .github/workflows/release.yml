@@ -39,14 +39,27 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # PRs opened with GITHUB_TOKEN don't trigger CI, but a dispatched run does; it reports
-      # its result on the release PR's head commit.
-      - name: Run CI on the release PR
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+      # Workflows on a bot-opened release PR wait for approval ("action_required"). Approve them so
+      # CI runs as a normal PR check, which the "Protect main" ruleset requires before merging.
+      - name: Approve CI on the release PR
+        # `pr` is empty on the run that publishes a release, so check both.
+        if: ${{ steps.release.outputs.prs_created == 'true' && steps.release.outputs.pr != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+        run: |
+          for attempt in $(seq 1 12); do
+            ids=$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$BRANCH" --event pull_request \
+                    --status action_required --json databaseId --jq '.[].databaseId')
+            if [ -n "$ids" ]; then
+              for id in $ids; do
+                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve" && echo "approved run $id"
+              done
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::No release-PR runs were waiting for approval; approve them from the Actions tab if CI is missing."
 
   build:
     needs: release-please
