@@ -42,7 +42,8 @@ jobs:
       # Workflows on a bot-opened release PR wait for approval ("action_required"). Approve them so
       # CI runs as a normal PR check, which the "Protect main" ruleset requires before merging.
       - name: Approve CI on the release PR
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        # `pr` is empty on the run that publishes a release, so check both.
+        if: ${{ steps.release.outputs.prs_created == 'true' && steps.release.outputs.pr != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
