@@ -35,6 +35,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q
+      - name: Desktop tests (real windows, share sheet, keyboard hook)
+        env:
+          QT_QPA_PLATFORM: windows
+        run: python -m pytest -q -m desktop -rs
 
   build:
     name: Build installer

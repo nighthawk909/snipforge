@@ -11,6 +11,10 @@ Releases as a per-user installer. These rules make agent-driven changes safe to 
 3. Run before every commit:
    - `python -m ruff check .`
    - `python -m pytest -q`
+   - For anything touching Windows integrations (share, Outlook, Teams, OneDrive, hotkey, clipboard):
+     `QT_QPA_PLATFORM=windows python -m pytest -m desktop`. Unit tests replace these with fakes,
+     so only the desktop suite proves the real feature works. Add a desktop test with every new
+     integration.
    - For packaging, dependency or startup changes: `python scripts/build.py` and then
      `dist/SnipForge/SnipForge.exe --self-test report.json` (must exit 0).
 4. Commit with conventional commits. The subject line becomes the user-facing release note, so

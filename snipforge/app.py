@@ -5,8 +5,8 @@ import ctypes
 import logging
 import sys
 
-from PySide6.QtCore import QPoint, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import REPO, __version__, autostart
@@ -17,7 +17,8 @@ from .hotkey import HotkeyListener
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
 from .single_instance import InstanceServer, send_to_running
-from .updates import UpdateChecker
+from .update_flow import UpdateFlow, automatic_enabled, set_automatic
+from .updates import disabled_by_policy
 
 log = logging.getLogger(__name__)
 CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing the screen
@@ -66,8 +67,7 @@ class SnipForgeApp:
     def _build_tray(self) -> None:
         self._tray = QSystemTrayIcon(self._icon)
         self._tray.setToolTip(f"SnipForge {__version__} — Win+Shift+S or Print Screen")
-        self._updates = UpdateChecker()
-        self._updates.finished.connect(self._update_result)
+        self._updates = UpdateFlow(self._tray)
         menu = QMenu()
         menu.addAction("New snip", self.capture)
         menu.addAction("Library", self.show_home)
@@ -79,6 +79,12 @@ class SnipForgeApp:
         menu.addAction(start)
         menu.addSeparator()
         menu.addAction("Check for updates…", self.check_updates)
+        if not disabled_by_policy():
+            auto = QAction("Update automatically", menu)
+            auto.setCheckable(True)
+            auto.setChecked(automatic_enabled())
+            auto.toggled.connect(set_automatic)
+            menu.addAction(auto)
         menu.addAction("About SnipForge", self.about)
         menu.addAction("Quit", self._app.quit)
         self._menu = menu
@@ -89,6 +95,7 @@ class SnipForgeApp:
         if not self._hook_ok:
             self._tray.showMessage("SnipForge", "Couldn't install the keyboard hook, so Win+Shift+S "
                                    "won't work. Use the tray icon to snip.", QSystemTrayIcon.Warning)
+        self._updates.start()
 
     def _toggle_autostart(self, on: bool) -> None:
         try:
@@ -100,30 +107,16 @@ class SnipForgeApp:
                                     "(set by your administrator), so it will still start when you sign in.")
 
     def check_updates(self) -> None:
-        self._tray.showMessage("SnipForge", "Checking for updates…", QSystemTrayIcon.Information, 2000)
-        self._updates.check()
-
-    def _update_result(self, status: str, detail: str, page: str) -> None:
-        if status == "newer":
-            box = QMessageBox(QMessageBox.Question, "SnipForge",
-                              f"SnipForge {detail} is available (you have {__version__}).\n\nOpen the download page?",
-                              QMessageBox.Yes | QMessageBox.No)
-            box.setTextFormat(Qt.PlainText)  # text from the network is never treated as rich text
-            if box.exec() == QMessageBox.Yes:
-                QDesktopServices.openUrl(QUrl(page))
-        elif status == "current":
-            QMessageBox.information(None, "SnipForge", f"You're on the latest version ({__version__}).")
-        else:
-            QMessageBox.information(None, "SnipForge", f"Couldn't check for updates: {detail}\n\n"
-                                    f"You can check manually at {page}")
+        self._updates.check_now()
 
     def about(self) -> None:
         QMessageBox.about(
             None, "About SnipForge",
             f"<b>SnipForge {__version__}</b><br>Open-source screenshot and markup tool for Windows."
             f"<br><br>Built with Python, Qt and PySide6 (LGPL-3.0). License texts are in the install folder."
-            f"<br><br>MIT License. Everything stays on this PC; nothing is sent anywhere unless you "
-            f"use Share or Check for updates.<br><br><a href='https://github.com/{REPO}'>github.com/{REPO}</a>")
+            f"<br><br>MIT License. Your snips stay on this PC. SnipForge only goes online to check GitHub "
+            f"for updates (turn off in the tray menu) or when you use Share."
+            f"<br><br><a href='https://github.com/{REPO}'>github.com/{REPO}</a>")
 
     def handle_command(self, command: str) -> None:
         if command == "snip":

@@ -11,8 +11,9 @@ be checked in the source code; file references are given where useful.
 | License | MIT (open source); bundled components and their licenses in `THIRD_PARTY_NOTICES.md` |
 | Install | Per-user to `%LOCALAPPDATA%\Programs\SnipForge`; **no admin rights needed** |
 | Machine-wide | Optional, needs admin: `SnipForge-<version>-setup.exe /VERYSILENT /ALLUSERS /TASKS="autostart"` |
-| Network | **None by default.** Only when the user clicks Share or Check for updates (details below) |
-| Telemetry | None. No accounts, analytics, crash reporting or automatic updates |
+| Network | A once-a-day update check against GitHub (can be turned off by the user or by policy), plus Share actions the user starts. Nothing else (details below) |
+| Telemetry | None. No accounts, analytics or crash reporting |
+| Updates | Asks before updating. Per-user installs download the new installer from the GitHub release, verify its SHA-256 against the release's `SHA256SUMS.txt`, and install silently. All-users installs only point to the download page |
 | Elevation | The app never runs elevated; only an all-users install needs admin |
 
 ## Data on the PC
@@ -21,7 +22,7 @@ be checked in the source code; file references are given where useful.
 |---|---|---|
 | The user's snips (original capture, editable markup, rendered image) | `%USERPROFILE%\Pictures\SnipForge` | No (it's the user's work) |
 | Settings: tool styles, Beautify on/off, recent Teams recipients' email addresses | `HKCU\Software\SnipForge\SnipForge` | Yes |
-| Temporary copies for drag-out and sharing (auto-deleted after 24 hours) | `%TEMP%\SnipForge` | Yes |
+| Temporary copies for drag-out and sharing (auto-deleted after 24 hours) and downloaded updates | `%TEMP%\SnipForge` | Yes |
 | Startup entry (if enabled) | `HKCU` or, for all-users installs, `HKLM\...\CurrentVersion\Run` | Yes |
 | OneDrive shares | `<OneDrive>\SnipForge` (synced by the user's OneDrive client) | No |
 
@@ -45,14 +46,24 @@ as keylogger-like; this is a false positive, and the ~150-line source shows the 
 right-click commands a user would click by hand (OneDrive "Copy link"/"Share", Windows "Share") on
 the exported image.
 
-## Network access (only on user action)
+## Network access
 
 | Action | Destination | What's sent |
 |---|---|---|
-| Check for updates | `api.github.com/repos/nighthawk909/snipforge/releases/latest` | A GET request; no user data |
+| Update check (daily, and on Check for updates) | `api.github.com/repos/nighthawk909/snipforge/releases/latest` | A GET request; no user data |
+| Update download (only after the user clicks Update now) | `github.com/nighthawk909/snipforge/releases/download/...` (redirects to GitHub's file storage) | Downloads the installer and checksum file |
 | Share → OneDrive | The user's own signed-in OneDrive client | The PNG is saved into the OneDrive folder; OneDrive syncs it |
 | Share → Outlook | Classic Outlook via COM on the same PC | Opens a draft; nothing is sent until the user clicks Send |
 | Share → Teams | The Teams desktop app (`msteams:` link with the chosen recipients) | Opens the chat; the user pastes and sends |
+
+## Turning update checks off
+
+Users can untick **Update automatically** in the tray menu. Organizations can turn checks off for
+everyone (this also hides the option) with a DWORD policy value:
+
+```
+HKLM\Software\Policies\SnipForge  DisableUpdateCheck = 1
+```
 
 ## Supply chain
 

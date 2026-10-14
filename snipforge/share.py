@@ -173,6 +173,46 @@ def has_shell_verb(path: Path, verb: str) -> bool:
         return False
 
 
+class _OwnerWindowSite:
+    """COM site that tells shell commands which window they belong to.
+
+    Explorer gives its context menus a site; modern commands such as the Windows share sheet
+    ask that site for the owner window and fail with "Invalid window handle" without one.
+    """
+
+    def __init__(self, hwnd: int) -> None:
+        import pythoncom
+        self._com_interfaces_ = [pythoncom.IID_IOleWindow, pythoncom.IID_IServiceProvider]
+        self._public_methods_ = ["GetWindow", "ContextSensitiveHelp", "QueryService"]
+        self._hwnd = hwnd
+
+    def GetWindow(self) -> int:  # noqa: N802 - COM method name
+        return self._hwnd
+
+    def ContextSensitiveHelp(self, _enter) -> None:  # noqa: N802 - COM method name
+        pass
+
+    def QueryService(self, _service, iid):  # noqa: N802 - COM method name
+        import pythoncom
+        import winerror
+        from win32com.server.exception import COMException
+        from win32com.server.util import wrap
+        if iid == pythoncom.IID_IOleWindow:
+            return wrap(self, pythoncom.IID_IOleWindow)
+        raise COMException(hresult=winerror.E_NOINTERFACE)
+
+
+def _set_owner_site(menu_obj, hwnd: int) -> None:
+    import pythoncom
+    from win32com.axcontrol import axcontrol
+    from win32com.server.util import wrap
+    try:
+        menu_obj.QueryInterface(axcontrol.IID_IObjectWithSite).SetSite(
+            wrap(_OwnerWindowSite(hwnd), pythoncom.IID_IOleWindow))
+    except Exception as exc:  # some menus don't take a site; classic commands still work
+        log.debug("Couldn't give the context menu an owner window: %s", exc)
+
+
 def invoke_shell_verb(path: Path, verb: str, hwnd: int = 0) -> bool:
     """Runs a right-click command (by verb) on a file. Returns False if it isn't offered."""
     import win32con
@@ -181,6 +221,8 @@ def invoke_shell_verb(path: Path, verb: str, hwnd: int = 0) -> bool:
         offset = _find_verb(menu_obj, hmenu, verb)
         if offset is None:
             return False
+        if hwnd:
+            _set_owner_site(menu_obj, hwnd)
         menu_obj.InvokeCommand((0, hwnd, offset, None, None, win32con.SW_SHOWNORMAL, 0, None))
     now = time.monotonic()
     _keepalive[:] = [(t, o) for t, o in _keepalive if now - t < KEEPALIVE_S] + [(now, menu_obj)]
