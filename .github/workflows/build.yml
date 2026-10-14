@@ -1,22 +1,17 @@
 name: Build
 
 # Builds SnipForge.exe, the installer and the portable zip, proves the packaged app works
-# (--self-test), and writes checksums and an SBOM. With release_tag set, it attaches
-# everything to that GitHub release.
+# (--self-test), and writes checksums and an SBOM, uploaded as the "snipforge-windows" artifact.
+# Read-only: publishing to a release is a separate job in release.yml.
 on:
   workflow_call:
     inputs:
-      release_tag:
+      ref:
+        description: "Git ref to build (defaults to the triggering ref)"
         type: string
         required: false
         default: ""
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "Existing release tag to attach the build to (leave empty for a test build)"
-        type: string
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -26,14 +21,10 @@ jobs:
     name: Build and self-test
     runs-on: windows-latest
     timeout-minutes: 40
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -51,20 +42,19 @@ jobs:
         run: python scripts/build.py --installer
       - name: Self-test the packaged app
         shell: pwsh
+        timeout-minutes: 5
         run: |
           $report = "dist\selftest.json"
-          $p = Start-Process -FilePath dist\SnipForge\SnipForge.exe -ArgumentList '--self-test', $report -PassThru -Wait
-          Get-Content $report
-          if ($p.ExitCode -ne 0) { throw "Packaged app failed its self-test" }
-      - name: SBOM
-        run: python -m cyclonedx_py environment --output-format JSON --output-file dist/sbom.cdx.json
-      - name: Build provenance
-        if: ${{ !github.event.repository.private }}
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: |
-            dist/SnipForge-*-setup.exe
-            dist/SnipForge-*-portable.zip
+          $p = Start-Process -FilePath dist\SnipForge\SnipForge.exe -ArgumentList '--self-test', $report -PassThru
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "Packaged app self-test timed out" }
+          if (Test-Path $report) { Get-Content $report }
+          if ($p.ExitCode -ne 0) { throw "Packaged app failed its self-test (exit $($p.ExitCode))" }
+      - name: SBOM (runtime dependencies only)
+        shell: pwsh
+        run: |
+          python -m venv sbom-env
+          sbom-env\Scripts\python -m pip install --quiet -r requirements.txt
+          python -m cyclonedx_py environment sbom-env\Scripts\python.exe --output-format JSON --output-file dist\sbom.cdx.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: snipforge-windows
@@ -75,12 +65,3 @@ jobs:
             dist/sbom.cdx.json
             dist/selftest.json
           if-no-files-found: error
-      - name: Attach to release
-        if: ${{ inputs.release_tag != '' }}
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.release_tag }}
-        run: |
-          $files = @(Get-ChildItem dist\SnipForge-*-setup.exe, dist\SnipForge-*-portable.zip, dist\SHA256SUMS.txt, dist\sbom.cdx.json | ForEach-Object FullName)
-          gh release upload $env:TAG @files --clobber --repo $env:GITHUB_REPOSITORY

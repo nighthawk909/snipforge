@@ -21,6 +21,8 @@ LLKHF_INJECTED = 0x10
 KEYEVENTF_KEYUP = 0x0002
 
 VK_SHIFT = 0x10
+VK_CONTROL = 0x11
+VK_MENU = 0x12  # Alt
 VK_LWIN = 0x5B
 VK_RWIN = 0x5C
 VK_S = 0x53
@@ -128,9 +130,10 @@ class HotkeyListener(QObject):
 
     @staticmethod
     def _matches(vk: int) -> bool:
-        if vk == VK_SNAPSHOT:
-            return True
         win = _is_down(VK_LWIN) or _is_down(VK_RWIN)
+        if vk == VK_SNAPSHOT:
+            # Plain Print Screen only: Alt+PrtSc (active window) and Win+PrtSc stay with Windows.
+            return not (win or _is_down(VK_MENU) or _is_down(VK_CONTROL))
         return vk == VK_S and win and _is_down(VK_SHIFT)
 
     @staticmethod

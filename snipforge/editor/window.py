@@ -411,7 +411,8 @@ class EditorWindow(QMainWindow):
             self._autosave.start()  # don't interrupt typing; try again shortly
             return
         try:
-            self._library.save(self._entry, self.canvas.to_document(), self.canvas.render_image(commit=False))
+            self._library.save(self._entry, self.canvas.to_document(),
+                               self.canvas.render_image(commit=False, use_draft=False))
         except OSError as exc:
             log.warning("Autosave failed: %s", exc)
             self.statusBar().showMessage(f"Couldn't autosave: {exc}", 5000)

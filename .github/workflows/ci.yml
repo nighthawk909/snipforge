@@ -41,6 +41,4 @@ jobs:
     needs: test
     uses: ./.github/workflows/build.yml
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read

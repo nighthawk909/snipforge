@@ -60,6 +60,12 @@ def _icons() -> str:
 
 
 def _ocr() -> str:
+    # Import the WinRT pieces directly: a packaging mistake must fail here, not be reported as
+    # "OCR unavailable". Only a missing Windows language pack counts as a skip.
+    import winrt.windows.graphics.imaging  # noqa: F401
+    import winrt.windows.media.ocr  # noqa: F401
+    import winrt.windows.storage.streams  # noqa: F401
+
     from . import ocr
 
     image = QImage(560, 90, QImage.Format_ARGB32)
@@ -107,5 +113,8 @@ def run(report_path: str) -> int:
     _check(results, "share", _share, required=False)
     passed = all(r["ok"] for r in results.values() if r["required"])
     report = {"version": __version__, "passed": passed, "checks": results}
-    Path(report_path).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    try:
+        Path(report_path).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    except OSError:
+        return 2  # can't write the report: treat as a failed self-test
     return 0 if passed else 1

@@ -20,10 +20,11 @@ python -m ruff check .   # lint
    - `fix(share): Teams drop no longer reports a missing file` → listed under Bug fixes, patch bump
    - `docs:`, `test:`, `refactor:`, `ci:`, `chore:` → no release on their own
    - `feat!:` or a `BREAKING CHANGE:` footer → major bump
-4. **Pull request** to `main`. CI must pass: lint, tests, and a full installer build whose packaged
-   app runs a self-test.
+4. **Pull request** to `main`, titled like a conventional commit (checked automatically; PRs are
+   squash-merged so the title becomes the release note). CI must pass: lint, tests, and a full
+   installer build whose packaged app runs a self-test.
 5. **Merge** (squash). release-please opens or updates a **release PR** with the version bump and
-   CHANGELOG entry.
+   CHANGELOG entry, and CI is started on it automatically.
 6. **Release** by merging the release PR. That tags `vX.Y.Z`, creates the GitHub release, builds
    the installer, and attaches the installer, portable zip, checksums and SBOM.
 

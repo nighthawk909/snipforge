@@ -15,6 +15,7 @@ from . import REPO, __version__
 
 RELEASES_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
+TRUSTED_PREFIX = f"https://github.com/{REPO}/"
 TIMEOUT_MS = 8000
 
 
@@ -56,4 +57,10 @@ class UpdateChecker(QObject):
         except (ValueError, KeyError, TypeError) as exc:
             self.finished.emit("error", f"Unexpected response from GitHub ({exc})", RELEASES_PAGE)
             return
-        self.finished.emit("newer" if is_newer(tag) else "current", tag.lstrip("v"), page)
+        version = ".".join(str(n) for n in parse_version(tag))
+        if not version:
+            self.finished.emit("error", "GitHub returned an unrecognised version", RELEASES_PAGE)
+            return
+        if not page.startswith(TRUSTED_PREFIX):  # never open a link we didn't expect
+            page = RELEASES_PAGE
+        self.finished.emit("newer" if is_newer(tag) else "current", version, page)

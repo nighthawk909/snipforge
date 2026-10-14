@@ -1,0 +1,27 @@
+name: PR title
+
+# PRs are squash-merged, so the PR title becomes the commit message and, through release-please,
+# the line in the release notes. Require the conventional-commit format.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Conventional commit title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|docs|refactor|test|ci|chore|build|revert)(\([a-z0-9 ._/-]+\))?!?: .+'
+          if [[ "$TITLE" =~ $pattern ]]; then
+            echo "OK: $TITLE"
+          else
+            echo "::error::PR title must look like 'fix(crop): what changed for users'. Got: $TITLE"
+            exit 1
+          fi

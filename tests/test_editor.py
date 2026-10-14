@@ -695,3 +695,57 @@ def test_crop_geometry_helpers():
     bounds = QRectF(0, 0, 200, 100)
     assert resize_crop(QRectF(20, 10, 100, 60), "l", QPointF(130, 40), bounds).width() >= 8
     assert move_crop(QRectF(150, 50, 100, 60), QPointF(0, 0), bounds) == QRectF(100, 40, 100, 60)
+
+
+# --- review round 4 regressions -------------------------------------------------------
+def test_crop_snaps_to_whole_pixels(canvas):
+    canvas.set_zoom(1.37)
+    canvas.set_tool("crop")
+    gesture(canvas, (20.4, 10.6), (120.3, 70.2))
+    r = canvas._mask.crop
+    assert all(float(v).is_integer() for v in (r.x(), r.y(), r.width(), r.height()))
+
+
+def test_enter_mid_crop_drag_keeps_crop_and_ends_drag(canvas):
+    from PySide6.QtGui import QKeyEvent
+    canvas.set_tool("crop")
+    send(canvas, "press", (20, 10))
+    send(canvas, "move", (60, 40))
+    send(canvas, "move", (120, 70))
+    QApplication.sendEvent(canvas, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    send(canvas, "move", (180, 90))  # stray movement after applying must not change anything
+    assert canvas._drag is None and canvas.crop_rect() == QRectF(20, 10, 100, 60)
+    assert canvas.render_image().size().toTuple() == (100, 60)
+
+
+def test_rechoosing_crop_keeps_adjustments(canvas):
+    canvas.set_tool("crop")
+    gesture(canvas, (20, 10), (120, 70))
+    canvas.set_tool("crop")
+    assert canvas._mask.crop == QRectF(20, 10, 100, 60)
+
+
+def test_autosave_mid_crop_matches_saved_document(tmp_path, white_image):
+    from snipforge.editor.window import EditorWindow
+    from snipforge.library import Library
+    lib = Library(tmp_path)
+    entry = lib.create(white_image)
+    w = EditorWindow(white_image, lib, entry)
+    w.show()
+    w.canvas.set_tool("crop")
+    w.canvas._mask.set_crop(QRectF(10, 10, 50, 40))  # a crop in progress, not applied
+    w._save_to_library()
+    from PySide6.QtGui import QImage
+    assert QImage(str(entry.rendered_path)).size().toTuple() == (200, 100)
+    w.canvas.cancel_crop()
+    w.close()
+
+
+def test_hidden_annotations_are_not_selectable(canvas):
+    outside = drag(canvas, "rect", (150, 60), (190, 90))
+    canvas.set_tool("crop")
+    gesture(canvas, (30, 20), (100, 50))  # a new crop, away from the corner handles
+    canvas.set_tool("select")
+    canvas._scene.clearSelection()
+    canvas.select_all()
+    assert outside not in canvas.selected_annotations()

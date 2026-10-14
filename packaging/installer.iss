@@ -1,8 +1,8 @@
 ; SnipForge installer (Inno Setup 6). Built by: python scripts/build.py --installer
 ;
 ; Installs per user by default (no admin rights needed), into
-; %LOCALAPPDATA%\Programs\SnipForge. IT can deploy machine-wide with:
-;   SnipForge-<version>-setup.exe /VERYSILENT /ALLUSERS
+; %LOCALAPPDATA%\Programs\SnipForge. IT can deploy machine-wide (needs admin) with:
+;   SnipForge-<version>-setup.exe /VERYSILENT /ALLUSERS /TASKS="autostart"
 
 #define AppName "SnipForge"
 #define AppExe "SnipForge.exe"
@@ -58,15 +58,32 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: 
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppUserModelID}"; Tasks: desktopicon; Comment: "Screenshot and markup"
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; ValueData: """{app}\{#AppExe}"" --background"; Tasks: autostart
-; Remove the startup entry on uninstall whether the installer or the tray menu created it.
+; HKA = this user for a per-user install, the whole machine for /ALLUSERS, so IT deployments
+; start SnipForge for everyone who signs in.
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; ValueData: """{app}\{#AppExe}"" --background"; Tasks: autostart
+; Remove startup entries on uninstall, whether the installer or the tray menu created them.
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "{#AppName}"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "{#AppName}"; Flags: uninsdeletevalue
+; App settings (tool styles, recent Teams recipients) are removed on uninstall.
+Root: HKCU; Subkey: "Software\SnipForge"; ValueType: none; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+; A silent per-user upgrade closes the running app; start it again so Win+Shift+S keeps working.
+Filename: "{app}\{#AppExe}"; Parameters: "--background"; Flags: nowait; Check: RelaunchAfterSilentInstall
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#AppExe} /F"; Flags: runhidden; RunOnceId: "StopSnipForge"
+
+[UninstallDelete]
+; Temporary copies made for drag-out and sharing. The user's own snips in Pictures are kept.
+Type: filesandordirs; Name: "{%TEMP}\SnipForge"
+
+[Code]
+function RelaunchAfterSilentInstall: Boolean;
+begin
+  Result := WizardSilent and not IsAdminInstallMode;
+end;
 
 [Messages]
 FinishedLabel=Setup has finished installing [name].%n%nTo pin it to the taskbar: open Start, right-click {#AppName}, and choose Pin to taskbar.%n%nPress Win+Shift+S or Print Screen to snip.
