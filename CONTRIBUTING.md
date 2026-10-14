@@ -5,7 +5,8 @@
 ```bash
 pip install -r requirements-dev.txt
 python -m snipforge      # run from source
-python -m pytest         # all tests (they run headless)
+python -m pytest         # unit tests (headless, fast)
+QT_QPA_PLATFORM=windows python -m pytest -m desktop   # real Windows features (opens windows)
 python -m ruff check .   # lint
 ```
 

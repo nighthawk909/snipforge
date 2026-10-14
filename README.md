@@ -53,7 +53,7 @@ every snip in `Pictures\SnipForge\Library` that you can reopen and keep editing.
 ## Privacy
 
 Everything stays on your PC. SnipForge has no accounts, telemetry or analytics, and makes no network
-requests unless you use **Share** or click **Check for updates**. See [docs/IT-REVIEW.md](docs/IT-REVIEW.md)
+requests except a once-a-day check for new versions on GitHub (you can turn it off in the tray menu) and the **Share** actions you choose. When an update is available, SnipForge asks first, then downloads, verifies and installs it for you. See [docs/IT-REVIEW.md](docs/IT-REVIEW.md)
 for a full security and IT review guide.
 
 ## Build from source

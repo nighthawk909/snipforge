@@ -62,7 +62,7 @@ class ShareController(QObject):
             menu.addAction(icon("cloud"), f"OneDrive ({account.label}): share with people…",
                            lambda a=account: self.onedrive(a, share.ONEDRIVE_SHARE_VERB))
         menu.addSeparator()
-        menu.addAction(icon("share"), "More apps (Windows share)…", self.windows_share)
+        menu.addAction(icon("share"), "Teams chat, Outlook and more apps…", self.windows_share)
         menu.addAction(icon("folder"), "Save and show in folder", self.show_in_folder)
 
     # ------------------------------------------------------------------ helpers

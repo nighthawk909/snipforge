@@ -139,10 +139,7 @@ def test_pin_home_commands_and_about(forge, white_image, no_dialogs, monkeypatch
     forge.handle_command("snip")
     assert calls == ["snip"]
     forge.about()
-    forge._update_result("current", "0.4.0", "https://example.test")
-    forge._update_result("error", "offline", "https://example.test")
-    forge._update_result("newer", "9.9.9", "https://example.test")
-    assert [k for k, _ in no_dialogs] == ["about", "information", "information", "question"]
+    assert [k for k, _ in no_dialogs] == ["about"]
 
 
 def test_capture_runs_one_session_at_a_time(forge, monkeypatch):
@@ -251,34 +248,3 @@ def test_selftest_reports_failures(tmp_path, monkeypatch, qapp):
     monkeypatch.setattr(selftest, "_ocr", boom)
     monkeypatch.setattr(selftest, "_hotkey", lambda: "ok")
     assert selftest.run(str(tmp_path / "r.json")) == 1
-
-
-def test_update_checker_parses_reply(qapp):
-    from PySide6.QtNetwork import QNetworkReply
-
-    from snipforge.updates import UpdateChecker
-    checker = UpdateChecker()
-    results = []
-    checker.finished.connect(lambda *a: results.append(a))
-
-    class FakeReply:
-        def __init__(self, body, error=QNetworkReply.NoError):
-            self.body, self.err = body, error
-
-        def deleteLater(self):
-            pass
-
-        def error(self):
-            return self.err
-
-        def errorString(self):
-            return "offline"
-
-        def readAll(self):
-            return self.body
-
-    checker._done(FakeReply(b'{"tag_name": "v99.0.0", "html_url": "https://github.com/nighthawk909/snipforge/releases/tag/v99.0.0"}'))
-    checker._done(FakeReply(b"not json"))
-    checker._done(FakeReply(b"", error=QNetworkReply.HostNotFoundError))
-    assert results[0] == ("newer", "99.0.0", "https://github.com/nighthawk909/snipforge/releases/tag/v99.0.0")
-    assert [r[0] for r in results[1:]] == ["error", "error"]

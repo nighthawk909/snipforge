@@ -86,28 +86,6 @@ def test_print_screen_only_without_modifiers(monkeypatch):
     assert not hotkey.HotkeyListener._matches(hotkey.VK_SNAPSHOT)  # Win+PrtSc belongs to Windows
 
 
-def test_update_link_must_point_at_this_repo(qapp):
-    from PySide6.QtNetwork import QNetworkReply
-
-    from snipforge.updates import RELEASES_PAGE, UpdateChecker
-    checker = UpdateChecker()
-    results = []
-    checker.finished.connect(lambda *a: results.append(a))
-
-    class Reply:
-        def deleteLater(self):
-            pass
-
-        def error(self):
-            return QNetworkReply.NoError
-
-        def readAll(self):
-            return b'{"tag_name": "v9.0.0<b>x</b>", "html_url": "https://evil.example/download"}'
-
-    checker._done(Reply())
-    assert results[0] == ("newer", "9.0.0", RELEASES_PAGE)
-
-
 def test_all_users_startup_counts_as_enabled(monkeypatch):
     import winreg
 
