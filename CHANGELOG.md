@@ -3,6 +3,13 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.5.0](https://github.com/nighthawk909/snipforge/compare/v0.4.0...v0.5.0) (2026-10-14)
+
+
+### Features
+
+* SnipForge 0.4.0, open-source screenshot and markup tool for Windows ([de36bdb](https://github.com/nighthawk909/snipforge/commit/de36bdb1d8f0e7660319ce6ce4d453cd17d37344))
+
 ## 0.4.0 (2026-10-14)
 
 First public release.
