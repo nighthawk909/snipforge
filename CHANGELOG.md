@@ -3,6 +3,19 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.5.0](https://github.com/nighthawk909/snipforge/compare/v0.4.0...v0.5.0) (2026-10-14)
+
+
+### Features
+
+* SnipForge updates itself: checks daily, asks first, then downloads, verifies and installs the new version ([b430965](https://github.com/nighthawk909/snipforge/commit/b4309658b8854cbeed7982d3609da5c47a113123))
+
+
+### Bug fixes
+
+* harden installer, crop, hotkey and release pipeline ([#3](https://github.com/nighthawk909/snipforge/issues/3)) ([bce369b](https://github.com/nighthawk909/snipforge/commit/bce369b65485af2140ca4b2f58de3284a2fc37de))
+* **share:** "Teams chat, Outlook and more apps" opens the Windows share sheet instead of an "Invalid window handle" error ([b430965](https://github.com/nighthawk909/snipforge/commit/b4309658b8854cbeed7982d3609da5c47a113123))
+
 ## 0.4.0 (2026-10-14)
 
 First public release.
