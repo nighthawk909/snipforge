@@ -73,7 +73,15 @@ def build_exe(version: str) -> Path:
     app_dir = DIST / "SnipForge"
     if not (app_dir / "SnipForge.exe").exists():
         sys.exit("PyInstaller didn't produce SnipForge.exe")
+    add_license_files(app_dir)
     return app_dir
+
+
+def add_license_files(app_dir: Path) -> None:
+    """License texts sit next to SnipForge.exe so they're easy to find (LGPL notice requirement)."""
+    shutil.copy2(ROOT / "LICENSE", app_dir / "LICENSE.txt")
+    shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", app_dir / "THIRD_PARTY_NOTICES.md")
+    shutil.copytree(ROOT / "licenses", app_dir / "licenses", dirs_exist_ok=True)
 
 
 def build_zip(app_dir: Path, version: str) -> Path:

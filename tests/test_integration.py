@@ -20,6 +20,7 @@ def no_dialogs(monkeypatch):
     for name in ("information", "warning", "about"):
         monkeypatch.setattr(QMessageBox, name, lambda *a, n=name, **k: shown.append((n, a)))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: shown.append(("question", a)) or QMessageBox.No)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(("question", self.text())) or QMessageBox.No)
     return shown
 
 
@@ -276,8 +277,8 @@ def test_update_checker_parses_reply(qapp):
         def readAll(self):
             return self.body
 
-    checker._done(FakeReply(b'{"tag_name": "v99.0.0", "html_url": "https://example.test/r"}'))
+    checker._done(FakeReply(b'{"tag_name": "v99.0.0", "html_url": "https://github.com/nighthawk909/snipforge/releases/tag/v99.0.0"}'))
     checker._done(FakeReply(b"not json"))
     checker._done(FakeReply(b"", error=QNetworkReply.HostNotFoundError))
-    assert results[0] == ("newer", "99.0.0", "https://example.test/r")
+    assert results[0] == ("newer", "99.0.0", "https://github.com/nighthawk909/snipforge/releases/tag/v99.0.0")
     assert [r[0] for r in results[1:]] == ["error", "error"]

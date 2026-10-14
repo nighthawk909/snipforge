@@ -36,6 +36,12 @@ def crop_handle_at(rect: QRectF, pos: QPointF, zoom: float) -> str | None:
     return None
 
 
+def snap(rect: QRectF) -> QRectF:
+    """Crops are whole pixels, so the export is exactly what's shown."""
+    left, top = round(rect.left()), round(rect.top())
+    return QRectF(left, top, round(rect.right()) - left, round(rect.bottom()) - top)
+
+
 def resize_crop(origin: QRectF, handle: str, pos: QPointF, bounds: QRectF) -> QRectF:
     """Move the dragged edge(s) to `pos`, staying inside the image and at least MIN_CROP big."""
     left, top, right, bottom = origin.left(), origin.top(), origin.right(), origin.bottom()
@@ -49,18 +55,18 @@ def resize_crop(origin: QRectF, handle: str, pos: QPointF, bounds: QRectF) -> QR
         top = min(y, bottom - MIN_CROP)
     if "b" in handle:
         bottom = max(y, top + MIN_CROP)
-    return QRectF(QPointF(left, top), QPointF(right, bottom))
+    return snap(QRectF(QPointF(left, top), QPointF(right, bottom)))
 
 
 def move_crop(origin: QRectF, delta: QPointF, bounds: QRectF) -> QRectF:
     moved = origin.translated(delta)
     dx = max(bounds.left() - moved.left(), 0) - max(moved.right() - bounds.right(), 0)
     dy = max(bounds.top() - moved.top(), 0) - max(moved.bottom() - bounds.bottom(), 0)
-    return moved.translated(dx, dy)
+    return snap(moved.translated(dx, dy))
 
 
 def new_crop(origin: QPointF, pos: QPointF, bounds: QRectF) -> QRectF:
-    return QRectF(origin, pos).normalized().intersected(bounds)
+    return snap(QRectF(origin, pos).normalized().intersected(bounds))
 
 
 # ---------------------------------------------------------------------------

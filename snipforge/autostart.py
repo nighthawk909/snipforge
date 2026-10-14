@@ -17,13 +17,22 @@ def _command() -> str:
     return f'"{pythonw if pythonw.exists() else exe}" -m snipforge --background'
 
 
-def is_enabled() -> bool:
+def _has_value(hive) -> bool:
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+        with winreg.OpenKey(hive, RUN_KEY) as key:
             winreg.QueryValueEx(key, VALUE_NAME)
             return True
     except FileNotFoundError:
         return False
+
+
+def enabled_for_all_users() -> bool:
+    """IT (or an all-users install) can turn startup on machine-wide; only an admin can undo it."""
+    return _has_value(winreg.HKEY_LOCAL_MACHINE)
+
+
+def is_enabled() -> bool:
+    return _has_value(winreg.HKEY_CURRENT_USER) or enabled_for_all_users()
 
 
 def set_enabled(enabled: bool) -> None:

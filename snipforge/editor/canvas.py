@@ -125,6 +125,8 @@ class Canvas(QGraphicsView):
     # ------------------------------------------------------------------ tools and style
     def set_tool(self, tool: str) -> None:
         self.commit_text()
+        if tool == "crop" and self.tool == "crop" and self._mask.editing:
+            return  # re-choosing Crop mid-crop keeps your adjustments
         if self.tool == "crop" and tool != "crop":
             self.apply_crop()  # switching tools keeps the crop, like Snipping Tool
         self.tool = tool
@@ -214,7 +216,11 @@ class Canvas(QGraphicsView):
     def select_all(self) -> None:
         if self.editing_text_item() is None:
             for item in self.annotations():
-                item.setSelected(True)
+                if self._visible_in_crop(item):
+                    item.setSelected(True)
+
+    def _visible_in_crop(self, item) -> bool:
+        return self._mask.editing or item.sceneBoundingRect().intersects(self._crop_rect)
 
     def add_redactions(self, rects: list[QRectF], mode: str = "blur") -> int:
         style = self.tool_styles[mode]
@@ -251,6 +257,8 @@ class Canvas(QGraphicsView):
     def apply_crop(self) -> None:
         if not self._mask.editing:
             return
+        if self._drag is not None and self._drag["type"].startswith("crop"):
+            self._drag = None  # Enter or a tool key mid-drag: keep the crop as it is now
         draft = QRectF(self._mask.crop)
         self._mask.set_editing(False)
         if draft != self._crop_rect and draft.width() >= MIN_CROP and draft.height() >= MIN_CROP:
@@ -263,6 +271,8 @@ class Canvas(QGraphicsView):
     def cancel_crop(self) -> None:
         if not self._mask.editing:
             return
+        if self._drag is not None and self._drag["type"].startswith("crop"):
+            self._drag = None
         self._mask.set_editing(False)
         self._mask.set_crop(self._crop_rect)
         self._update_scene_rect()
@@ -306,10 +316,12 @@ class Canvas(QGraphicsView):
             self.set_crop_rect(crop)
         self.undo_stack.clear()
 
-    def render_image(self, commit: bool = True) -> QImage:
+    def render_image(self, commit: bool = True, use_draft: bool = True) -> QImage:
+        """Export the snip. While cropping, `use_draft` exports what's on screen; autosave passes
+        False so the library always matches the saved document."""
         if commit:
             self.commit_text()
-        crop = self._mask.crop if self._mask.editing else self._crop_rect
+        crop = self._mask.crop if (self._mask.editing and use_draft) else self._crop_rect
         rect = crop.toAlignedRect()
         out = QImage(rect.size(), QImage.Format_ARGB32_Premultiplied)
         out.fill(Qt.transparent)
@@ -717,7 +729,7 @@ class Canvas(QGraphicsView):
         for item in self.items(view_pos):
             while item is not None and not isinstance(item, Annotation):
                 item = item.parentItem()  # e.g. the text inside a callout
-            if item is not None:
+            if item is not None and self._visible_in_crop(item):
                 return item
         return None
 

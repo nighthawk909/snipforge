@@ -19,8 +19,7 @@ EXCLUDES = [
 a = Analysis(
     [str(ROOT / "packaging" / "snipforge_main.py")],
     pathex=[str(ROOT)],
-    datas=[(str(ROOT / "assets" / "snipforge.ico"), "assets"), (str(ROOT / "LICENSE"), "."),
-           (str(ROOT / "THIRD_PARTY_NOTICES.md"), ".")],
+    datas=[(str(ROOT / "assets" / "snipforge.ico"), "assets")],  # license files are copied by scripts/build.py
     hiddenimports=[
         "winrt.windows.media.ocr", "winrt.windows.graphics.imaging", "winrt.windows.storage.streams",
         "winrt.windows.foundation", "winrt.windows.foundation.collections", "winrt.windows.globalization",

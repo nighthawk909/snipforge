@@ -95,6 +95,9 @@ class SnipForgeApp:
             autostart.set_enabled(on)
         except OSError as exc:
             QMessageBox.warning(None, "SnipForge", f"Couldn't change the startup setting: {exc}")
+        if not on and autostart.enabled_for_all_users():
+            QMessageBox.information(None, "SnipForge", "SnipForge is set to start for everyone on this PC "
+                                    "(set by your administrator), so it will still start when you sign in.")
 
     def check_updates(self) -> None:
         self._tray.showMessage("SnipForge", "Checking for updates…", QSystemTrayIcon.Information, 2000)
@@ -102,10 +105,11 @@ class SnipForgeApp:
 
     def _update_result(self, status: str, detail: str, page: str) -> None:
         if status == "newer":
-            answer = QMessageBox.question(
-                None, "SnipForge", f"SnipForge {detail} is available (you have {__version__}).\n\n"
-                "Open the download page?")
-            if answer == QMessageBox.Yes:
+            box = QMessageBox(QMessageBox.Question, "SnipForge",
+                              f"SnipForge {detail} is available (you have {__version__}).\n\nOpen the download page?",
+                              QMessageBox.Yes | QMessageBox.No)
+            box.setTextFormat(Qt.PlainText)  # text from the network is never treated as rich text
+            if box.exec() == QMessageBox.Yes:
                 QDesktopServices.openUrl(QUrl(page))
         elif status == "current":
             QMessageBox.information(None, "SnipForge", f"You're on the latest version ({__version__}).")
@@ -117,6 +121,7 @@ class SnipForgeApp:
         QMessageBox.about(
             None, "About SnipForge",
             f"<b>SnipForge {__version__}</b><br>Open-source screenshot and markup tool for Windows."
+            f"<br><br>Built with Python, Qt and PySide6 (LGPL-3.0). License texts are in the install folder."
             f"<br><br>MIT License. Everything stays on this PC; nothing is sent anywhere unless you "
             f"use Share or Check for updates.<br><br><a href='https://github.com/{REPO}'>github.com/{REPO}</a>")
 

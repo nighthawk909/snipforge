@@ -30,7 +30,11 @@ class OcrResult:
 
 
 class OcrUnavailable(RuntimeError):
-    pass
+    """Windows can't do OCR here (e.g. no OCR language pack installed)."""
+
+
+class OcrNotInstalled(OcrUnavailable):
+    """SnipForge's OCR components are missing (a broken install or build)."""
 
 
 def _png_bytes(image: QImage) -> bytes:
@@ -47,8 +51,8 @@ async def _recognize_async(png: bytes):
         from winrt.windows.graphics.imaging import BitmapDecoder
         from winrt.windows.media.ocr import OcrEngine
         from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
-    except ImportError as exc:  # pragma: no cover - depends on optional install
-        raise OcrUnavailable("Install the winrt-Windows.Media.Ocr packages (see README).") from exc
+    except ImportError as exc:  # pragma: no cover - only when the bundle is broken
+        raise OcrNotInstalled("Text recognition components are missing from this build.") from exc
 
     engine = OcrEngine.try_create_from_user_profile_languages()
     if engine is None:
