@@ -109,8 +109,9 @@ class _ScreenOverlay(QWidget):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setAccessibleName("Choose what to snip")
         self.setAccessibleDescription(
-            "A to drag an area, W for a window, F for the full screen, Enter for the whole monitor, "
-            "D for a delay, P to include the pointer, Esc to cancel")
+            "A to drag an area, W for a window, F for the full screen, "
+            + ("S to scroll a long page or list, " if self._scrolling else "")
+            + "Enter for the whole monitor, D for a delay, P to include the pointer, Esc to cancel")
 
     # ------------------------------------------------------------------ what's on screen
     def _pointer_shown(self) -> bool:
@@ -183,7 +184,8 @@ class _ScreenOverlay(QWidget):
             self.mode_changed.emit(mode)
 
     def hint(self) -> str:
-        return f"{MODES[self._mode].hint}  •  A W F modes  •  D delay  •  P pointer"
+        letters = "A W F S" if self._scrolling else "A W F"
+        return f"{MODES[self._mode].hint}  •  {letters} modes  •  D delay  •  P pointer"
 
     def _place_toolbar(self) -> None:
         if self.toolbar is None:
@@ -378,8 +380,8 @@ class _ScreenOverlay(QWidget):
             self.cancelled.emit()
         elif e.key() in (Qt.Key_Return, Qt.Key_Enter):
             self._emit(self.rect())
-        elif e.modifiers() not in (Qt.NoModifier, Qt.ShiftModifier):
-            super().keyPressEvent(e)
+        elif e.modifiers() not in (Qt.NoModifier, Qt.ShiftModifier) or e.isAutoRepeat():
+            super().keyPressEvent(e)  # a held letter (e.g. the S of Win+Shift+S) isn't a choice
         elif mode := next((k for k, spec in MODES.items() if e.key() == ord(spec.key)), None):
             self._pick_mode(mode)
         elif e.key() == Qt.Key_D and self.toolbar is not None:
@@ -410,6 +412,7 @@ class CaptureSession:
         self.focus: _ScreenOverlay | None = None  # the overlay that has the keyboard
         self.countdown: Countdown | None = None  # counting down before the screen freezes
         self.scrolling: ScrollCapture | None = None  # Scrolling mode, under way
+        self.note: str | None = None  # why a scrolling capture ended early, for the person
         self.source = None  # the window the snip came from (winrects.WindowInfo), when known
 
     def start(self) -> None:
@@ -473,6 +476,8 @@ class CaptureSession:
             infos = []
         windows = [info.rect for info in infos]
         mode = prefs.capture_mode()
+        if mode == "scroll":  # remembered by an older version: never start in Scrolling
+            mode = "area"
         shot = pointer.grab()  # first: the pointer as it is the moment the screen freezes
         # Every monitor gets the toolbar; the keyboard goes to the one the pointer is on (the main
         # one if the pointer is somewhere Windows doesn't report, e.g. while a remote session reconnects).
@@ -499,10 +504,12 @@ class CaptureSession:
             self.focus.setFocus()
 
     def _set_mode(self, mode: str) -> None:
-        """A mode picked on one monitor applies to all of them, and to the next snip."""
+        """A mode picked on one monitor applies to all of them, and to the next snip, except
+        Scrolling: it acts on whatever is under the pointer, so it's chosen afresh every time."""
         for overlay in self._overlays:
             overlay.set_mode(mode)
-        prefs.set_capture_mode(mode)
+        if mode != "scroll":
+            prefs.set_capture_mode(mode)
 
     def _set_delay(self, seconds: int) -> None:
         """Remembered for the next snip. A delay also starts now: the overlays step aside, the
@@ -522,11 +529,15 @@ class CaptureSession:
         self._close_overlays()
         try:
             self.scrolling = ScrollCapture(screen, physical)
-            self.scrolling.finished.connect(lambda image: self._finish(image, source))
+            self.scrolling.finished.connect(lambda image: self._scroll_done(image, source))
             self.scrolling.start()
         except Exception:  # never leave a session that blocks every later snip
             logging.getLogger(__name__).exception("Scrolling capture failed to start")
             self._finish(None)
+
+    def _scroll_done(self, image, source) -> None:
+        self.note = getattr(self.scrolling, "note", None)
+        self._finish(image, source)
 
     def _set_pointer(self, on: bool) -> None:
         prefs.set_capture_pointer(on)

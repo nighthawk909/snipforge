@@ -193,3 +193,113 @@ def test_a_panel_that_stays_put_beside_the_scrolling_part():
     result = stitcher.result()
     # Only the part that scrolls comes out, stitched end to end; the panel isn't repeated down it.
     assert same(result, full)
+
+
+# --- from the code review: real pages change while they scroll -----------------------------------
+
+def run_stitch(frames, stitcher=None):
+    stitcher = stitcher or Stitcher()
+    for frame in frames:
+        stitcher.add(frame)
+    return stitcher
+
+
+def test_a_header_that_docks_after_the_first_scroll():
+    full = page(2000)
+    frames = []
+    for n, top in enumerate(range(0, 1301, 180)):
+        frame = view(full, top, 600)
+        if n >= 2:  # from the third view on, an 90 px bar sticks to the top
+            p = QPainter(frame)
+            p.fillRect(0, 0, WIDTH, 90, QColor("#102030"))
+            p.end()
+        frames.append(frame)
+    frames.append(view(full, 1400, 600))
+    result = run_stitch(frames).result()
+    assert result.height() >= 1900  # didn't stop early
+    assert result.height() <= 2000 + 90  # the docked bar isn't stacked down the page
+
+
+def test_a_banner_that_slides_in_at_the_bottom_appears_once():
+    full = page(2400)
+    frames = []
+    for n, top in enumerate(list(range(0, 1801, 200)) + [1800]):
+        frame = view(full, top, 600)
+        if n >= 1:
+            p = QPainter(frame)
+            p.fillRect(0, 600 - 120, WIDTH, 120, QColor("#ff8800"))
+            p.end()
+        frames.append(frame)
+    result = run_stitch(frames).result()
+    banner_rows = sum(result.pixelColor(5, y).name() == "#ff8800" for y in range(result.height()))
+    assert banner_rows <= 120  # once (at the bottom), not baked into every strip
+    assert result.height() >= 2400 - 120
+
+
+def test_something_changing_in_place_does_not_end_the_capture():
+    full = page(2400)
+    frames = []
+    for n, top in enumerate(list(range(0, 1801, 220)) + [1800]):
+        frame = view(full, top, 600)
+        p = QPainter(frame)  # an animation: a 60 px block in the middle, different every time
+        p.fillRect(0, 270, WIDTH, 60, QColor(n * 20 % 256, 90, 160))
+        p.end()
+        frames.append(frame)
+    stitcher = run_stitch(frames)
+    assert stitcher.result().height() >= 2300  # all the way down, not stopped at the first animation
+
+
+def test_repetitive_content_follows_the_expected_scroll():
+    log_line = QImage(WIDTH, 20, QImage.Format_RGB32)
+    log_line.fill(QColor("#ffffff"))
+    p = QPainter(log_line)
+    p.fillRect(4, 6, 70, 8, QColor("#333333"))
+    p.end()
+    full = QImage(WIDTH, 3000, QImage.Format_RGB32)
+    p = QPainter(full)
+    for y in range(0, 3000, 20):  # identical lines: every 20 px looks the same
+        p.drawImage(0, y, log_line)
+    p.end()
+    stitcher = Stitcher()
+    stitcher.add(view(full, 0, 400))
+    for top in range(130, 2601, 130):
+        stitcher.expected = 130
+        assert stitcher.add(view(full, top, 400))
+        assert stitcher.last_shift == 130
+    assert stitcher.result().height() == 3000
+
+
+def test_content_that_appears_later_in_an_empty_column_is_kept():
+    full = page(2000)
+    p = QPainter(full)
+    p.fillRect(60, 0, WIDTH - 60, 900, QColor("#ffffff"))  # the right half is blank at first
+    p.end()
+    stitcher = run_stitch([view(full, top, 400) for top in list(range(0, 1601, 200)) + [1600]])
+    result = stitcher.result()
+    assert result.width() == WIDTH and same(result, full)
+
+
+def test_page_margins_stay_even_with_a_sticky_bar():
+    full = page(1800)
+    p = QPainter(full)
+    p.fillRect(0, 0, 20, 1800, QColor("#ffffff"))
+    p.fillRect(WIDTH - 20, 0, 20, 1800, QColor("#ffffff"))
+    p.end()
+    frames = [view(full, top, 400, header=40) for top in list(range(0, 1401, 150)) + [1400]]
+    assert run_stitch(frames).result().width() == WIDTH
+
+
+def test_the_scrollbar_is_left_out_of_the_result():
+    full = page(1800)
+    frames = [view(full, top, 400, scrollbar=True) for top in list(range(0, 1401, 150)) + [1400]]
+    result = run_stitch(frames).result()
+    assert result.width() == WIDTH - 10 and result.height() == 1800
+    assert same(result, full.copy(QRect(0, 0, WIDTH - 10, 1800)))
+
+
+def test_huge_pages_stop_at_a_pixel_budget():
+    full = page(3000)
+    stitcher = Stitcher(max_pixels=WIDTH * 1000)
+    for top in range(0, 2601, 200):
+        stitcher.add(view(full, top, 400))
+    assert stitcher.result().height() <= 1000 and stitcher.full and stitcher.outcome == "full"

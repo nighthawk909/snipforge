@@ -26,18 +26,35 @@ def clean_prefs():
 
 
 class FakeScroller:
-    """Stands in for scroll_input: a page that scrolls PX_PER_NOTCH per notch, and a pointer."""
+    """Stands in for scroll_input: a page that scrolls PX_PER_NOTCH per notch, a pointer, the window
+    under it and the keyboard. `decorate(frame, n)` can draw on each view (a sticky bar)."""
 
-    def __init__(self, full: QImage, moved_by_person_after: int | None = None):
+    def __init__(self, full: QImage, moved_by_person_after: int | None = None, view_h: int = VIEW_H,
+                 decorate=None):
         self.full = full
         self.top = 0
+        self.view_h = view_h
         self.position = QPoint(5, 5)
         self.placed = []
         self.notches = []
+        self.pointer_at_grab = []
+        self.keys_held = False
+        self.window = 7
+        self.desktop = False
         self._moved_after = moved_by_person_after
+        self._decorate = decorate
 
     def available(self):
         return True
+
+    def modifiers_down(self):
+        return self.keys_held
+
+    def window_at(self, _at):
+        return self.window
+
+    def is_desktop(self, _window):
+        return self.desktop
 
     def pointer_position(self):
         if self._moved_after is not None and len(self.notches) >= self._moved_after:
@@ -50,10 +67,15 @@ class FakeScroller:
 
     def scroll_down(self, notches):
         self.notches.append(notches)
-        self.top = min(self.top + notches * PX_PER_NOTCH, self.full.height() - VIEW_H)
+        self.top = min(self.top + notches * PX_PER_NOTCH, self.full.height() - self.view_h)
+
+    def scroll_up(self, notches):
+        self.top = max(0, self.top - notches * PX_PER_NOTCH)
 
     def grab(self):
-        return self.full.copy(QRect(0, self.top, self.full.width(), VIEW_H))
+        self.pointer_at_grab.append(QPoint(self.position))
+        frame = self.full.copy(QRect(0, self.top, self.full.width(), self.view_h))
+        return self._decorate(frame, len(self.notches)) if self._decorate else frame
 
 
 def run(capture, timeout=10.0):
@@ -69,8 +91,9 @@ def run(capture, timeout=10.0):
 
 def make_capture(scroller, **kwargs):
     from snipforge.scrolling import ScrollCapture
-    return ScrollCapture(QGuiApplication.primaryScreen(), QRect(0, 0, scroller.full.width(), VIEW_H),
-                         grab=scroller.grab, scroller=scroller, settle_ms=0, **kwargs)
+    rect = kwargs.pop("rect", QRect(40, 40, scroller.full.width(), scroller.view_h))
+    return ScrollCapture(QGuiApplication.primaryScreen(), rect, grab=scroller.grab, scroller=scroller,
+                         settle_ms=0, poll_ms=0, **kwargs)
 
 
 def same(a: QImage, b: QImage) -> bool:
@@ -147,7 +170,7 @@ def test_status_pill_shows_while_scrolling(qapp):
     capture.start()
     QTest.qWait(10)
     assert capture.status is not None and capture.status.isVisible()
-    assert "move the mouse to stop" in capture.status.text().lower()
+    assert "move the mouse" in capture.status.text().lower() and "snip key" in capture.status.text().lower()
     assert capture.status.windowFlags() & Qt.WindowDoesNotAcceptFocus
     capture.cancel()
     QTest.qWait(50)
@@ -189,7 +212,7 @@ def test_s_switches_to_scrolling(qapp):
     o = make_overlay(mode="area")
     QApplication.sendEvent(o, QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier, "s"))
     assert o.mode == "scroll" and o.toolbar.buttons["scroll"].isChecked()
-    assert "move the mouse to stop" in o.hint()
+    assert "move the mouse to stop" in o.hint() and "S" in o.hint()
 
 
 def test_scrolling_is_only_offered_where_it_works(qapp):
@@ -227,11 +250,11 @@ def test_session_runs_the_scrolling_capture_on_the_chosen_area(qapp, monkeypatch
 
     monkeypatch.setattr(capture, "ScrollCapture", FakeRun)
     monkeypatch.setattr(capture.scroll_input, "available", lambda: True)
-    prefs.set_capture_mode("scroll")
     results = []
     session = capture.CaptureSession(results.append)
     session.start()
     overlay = session._overlays[0]
+    QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier, "s"))
     mouse(overlay, QEvent.MouseButtonPress, (10, 10))
     mouse(overlay, QEvent.MouseMove, (60, 40), Qt.NoButton)
     mouse(overlay, QEvent.MouseButtonRelease, (110, 70), buttons=Qt.NoButton)
@@ -311,3 +334,150 @@ def test_stitcher_says_why_a_frame_added_nothing():
     assert s.outcome == "added"
     s.add(page(600, seed=5).copy(QRect(0, 0, 120, 200)))
     assert s.outcome == "mismatch"
+
+
+# --- from the code review ------------------------------------------------------------------------------
+
+def test_the_pointer_waits_outside_the_area_during_every_grab(qapp):
+    scroller = FakeScroller(page(1200))
+    capture = make_capture(scroller)
+    run(capture)
+    area = QRect(40, 40, scroller.full.width(), VIEW_H).translated(QGuiApplication.primaryScreen().geometry().topLeft())
+    assert scroller.pointer_at_grab and not any(area.contains(p) for p in scroller.pointer_at_grab)
+
+
+def test_steps_are_sized_from_the_part_that_scrolls(qapp):
+    def bars(frame, _n):  # a 200 px header and 150 px footer on a 700 px view
+        p = QPainter(frame)
+        p.fillRect(0, 0, frame.width(), 200, QColor("#203040"))
+        p.fillRect(0, frame.height() - 150, frame.width(), 150, QColor("#405060"))
+        p.end()
+        return frame
+    full = page(4000)
+    scroller = FakeScroller(full, view_h=700, decorate=bars)
+    result = run(make_capture(scroller))
+    assert result.height() == 4000  # 200 header + the whole page between + 150 footer
+    assert max(scroller.notches) * PX_PER_NOTCH <= 350  # never more than the band between the bars
+
+
+def test_tells_the_stitcher_how_far_each_scroll_should_go(qapp):
+    log_line = QImage(120, 20, QImage.Format_RGB32)
+    log_line.fill(QColor("#ffffff"))
+    p = QPainter(log_line)
+    p.fillRect(4, 6, 70, 8, QColor("#333333"))
+    p.end()
+    full = QImage(120, 2000, QImage.Format_RGB32)
+    p = QPainter(full)
+    p.fillRect(0, 0, 120, 40, QColor("#aa3355"))  # something distinctive to start from
+    for y in range(40, 2000, 20):
+        p.drawImage(0, y, log_line)
+    p.end()
+    result = run(make_capture(FakeScroller(full)))
+    assert result.height() == 2000
+
+
+@pytest.mark.parametrize("trouble, note", [("keys", "key was held"), ("covered", "another window")])
+def test_stops_safely_when_a_key_is_held_or_a_window_comes_in_front(qapp, trouble, note):
+    scroller = FakeScroller(page(3000))
+    capture = make_capture(scroller)
+    original = scroller.scroll_down
+
+    def scroll_then_trouble(notches):
+        original(notches)
+        if len(scroller.notches) == 3:
+            if trouble == "keys":
+                scroller.keys_held = True
+            else:
+                scroller.window = 99
+    scroller.scroll_down = scroll_then_trouble
+    result = run(capture)
+    assert len(scroller.notches) == 3 and result is not None and note in capture.note
+
+
+def test_never_scrolls_the_desktop(qapp):
+    scroller = FakeScroller(page(3000))
+    scroller.desktop = True
+    capture = make_capture(scroller)
+    result = run(capture)
+    assert scroller.notches == [] and result.height() == VIEW_H and "desktop" in capture.note
+
+
+def test_an_area_that_does_not_scroll_says_so(qapp):
+    class Stuck(FakeScroller):
+        def scroll_down(self, notches):
+            self.notches.append(notches)  # the wheel turns, nothing moves
+    scroller = Stuck(page(3000))
+    capture = make_capture(scroller)
+    result = run(capture)
+    assert result.height() == VIEW_H and "didn't scroll" in capture.note
+
+
+def test_finishing_always_reports_back(qapp, monkeypatch):
+    scroller = FakeScroller(page(1200))
+    capture = make_capture(scroller)
+
+    def broken():
+        raise RuntimeError("out of memory")
+    monkeypatch.setattr(capture._stitcher, "result", broken)
+    assert run(capture) is None and capture.note
+
+
+def test_a_normal_finish_has_no_note(qapp):
+    capture = make_capture(FakeScroller(page(1200)))
+    run(capture)
+    assert capture.note is None and capture.reason == "end"
+
+
+def test_the_next_snip_does_not_start_in_scrolling_mode(qapp, monkeypatch):
+    from snipforge import capture
+    monkeypatch.setattr(capture.scroll_input, "available", lambda: True)
+    o = make_overlay(mode="area")
+    QApplication.sendEvent(o, QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier, "s"))
+    assert o.mode == "scroll"
+    session = capture.CaptureSession(lambda image: None)
+    session._set_mode("scroll")
+    assert prefs.capture_mode() != "scroll"  # a stray Enter next time must not scroll anything
+
+
+def test_a_held_s_does_not_switch_modes(qapp):
+    o = make_overlay(mode="area")
+    QApplication.sendEvent(o, QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier, "s", True))  # autorepeat
+    assert o.mode == "area"
+
+
+def test_the_keys_are_described_for_screen_readers(qapp):
+    o = make_overlay(mode="area")
+    assert "S to scroll" in o.accessibleDescription() and "S" in o.hint()
+
+
+def test_the_session_passes_on_why_a_scroll_ended(qapp, monkeypatch):
+    from snipforge import capture
+    monkeypatch.setattr(capture.scroll_input, "available", lambda: True)
+
+    class Ended:
+        def __init__(self, screen, rect, **kwargs):
+            from PySide6.QtCore import QObject, Signal
+
+            class Box(QObject):
+                finished = Signal(object)
+            self._box = Box()
+            self.finished = self._box.finished
+            self.note = "Scrolling capture stopped because a key was held down."
+
+        def start(self):
+            self.finished.emit(QImage(10, 10, QImage.Format_RGB32))
+
+        def blockSignals(self, on):  # noqa: N802 - Qt API
+            return self._box.blockSignals(on)
+
+        def cancel(self):
+            pass
+
+    monkeypatch.setattr(capture, "ScrollCapture", Ended)
+    prefs.set_capture_mode("area")
+    session = capture.CaptureSession(lambda image: None)
+    session.start()
+    overlay = session._overlays[0]
+    QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier, "s"))
+    QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    assert session.note == "Scrolling capture stopped because a key was held down."

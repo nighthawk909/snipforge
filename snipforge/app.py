@@ -172,8 +172,11 @@ class SnipForgeApp:
 
     def _on_captured(self, image: QImage | None) -> None:
         source = self._session.source if self._session is not None else None
+        note = getattr(self._session, "note", None)
         self._session = None
         self._cancel_snip_action.setVisible(False)
+        if note:  # a scrolling capture that ended early says why
+            self._tray.showMessage("SnipForge", note, QSystemTrayIcon.Information, 6000)
         if image is None:
             return
         if prefs.copy_on_capture():  # like Win+Shift+S: the raw snip is on the clipboard too
