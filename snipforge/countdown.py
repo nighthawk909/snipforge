@@ -85,7 +85,7 @@ class Countdown(QWidget):
         area = self._screen.availableGeometry()
         self.move(area.x() + (area.width() - self.width()) // 2, area.y() + TOP_MARGIN)
         self.show()
-        _exclude_from_capture(self)
+        exclude_from_capture(self)
         self._timer.start()
 
     def tick(self) -> None:
@@ -116,14 +116,14 @@ class Countdown(QWidget):
         QTimer.singleShot(self._settle_ms, self, self.finished.emit)  # never after it's deleted
 
 
-def _exclude_from_capture(widget: QWidget) -> None:
-    """Keep the countdown out of screenshots even while it's showing (belt and braces: it also
-    hides before the screen freezes). Best effort: older Windows just ignore it."""
+def exclude_from_capture(widget: QWidget) -> None:
+    """Keep a SnipForge pop-up (the countdown, the scrolling pill) out of screenshots even while it's
+    showing. Best effort: older Windows just ignore it."""
     if sys.platform != "win32":
         return
     try:
         import ctypes
         if not ctypes.windll.user32.SetWindowDisplayAffinity(int(widget.winId()), WDA_EXCLUDEFROMCAPTURE):
-            log.info("Windows wouldn't keep the countdown out of screenshots")
+            log.info("Windows wouldn't keep a pop-up out of screenshots")
     except (AttributeError, OSError, ValueError) as exc:
-        log.info("Couldn't keep the countdown out of screenshots: %s", exc)
+        log.info("Couldn't keep a pop-up out of screenshots: %s", exc)

@@ -310,3 +310,18 @@ def test_main_monitor_takes_the_keyboard_when_the_pointer_is_off_every_screen(qa
         assert session.focus is not None and session.focus.screen() is QGuiApplication.primaryScreen()
     finally:
         session._finish(None)
+
+
+def test_toolbar_fits_a_narrow_monitor_with_icons_only(qapp):
+    o = shown()
+    for width in (1920, 700):
+        o.resize(width, 600)
+        QApplication.processEvents()
+        bar = o.toolbar.geometry()
+        assert bar.left() >= 0 and bar.right() < width  # never hangs off the edge
+    button = o.toolbar.buttons["window"]
+    assert button.toolButtonStyle() == Qt.ToolButtonIconOnly and button.accessibleName() == "Window"
+    o.resize(3000, 600)
+    QApplication.processEvents()
+    assert o.toolbar.buttons["window"].toolButtonStyle() == Qt.ToolButtonTextBesideIcon
+    o.close()
