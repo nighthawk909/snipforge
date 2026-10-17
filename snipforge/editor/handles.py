@@ -5,9 +5,9 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
-ACCENT = QColor("#3b82f6")
-HOVER = QColor(59, 130, 246, 150)
-TAIL = QColor("#f59e0b")
+from .. import theme
+
+TAIL = QColor("#f59e0b")  # callout pointer handle: distinct from the accent on purpose
 HANDLE_PX = 9  # on-screen size regardless of zoom
 
 CURSORS = {
@@ -56,12 +56,15 @@ class HandleOverlay(QGraphicsItem):
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         scale = p.worldTransform().m11() or 1.0
+        accent = QColor(theme.current().accent.fill)
+        hover_color = QColor(accent)
+        hover_color.setAlpha(150)
         hover = self._hover
         if hover is not None and hover.scene() is not None and hover not in self._selected:
-            p.setPen(QPen(HOVER, 2.0 / scale))
+            p.setPen(QPen(hover_color, 2.0 / scale))
             p.setBrush(Qt.NoBrush)
             p.drawRect(hover.sceneBoundingRect())
-        outline = QPen(ACCENT, 1.0 / scale, Qt.DashLine)
+        outline = QPen(accent, 1.0 / scale, Qt.DashLine)
         for item in self._selected:
             if item.scene() is None:
                 continue
@@ -74,7 +77,7 @@ class HandleOverlay(QGraphicsItem):
             return
         size = HANDLE_PX / scale
         for name, pt in target.handle_points().items():
-            p.setPen(QPen(ACCENT, 1.5 / scale))
+            p.setPen(QPen(accent, 1.5 / scale))
             p.setBrush(TAIL if name == "tail" else QColor("#ffffff"))
             if name == "tail":
                 p.drawEllipse(QRectF(pt.x() - size * 0.65, pt.y() - size * 0.65, size * 1.3, size * 1.3))

@@ -104,6 +104,7 @@ def build_exe(version: str) -> Path:
     if not (app_dir / "SnipForge.exe").exists():
         sys.exit("PyInstaller didn't produce SnipForge.exe")
     add_license_files(app_dir)
+    add_theme_packs(app_dir)
     return app_dir
 
 
@@ -112,6 +113,26 @@ def add_license_files(app_dir: Path) -> None:
     shutil.copy2(ROOT / "LICENSE", app_dir / "LICENSE.txt")
     shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", app_dir / "THIRD_PARTY_NOTICES.md")
     shutil.copytree(ROOT / "licenses", app_dir / "licenses", dirs_exist_ok=True)
+
+
+def add_theme_packs(app_dir: Path, source: Path = ROOT / "themes") -> list[Path]:
+    """Organization builds keep theme packs in themes/*.json at the repo root; they ship in a
+    themes folder next to SnipForge.exe. A pack that doesn't validate fails the build."""
+    if not source.is_dir():
+        return []
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from snipforge.theme.packs import ThemePackError, load_pack
+
+    copied = []
+    for pack in sorted(source.glob("*.json")):
+        try:
+            load_pack(pack)
+        except ThemePackError as exc:
+            sys.exit(f"Theme pack {pack.name} is invalid: {exc}")
+        (app_dir / "themes").mkdir(exist_ok=True)
+        copied.append(Path(shutil.copy2(pack, app_dir / "themes" / pack.name)))
+    return copied
 
 
 def build_zip(app_dir: Path, version: str) -> Path:

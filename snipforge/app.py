@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import __version__, autostart, project
+from . import __version__, autostart, project, theme
 from .capture import CaptureSession
 from .editor.window import EditorWindow
 from .home import HomeWindow
@@ -17,6 +17,7 @@ from .hotkey import HotkeyListener
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
 from .single_instance import InstanceServer, send_to_running
+from .theme.tokens import BRAND
 from .update_flow import UpdateFlow, automatic_enabled, set_automatic
 from .updates import disabled_by_policy
 
@@ -32,7 +33,7 @@ def build_icon(size: int = 256) -> QIcon:
     p = QPainter(pix)
     p.setRenderHint(QPainter.Antialiasing)
     p.scale(size / 64, size / 64)  # drawn on a 64-unit grid, rendered at full resolution
-    p.setBrush(QColor("#2563eb"))
+    p.setBrush(QColor(BRAND))
     p.setPen(Qt.NoPen)
     p.drawRoundedRect(2, 2, 60, 60, 14, 14)
     p.setPen(QPen(Qt.white, 5, Qt.SolidLine, Qt.SquareCap))
@@ -178,7 +179,8 @@ class SnipForgeApp:
 
     def _open_editor(self, image: QImage, entry, document, autosave: bool = True) -> None:
         editor = EditorWindow(image, self.library, entry, document, on_new_snip=self.capture,
-                              on_open_entry=self.open_entry, on_pin=self.pin, autosave=autosave)
+                              on_open_entry=self.open_entry, on_pin=self.pin, autosave=autosave,
+                              on_open_library=self.show_home)
         self._track(editor)
         editor.show()
         self._bring_to_front(editor)
@@ -239,6 +241,7 @@ def main() -> int:
     server = InstanceServer()
     if not server.listening and send_to_running(command):
         return 0  # lost a start-up race with another launch; let that one handle it
+    theme.install(app)
     forge = SnipForgeApp(app)
     server.command.connect(forge.handle_command)
     if command != "background":
