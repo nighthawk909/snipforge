@@ -160,3 +160,44 @@ def test_a_failed_save_tries_the_save_folder_again(qapp, tmp_path, white_image, 
 
 
 _ = QColor  # imported for readers adding image checks
+
+
+def test_holding_a_snip_key_is_one_snip(monkeypatch):
+    class FakeUser32:
+        def GetAsyncKeyState(self, vk):  # noqa: N802 - mirrors user32
+            return 0
+
+        def CallNextHookEx(self, *_a):  # noqa: N802
+            return 42
+
+        def keybd_event(self, *a):
+            pass
+
+    monkeypatch.setattr(hotkey, "_user32", FakeUser32())
+    listener = hotkey.HotkeyListener()
+    fired = []
+    listener.triggered.connect(lambda: fired.append(True))
+
+    def send(message, when):
+        info = hotkey.KBDLLHOOKSTRUCT(vkCode=hotkey.VK_SNAPSHOT, scanCode=0, flags=0, time=when, dwExtraInfo=0)
+        return listener._callback(0, message, ctypes.addressof(info))
+
+    assert send(hotkey.WM_KEYDOWN, 1000) == 1
+    for when in (1500, 1530, 1560):  # Windows repeating the held key: swallowed, not snips
+        assert send(hotkey.WM_KEYDOWN, when) == 1
+    assert fired == [True]
+    assert send(hotkey.WM_KEYUP, 1600) == 42  # the key-up still reaches Windows
+    send(hotkey.WM_KEYDOWN, 1700)
+    assert fired == [True, True]  # pressed again after letting go
+    send(hotkey.WM_KEYDOWN, 1700 + hotkey.REPEAT_GAP_MS + 1)  # its key-up went missing
+    assert fired == [True, True, True]
+
+
+def test_tray_cancel_snip_shows_only_while_snipping(forge, monkeypatch):
+    from snipforge import app as app_module
+    monkeypatch.setattr(app_module.CaptureSession, "start", lambda self: None)
+    assert not forge._cancel_snip_action.isVisible()
+    forge.capture()
+    assert forge._cancel_snip_action.isVisible()
+    forge.cancel_snip()
+    assert forge._session is None and not forge._cancel_snip_action.isVisible()

@@ -77,6 +77,8 @@ class SnipForgeApp:
         self._updates.ui_shows_updates = self._settings_shows_updates
         menu = QMenu()
         menu.addAction("New snip", self.capture)
+        self._cancel_snip_action = menu.addAction("Cancel snip", self.cancel_snip)
+        self._cancel_snip_action.setVisible(False)  # only while a snip is under way
         menu.addAction("Library", self.show_home)
         menu.addAction("Settings…", self.show_settings)
         menu.addSeparator()
@@ -153,13 +155,21 @@ class SnipForgeApp:
 
     def capture(self) -> None:
         if self._session is not None:
+            self._session.snip_now()  # pressed again during a countdown: don't wait
             return
         self._session = CaptureSession(self._on_captured)
+        self._cancel_snip_action.setVisible(True)
         QTimer.singleShot(CAPTURE_DELAY_MS, self._session.start)
+
+    def cancel_snip(self) -> None:
+        """From the tray: stop a snip in progress, e.g. during a countdown, which has no keyboard."""
+        if self._session is not None:
+            self._session.cancel()
 
     def _on_captured(self, image: QImage | None) -> None:
         source = self._session.source if self._session is not None else None
         self._session = None
+        self._cancel_snip_action.setVisible(False)
         if image is None:
             return
         if prefs.copy_on_capture():  # like Win+Shift+S: the raw snip is on the clipboard too

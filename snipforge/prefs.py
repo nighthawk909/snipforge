@@ -12,12 +12,15 @@ from .settings import app_settings
 DEFAULT_EXPORT_DIR = Path.home() / "Pictures" / "SnipForge"
 FORMATS = ("png", "jpg")
 CAPTURE_MODES = ("area", "window", "screen")  # the capture toolbar's modes, in its order
+DELAYS = (0, 3, 5, 10)  # seconds the capture toolbar's Delay menu offers
 KEYS = {
     "copy_on_capture": "capture/copy_to_clipboard",
     "hotkey_win_shift_s": "capture/hotkey_win_shift_s",
     "hotkey_print_screen": "capture/hotkey_print_screen",
     "magnifier": "capture/magnifier",
     "capture_mode": "capture/mode",
+    "capture_delay": "capture/delay",
+    "capture_pointer": "capture/pointer",
     "export_dir": "output/folder",
     "export_format": "output/format",
 }
@@ -73,6 +76,31 @@ def set_capture_mode(mode: str) -> None:
     if mode not in CAPTURE_MODES:
         raise ValueError(f"unknown capture mode {mode!r}")
     _set("capture_mode", mode)
+
+
+def capture_delay() -> int:
+    """Seconds to count down before the screen freezes (0: none). Remembered, like the mode."""
+    value = app_settings().value(KEYS["capture_delay"], 0)
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return seconds if seconds in DELAYS else 0
+
+
+def set_capture_delay(seconds: int) -> None:
+    if seconds not in DELAYS:
+        raise ValueError(f"the delay must be one of {DELAYS}, got {seconds!r}")
+    _set("capture_delay", int(seconds))
+
+
+def capture_pointer() -> bool:
+    """Draw the mouse pointer into snips."""
+    return _bool("capture_pointer", False)
+
+
+def set_capture_pointer(on: bool) -> None:
+    _set("capture_pointer", bool(on))
 
 
 def export_dir() -> Path:
