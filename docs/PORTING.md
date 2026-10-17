@@ -16,13 +16,13 @@ your copy:
 - The app can't read the copy's releases. **Check for updates** says *"SnipForge can't see the
   releases at …: the repository is private, needs a sign-in (which SnipForge doesn't do) or has
   moved. If your organization keeps SnipForge updates in a shared folder, ask your IT team to point
-  SnipForge at it (the UpdateFeed policy)."* Automatic checks fail quietly and try again the next
-  day.
+  SnipForge at it (the UpdateFeed policy)."* Automatic checks fail quietly; SnipForge tries again
+  every six hours and each time it starts, sending one anonymous request that the server refuses.
 
 So at work the **company mirror is the main update path**: a SharePoint library (synced to PCs by
 OneDrive) or a file share, filled by `scripts/publish_feed.py` and chosen with the
 `UpdateSource = "feed"` / `UpdateFeed` policy ([DISTRIBUTION.md, section 2](DISTRIBUTION.md#2-company-mirror-sharepoint-or-a-network-share)).
-Set it up before handing out installers ([step 6](#6-updates-at-work-the-company-mirror)).
+Set it up before handing out installers ([step 5](#5-updates-at-work-the-company-mirror)).
 
 ## 1. Know your values
 
@@ -35,36 +35,27 @@ Look at the address of your organization's GitHub in a browser:
 | API (worked out from it) | `https://api.github.com` | `https://api.<name>.ghe.com` | `https://<host>/api/v3` |
 | `--pages-url` (only if you use Pages) | shown in **Settings → Pages** | shown in **Settings → Pages** | `https://<host>/pages/<org>/<repo>/` or `https://pages.<host>/<org>/<repo>/` |
 
-`--repo` is always `<org>/<repo>`, for example `acme/snipforge`.
+`--repo` is always `<org>/<repo>`: the organization (or user) and the repository name.
 
 Release downloads are trusted from the server's own host (plus GitHub's file storage on
 github.com). If your copy can be read without signing in and its downloads redirect elsewhere, add
 that host to `EXTRA_DOWNLOAD_HOSTS` in `snipforge/project.py`. A private copy never gets that far.
 
-## 2. Copy the repository
+## 2. Copy the repository and point it at its new home
 
-Create an empty repository in your organization (no README or license), then:
+Create an empty repository in your organization (no README or license). Don't push to it yet:
+the first push to `main` starts the release workflows, so the settings in step 3 come first.
 
 ```bash
 git clone https://github.com/nighthawk909/snipforge.git snipforge
 cd snipforge
 git remote rename origin upstream
 git remote add origin https://<server>/<org>/<repo>.git
-git push -u origin main
-git push origin --tags
-```
-
-Keeping the public repository as `upstream` lets you take its later changes ([step 7](#7-taking-later-changes-from-the-public-repository)).
-
-## 3. Point the copy at its new home
-
-```bash
 python scripts/port_repo.py --repo <org>/<repo> --server-url <server> --pages-url <pages address>
 git diff
 python -m ruff check .
 python -m pytest -q
 git commit -am "chore: point SnipForge at its new repository"
-git push
 ```
 
 Leave out `--server-url` on github.com and `--pages-url` if you don't use Pages; `--dry-run` lists
@@ -72,9 +63,10 @@ the files first. The script rewrites `snipforge/project.py` (`SERVER_URL` and `R
 the one place the app, the build, the scripts and the tests read the repository from, and every
 link to the old repository in the files listed in [Files that name the repository](#files-that-name-the-repository).
 Workflows need no edits: they use `$GITHUB_REPOSITORY` and `$GITHUB_SERVER_URL` and point `gh` at
-your server. A `chore:` commit doesn't trigger a release.
+your server. A `chore:` commit doesn't trigger a release. Keeping the public repository as
+`upstream` lets you take its later changes ([step 6](#6-taking-later-changes-from-the-public-repository)).
 
-## 4. Repository settings
+## 3. Repository settings (before the first push)
 
 - **Actions** must be allowed to run the actions the workflows use, all pinned to commit SHAs:
   `git grep -h "uses:" .github/workflows | sort -u` lists them. On GHE Server they come from
@@ -96,22 +88,25 @@ your server. A `chore:` commit doesn't trigger a release.
 - **Pages** is optional. If you want the download page anyway (only people who can sign in will see
   it), set **Settings → Pages → Source** to **GitHub Actions**.
 
-## 5. The first release in the copy
+## 4. Push, and give release-please its starting point
 
-release-please looks for the previous release to write the next release's notes. Give it one by
-creating a release for the version you copied (see `.release-please-manifest.json`) and attaching
-its installers:
+`<version>` is the one in `.release-please-manifest.json`:
 
 ```bash
-gh release create v<version> --repo <server host>/<org>/<repo> --verify-tag --draft --title "SnipForge <version>" --notes "Copied from the public repository."
+gh auth login --hostname <server host>   # once
+git push origin --tags
+gh release create v<version> --repo <server host>/<org>/<repo> --verify-tag --title "SnipForge <version>" --notes "Copied from the public repository."
+git push -u origin main
 ```
 
-Then run **Actions → Release → Run workflow** with that tag; it builds, self-tests and attaches the
-installer, `SHA256SUMS.txt` and the rest, then publishes the release. From then on releases work as in the public repository:
-merge pull requests, then merge release-please's release PR. Previews come from
-**Actions → Preview release**.
+The tags and that release come first so release-please can find the previous release; otherwise its
+first release PR lists the whole history. Then run **Actions → Release → Run workflow** with the
+tag `v<version>`: it builds and self-tests SnipForge and attaches the installer, `SHA256SUMS.txt`
+and the rest to that release, so you can fill the mirror right away. From then on releases work as
+in the public repository: merge pull requests, then merge release-please's release PR. Previews
+come from **Actions → Preview release**.
 
-## 6. Updates at work: the company mirror
+## 5. Updates at work: the company mirror
 
 1. **Create the mirror**: a SharePoint document library or a file-share folder that everyone can
    read and maintainers can write. [DISTRIBUTION.md](DISTRIBUTION.md#sharepoint) explains why
@@ -120,12 +115,11 @@ merge pull requests, then merge release-please's release PR. Previews come from
    release with `gh` (signed in to your server) and publish the folder with `--dist`:
 
    ```powershell
-   gh auth login --hostname <server host>   # once
    [Console]::OutputEncoding = [Text.UTF8Encoding]::new()   # read gh's output as UTF-8
    $tag  = "v0.7.0"
    $repo = "<server host>/<org>/<repo>"
    $dl   = "$env:TEMP\snipforge-$tag"
-   gh release download $tag --repo $repo --dir $dl --pattern "SnipForge-*-setup.exe" --pattern SHA256SUMS.txt
+   gh release download $tag --repo $repo --dir $dl --clobber --pattern "SnipForge-*-setup.exe" --pattern SHA256SUMS.txt
    gh release view $tag --repo $repo --json body --jq .body | Out-File -Encoding utf8 "$dl\notes.md"
    python scripts/publish_feed.py --dist $dl --target "<synced library or \\server\share>" --notes-file "$dl\notes.md"
    ```
@@ -147,18 +141,19 @@ merge pull requests, then merge release-please's release PR. Previews come from
    (`docs/site/index.html`) to SharePoint, change its **Download for Windows** link (`id="download"`)
    to the installer in the library; its other links go to your repository and need a sign-in.
 
-## 7. Taking later changes from the public repository
+## 6. Taking later changes from the public repository
 
 ```bash
 git fetch upstream
 git merge upstream/main
-python scripts/port_repo.py --repo <org>/<repo> --server-url <server> --from https://github.com/nighthawk909/snipforge
+python scripts/port_repo.py --repo <org>/<repo> --server-url <server> --pages-url <pages address> --from https://github.com/nighthawk909/snipforge
 ```
 
 `--from` rewrites links that arrived with the merge (after the first port, `snipforge/project.py`
-already names your copy). If a merge conflicts in `snipforge/project.py`, keep your `SERVER_URL`
-and `REPO`. If it conflicts on a line that only differs by its link, take the public repository's
-line and let `port_repo.py` rewrite it. Then run ruff and pytest as in step 3.
+already names your copy); leave out `--server-url` and `--pages-url` as in step 2. If a merge
+conflicts in `snipforge/project.py`, keep your `SERVER_URL` and `REPO`. If it conflicts on a line
+that only differs by its link, take the public repository's line and let `port_repo.py` rewrite it.
+Then run ruff and pytest as in step 2.
 
 ## Files that name the repository
 

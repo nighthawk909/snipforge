@@ -37,11 +37,15 @@ def test_enterprise_downloads_come_from_the_server_and_listed_extras():
 
 
 def test_repo_url_has_no_doubled_slash():
-    assert project.repo_url("https://ghe.example.com/", "acme/snipforge") == "https://ghe.example.com/acme/snipforge"
+    assert project.repo_url("https://ghe.example.com/", "example-org/example-repo") == (
+        "https://ghe.example.com/example-org/example-repo")
 
 
 @pytest.mark.parametrize("bad", ["http://github.com", "github.com", "https://", "https://user:pw@ghe.example.com",
-                                 "https://ghe.example.com/github", "https://ghe.example.com/?x=1", "", None])
+                                 "https://ghe.example.com/github", "https://ghe.example.com/?x=1", "", None,
+                                 "https://github.com:443", "https://ghe.example.com.", "https://ghe.example.com:abc",
+                                 "https://github.com:", "https://ghe.example.com:70000", 'https://ghe"x.example.com',
+                                 "https://ghe\\x.example.com", "https://-ghe.example.com", "https://ghe..example.com"])
 def test_server_must_be_a_bare_https_address(bad):
     with pytest.raises(ValueError):
         project.server_host(bad)
