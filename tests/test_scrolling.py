@@ -368,12 +368,15 @@ def test_tells_the_stitcher_how_far_each_scroll_should_go(qapp):
     p.end()
     full = QImage(120, 2000, QImage.Format_RGB32)
     p = QPainter(full)
-    p.fillRect(0, 0, 120, 40, QColor("#aa3355"))  # something distinctive to start from
-    for y in range(40, 2000, 20):
+    p.fillRect(0, 0, 120, 40, QColor("#aa3355"))  # something distinctive to start from...
+    for y in range(40, 1960, 20):  # ...identical lines all the way down the middle...
         p.drawImage(0, y, log_line)
+    p.fillRect(0, 1960, 120, 40, QColor("#33aa55"))  # ...and something to end on
     p.end()
-    result = run(make_capture(FakeScroller(full)))
-    assert result.height() == 2000
+    scroller = FakeScroller(full)
+    result = run(make_capture(scroller))
+    assert same(result, full)
+    assert len(scroller.notches) < 25  # a step that works on look-alike rows is kept, not re-learned
 
 
 @pytest.mark.parametrize("trouble, note", [("keys", "key was held"), ("covered", "another window")])

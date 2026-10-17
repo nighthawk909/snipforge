@@ -104,11 +104,19 @@ def find_shift(prev: list[int], cur: list[int], header: int = 0, footer: int = 0
         overlap = size - shift
         return sum(cur_band[i] == prev_band[i + shift] for i in range(overlap)) / overlap
 
+    def whole(shift: int) -> float:
+        """The same comparison over the whole frame, still rows included: a block that only looked
+        still (it sits at the bottom of both views) can tell otherwise identical shifts apart."""
+        overlap = min(len(prev), len(cur)) - shift
+        return sum(cur[i] == prev[i + shift] for i in range(overlap)) / overlap if overlap > 0 else 0.0
+
     def nearer(a: int, b: int | None) -> bool:
-        """For equally good shifts: the one more distinctive edges point to, then the expected
-        distance, then the smaller."""
+        """For equally good shifts: the one the whole frame agrees with better, then the one more
+        distinctive edges point to, then the expected distance, then the smaller."""
         if b is None:
             return True
+        if (header or footer) and whole(a) != whole(b):
+            return whole(a) > whole(b)
         if votes[a] != votes[b]:
             return votes[a] > votes[b]
         if expected is not None and abs(a - expected) != abs(b - expected):

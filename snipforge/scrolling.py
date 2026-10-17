@@ -117,6 +117,7 @@ class ScrollCapture(QObject):
         self._steps = 0
         self._retries = 0
         self._rechecked = False  # a scroll that seemed to do nothing has been tried once more
+        self._keep_notches = False  # a recheck found the usual step lands on look-alike rows
         self._window = 0  # the window being scrolled
         self._saved_pointer: QPoint | None = None
         self._placed: QPoint | None = None  # where the pointer was last put
@@ -235,6 +236,8 @@ class ScrollCapture(QObject):
                 self._rechecked = True
                 self._scroll(back=True)
                 return
+            if added and self._rechecked:
+                self._keep_notches = True  # that step size works here: don't size back down to one that doesn't
             if added:
                 self._rechecked = False
             if not added:
@@ -287,7 +290,8 @@ class ScrollCapture(QObject):
         band = max(1, height - s.header_rows - s.footer_rows)
         if s.last_shift > 0:
             self._per_notch = max(self._per_notch, s.last_shift / self._notches)
-            self._notches = max(1, min(MAX_NOTCHES, int(STEP_SHARE * band / self._per_notch)))
+            if not self._keep_notches:
+                self._notches = max(1, min(MAX_NOTCHES, int(STEP_SHARE * band / self._per_notch)))
             s.expected = round(self._notches * self._per_notch)
         self._target = self._origin + QPoint(self._rect.center().x(), self._rect.top() + s.header_rows + band // 2)
 
