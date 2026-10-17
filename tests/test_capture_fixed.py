@@ -11,6 +11,22 @@ from snipforge.settings import app_settings
 WINDOW = QRect(100, 80, 300, 200)
 
 
+class FakeCursor:
+    """Where the overlay thinks the pointer is (the real one is never read or moved)."""
+    at = QPoint(-30000, -30000)  # off every monitor, unless a test puts it somewhere
+
+    @classmethod
+    def pos(cls, *_args) -> QPoint:
+        return cls.at
+
+
+@pytest.fixture(autouse=True)
+def fake_cursor(monkeypatch):
+    from snipforge import capture
+    FakeCursor.at = QPoint(-30000, -30000)
+    monkeypatch.setattr(capture, "QCursor", FakeCursor)
+
+
 @pytest.fixture(autouse=True)
 def clean_prefs():
     keys = [prefs.KEYS["capture_mode"], prefs.KEYS["capture_fixed_size"], prefs.KEYS["capture_delay"]]
@@ -168,10 +184,31 @@ def test_arrow_keys_stop_at_the_edges(qapp):
     assert where(o.got[0]) == (0, 0)
 
 
-def test_enter_before_the_pointer_moves_snips_a_frame_in_the_middle(qapp):
+def test_enter_never_snips_a_frame_you_have_not_seen(qapp):
+    o = make_overlay((200, 100))  # the pointer is on another monitor: no frame here yet
+    assert o._selection() is None
+    key(o, Qt.Key_Return)  # first Enter: draws it, in the middle
+    assert o.got == [] and o._selection() == QRect(400, 300, 200, 100)
+    key(o, Qt.Key_Return)  # second Enter: snips it
+    assert where(o.got[0]) == (400, 300)
+
+
+def test_the_frame_is_there_from_the_start_under_the_pointer(qapp):
+    from snipforge import capture
     o = make_overlay((200, 100))
+    capture.QCursor.at = o.geometry().topLeft() + QPoint(300, 200)
+    o.show()
+    assert o._selection() == QRect(200, 150, 200, 100)
     key(o, Qt.Key_Return)
-    assert where(o.got[0]) == (o.width() // 2 - 100, o.height() // 2 - 50)
+    assert where(o.got[0]) == (200, 150)
+
+
+def test_ctrl_or_alt_arrows_do_not_nudge(qapp):
+    o = make_overlay((200, 100))
+    move(o, (400, 300))
+    key(o, Qt.Key_Right, Qt.ControlModifier)
+    key(o, Qt.Key_Down, Qt.AltModifier)
+    assert o._selection() == QRect(300, 250, 200, 100)
 
 
 def test_arrow_keys_do_nothing_in_other_modes(qapp):
@@ -310,6 +347,133 @@ def test_the_custom_row_works_from_the_keyboard_alone(qapp):
         host.close()
 
 
+def test_enter_on_use_picks_the_size(qapp):
+    o = shown(size=(200, 100))
+    picked = []
+    o.size_changed.connect(lambda w, h: picked.append((w, h)))
+    custom = o.toolbar.custom_size
+    custom.width_box.setValue(321)
+    QApplication.sendEvent(custom.use_button, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    assert picked == [(321, 100)]
+
+
+def test_a_number_below_the_smallest_size_means_the_smallest(qapp):
+    o = shown(size=(200, 100))
+    picked = []
+    o.size_changed.connect(lambda w, h: picked.append((w, h)))
+    box = o.toolbar.custom_size.width_box
+    QTest.keyClick(box, Qt.Key_A, Qt.ControlModifier)
+    QTest.keyClicks(box, "5")
+    o.toolbar.custom_size.use_button.click()
+    assert picked == [(prefs.MIN_FIXED, 100)]
+
+
+def test_reopening_the_size_menu_starts_fresh(qapp):
+    o = shown(size=(640, 480))
+    bar = o.toolbar
+    bar.open_size_menu()
+    QTest.qWait(30)
+    bar.custom_size.width_box.setFocus()
+    bar.custom_size.width_box.setValue(999)  # typed, then Esc
+    bar.size_menu.close()
+    bar.open_size_menu()
+    QTest.qWait(30)
+    try:
+        assert bar.custom_size.width_box.value() == 640
+        assert bar.size_menu.focusWidget() is not bar.custom_size.width_box  # arrows move through the menu
+        assert bar.size_menu.activeAction() is bar._size_actions[(640, 480)]
+    finally:
+        bar.size_menu.close()
+
+
+def wait_for(condition, ms: int = 1000) -> bool:
+    """Run Qt's event loop until `condition()` holds, for up to `ms` milliseconds."""
+    for _ in range(ms // 10):
+        if condition():
+            return True
+        QTest.qWait(10)
+    return bool(condition())
+
+
+def take_keyboard(o):
+    o.activateWindow()
+    o.setFocus()
+    QTest.qWaitForWindowActive(o)
+    assert wait_for(lambda: QApplication.focusWidget() is o, 1000)
+
+
+def test_x_again_opens_the_size_menu_and_a_pick_hands_the_keyboard_back(qapp):
+    o = shown(size=(200, 100))
+    take_keyboard(o)
+    move(o, (400, 300))
+    key(o, Qt.Key_X, text="x")
+    menu = o.toolbar.size_menu
+    assert wait_for(menu.isVisible, 1000)
+    QTest.keyClick(menu, Qt.Key_Down)  # the first preset: 640 × 480
+    QTest.keyClick(menu, Qt.Key_Return)
+    assert not menu.isVisible() and o.fixed_size == (640, 480)
+    assert wait_for(lambda: QApplication.focusWidget() is o, 1000)  # so arrows and Enter work
+    QTest.keyClick(o, Qt.Key_Right)
+    QTest.keyClick(o, Qt.Key_Return)
+    assert where(o.got[0]) == (81, 60) and o.got[0].size().toTuple() == (640, 480)
+
+
+def test_tab_goes_round_the_toolbar_and_back_to_the_frame(qapp):
+    o = shown()
+    take_keyboard(o)
+    seen = []
+    for _ in range(15):
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key_Tab)
+        seen.append(QApplication.focusWidget())
+        if seen[-1] is o:
+            break
+    assert seen[-1] is o and o.toolbar.size_button in seen
+
+
+def test_a_new_size_never_moves_the_toolbar_buttons(qapp):
+    o = shown(size=(16, 16))
+    bar = o.toolbar
+
+    def places():
+        return [b.mapTo(o, QPoint()) for b in (*bar.buttons.values(), bar.delay_button, bar.cancel_button)]
+
+    before = places()
+    for size in ((640, 480), (1920, 1080), (prefs.MAX_FIXED, prefs.MAX_FIXED)):
+        o.set_fixed_size(*size)
+        QApplication.processEvents()
+        assert places() == before, size
+
+
+def test_the_frame_stays_while_the_size_menu_is_open(qapp):
+    o = shown(size=(200, 100))
+    move(o, (400, 300))
+    o.toolbar.open_size_menu()
+    assert wait_for(o.toolbar.size_menu.isVisible, 1000)
+    try:
+        QApplication.sendEvent(o, QEvent(QEvent.Leave))  # the pointer went into the menu
+        assert o._selection() == QRect(300, 250, 200, 100)
+    finally:
+        o.toolbar.size_menu.close()
+    QApplication.sendEvent(o, QEvent(QEvent.Leave))  # really leaving (to another monitor) drops it
+    assert o._selection() is None
+
+
+def test_the_keyboard_follows_the_pointer_to_another_monitor(qapp):
+    from PySide6.QtGui import QEnterEvent
+    first, second = shown(size=(200, 100)), shown(size=(200, 100))
+    taken = []
+    second.keyboard_taken.connect(lambda: taken.append(second))
+    take_keyboard(first)
+    at = QPointF(400, 300)
+    QApplication.sendEvent(second, QEnterEvent(at, at, second.mapToGlobal(at)))
+    move(second, (400, 300))
+    assert taken == [second]
+    assert wait_for(lambda: QApplication.focusWidget() is second, 1000)
+    QTest.keyClick(QApplication.focusWidget(), Qt.Key_Right)
+    QTest.keyClick(QApplication.focusWidget(), Qt.Key_Return)
+    assert first.got == [] and where(second.got[0]) == (301, 250)
+
+
 # --- the session -------------------------------------------------------------------------------
 
 def test_a_snip_starts_in_fixed_size_with_the_remembered_size(qapp, monkeypatch):
@@ -327,6 +491,9 @@ def test_a_snip_starts_in_fixed_size_with_the_remembered_size(qapp, monkeypatch)
         overlay.toolbar.custom_size.use_button.click()
         assert prefs.capture_fixed_size() == (500, 200)
         assert all(o.fixed_size == (500, 200) for o in session._overlays)
+        session.focus = None
+        overlay.keyboard_taken.emit()  # the pointer came to this monitor
+        assert session.focus is overlay
         click(overlay, (300, 300))
         screen = overlay._frozen_image.size()
         assert results[0].size().toTuple() == (min(500, screen.width()), min(200, screen.height()))

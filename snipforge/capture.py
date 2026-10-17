@@ -14,9 +14,9 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from . import pointer, prefs, scroll_input, theme
 from .capture_toolbar import MODES, CaptureToolbar
@@ -65,6 +65,7 @@ class _ScreenOverlay(QWidget):
     scroll_requested = Signal(QRect)  # Scrolling mode: this area (overlay coordinates) is to be scrolled
     pointer_changed = Signal(bool)  # the user switched the pointer on or off here
     size_changed = Signal(int, int)  # the user picked Fixed size mode's size here (screen pixels)
+    keyboard_taken = Signal()  # the pointer came to this monitor, and the keyboard came with it
 
     def __init__(self, screen, pixmap: QPixmap, window_rects: list[QRect], sources: list | None = None,
                  *, mode: str = "area", toolbar: bool = False, delay: int = 0,
@@ -114,11 +115,12 @@ class _ScreenOverlay(QWidget):
             self._place_toolbar()
         self.setCursor(Qt.CrossCursor)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)  # Tab goes round the toolbar and back here
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setAccessibleName("Choose what to snip")
         self.setAccessibleDescription(
             "A to drag an area, W for a window, F for the full screen, "
-            "X for a fixed size frame (arrow keys move it, Enter snips it), "
+            "X for a fixed size frame (arrow keys move it, Enter snips it, X again picks its size), "
             + ("S to scroll a long page or list, " if self._scrolling else "")
             + "Enter for the whole monitor, D for a delay, P to include the pointer, Esc to cancel")
 
@@ -239,6 +241,23 @@ class _ScreenOverlay(QWidget):
     def _pick_size(self, width: int, height: int) -> None:
         self.set_fixed_size(width, height)
         self.size_changed.emit(width, height)
+        # Back to the frame (after the menu hands the keyboard back to the toolbar), so arrow keys
+        # move it and Enter snips it.
+        QTimer.singleShot(0, self, self.setFocus)
+
+    def _pointer_here(self) -> QPoint | None:
+        """Where the pointer is on this monitor (overlay coordinates), or None if it's elsewhere."""
+        at = QCursor.pos() - self.geometry().topLeft()
+        return at if self.rect().contains(at) else None
+
+    def _show_frame(self) -> bool:
+        """Draw the frame if it isn't drawn yet: at the pointer, or in the middle. Returns whether
+        it was already showing (Enter never snips a frame you haven't seen)."""
+        if self._fixed is not None:
+            return True
+        at = self._pointer_here()
+        self._set_fixed(self._fixed_at(at if at is not None else self._middle()))
+        return False
 
     def _middle(self) -> QPoint:
         return QPoint(self.width() // 2, self.height() // 2)
@@ -269,12 +288,26 @@ class _ScreenOverlay(QWidget):
         self.update()
 
     def _nudge(self, dx: int, dy: int) -> None:
-        frame = self._fixed if self._fixed is not None else self._fixed_at(self._middle())
-        self._set_fixed(self._clamped(frame.topLeft() + QPoint(dx, dy)))
+        self._show_frame()
+        self._set_fixed(self._clamped(self._fixed.topLeft() + QPoint(dx, dy)))
 
     def _snip_fixed(self) -> None:
-        frame = self._fixed if self._fixed is not None else self._fixed_at(self._middle())
-        self._emit_physical(frame, self._to_logical(frame))
+        if self._show_frame():
+            self._emit_physical(self._fixed, self._to_logical(self._fixed))
+
+    def showEvent(self, e) -> None:  # noqa: N802 - Qt API
+        super().showEvent(e)
+        if self._mode == "fixed" and self._fixed is None and (at := self._pointer_here()) is not None:
+            self._set_fixed(self._fixed_at(at))  # there from the start, under the pointer
+
+    def enterEvent(self, e) -> None:  # noqa: N802 - Qt API
+        """The keyboard follows the pointer from monitor to monitor, so arrow keys and Enter act on
+        the monitor you're looking at, not the one the snip started on."""
+        if QApplication.activePopupWidget() is None and not self.isActiveWindow():
+            self.activateWindow()
+            self.setFocus()
+            self.keyboard_taken.emit()
+        super().enterEvent(e)
 
     def resizeEvent(self, e) -> None:  # noqa: N802 - Qt API
         self._place_toolbar()
@@ -455,7 +488,7 @@ class _ScreenOverlay(QWidget):
 
     def leaveEvent(self, _e) -> None:
         self._cursor = None
-        if self._press is None:
+        if self._press is None and QApplication.activePopupWidget() is None:  # a menu isn't leaving
             self._hover = None
             self._fixed = None  # the pointer went to another monitor: so does the frame
         self.update()
@@ -493,7 +526,10 @@ class _ScreenOverlay(QWidget):
         elif e.modifiers() not in (Qt.NoModifier, Qt.ShiftModifier) or e.isAutoRepeat():
             super().keyPressEvent(e)  # a held letter (e.g. the S of Win+Shift+S) isn't a choice
         elif mode := next((k for k, spec in MODES.items() if e.key() == ord(spec.key)), None):
-            self._pick_mode(mode)
+            if mode == "fixed" == self._mode and self.toolbar is not None:
+                self.toolbar.open_size_menu()  # X again: the size
+            else:
+                self._pick_mode(mode)
         elif e.key() == Qt.Key_D and self.toolbar is not None:
             if self._press is None:  # not in the middle of a drag (the toolbar is hidden then)
                 self.toolbar.open_delay_menu()
@@ -616,6 +652,7 @@ class CaptureSession:
             overlay.delay_changed.connect(self._set_delay)
             overlay.pointer_changed.connect(self._set_pointer)
             overlay.size_changed.connect(self._set_fixed_size)
+            overlay.keyboard_taken.connect(lambda o=overlay: setattr(self, "focus", o))
             overlay.scroll_requested.connect(lambda rect, o=overlay: self._scroll(o, rect))
             self._overlays.append(overlay)
             if screen is active:
