@@ -11,11 +11,13 @@ from .settings import app_settings
 
 DEFAULT_EXPORT_DIR = Path.home() / "Pictures" / "SnipForge"
 FORMATS = ("png", "jpg")
+CAPTURE_MODES = ("area", "window", "screen")  # the capture toolbar's modes, in its order
 KEYS = {
     "copy_on_capture": "capture/copy_to_clipboard",
     "hotkey_win_shift_s": "capture/hotkey_win_shift_s",
     "hotkey_print_screen": "capture/hotkey_print_screen",
     "magnifier": "capture/magnifier",
+    "capture_mode": "capture/mode",
     "export_dir": "output/folder",
     "export_format": "output/format",
 }
@@ -59,6 +61,18 @@ def magnifier() -> bool:
 
 def set_magnifier(on: bool) -> None:
     _set("magnifier", bool(on))
+
+
+def capture_mode() -> str:
+    """The capture toolbar's mode: the one used last, so the next snip starts there."""
+    value = app_settings().value(KEYS["capture_mode"], "area")
+    return value if value in CAPTURE_MODES else "area"
+
+
+def set_capture_mode(mode: str) -> None:
+    if mode not in CAPTURE_MODES:
+        raise ValueError(f"unknown capture mode {mode!r}")
+    _set("capture_mode", mode)
 
 
 def export_dir() -> Path:

@@ -190,6 +190,12 @@ QToolButton#Chip {{ background: {p.surface}; color: {p.text2}; border: 1px solid
 QToolButton#Chip:hover {{ border-color: {p.text3}; }}
 QToolButton#Chip:checked {{ background: {a.soft}; color: {a.text}; border-color: {a.fill}; font-weight: 600; }}
 
+QFrame#CaptureToolbar {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 12px; }}
+#CaptureToolbar QToolButton {{ border-radius: 8px; padding: 6px 10px; color: {p.text2}; }}
+#CaptureToolbar QToolButton:checked {{ background: {a.soft}; color: {a.text}; font-weight: 600; }}
+#CaptureToolbar QToolButton:focus {{ border: 1px solid {a.fill}; }}
+QFrame#CaptureToolbarSeparator {{ background: {p.border}; }}
+
 QWidget#SettingsNav {{ background: {p.bg}; border-right: 1px solid {p.border}; }}
 QWidget#SettingsBody, QScrollArea#SettingsScroll {{ background: {p.bg}; border: none; }}
 QFrame#SettingCard {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 8px; }}
