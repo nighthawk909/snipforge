@@ -484,3 +484,70 @@ def test_the_session_passes_on_why_a_scroll_ended(qapp, monkeypatch):
     QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier, "s"))
     QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
     assert session.note == "Scrolling capture stopped because a key was held down."
+
+
+# --- from the second code review ----------------------------------------------------------------------
+
+def test_the_snip_survives_a_pointer_that_cannot_be_put_back(qapp):
+    class Locked(FakeScroller):  # e.g. the lock screen came up: the pointer can't be moved
+        def place_pointer(self, at):
+            if at == QPoint(5, 5):  # putting it back where it started
+                raise OSError("access denied")
+            super().place_pointer(at)
+    scroller = Locked(page(900))
+    result = run(make_capture(scroller))
+    assert result is not None and result.height() == 900
+
+
+def test_trouble_in_any_step_still_reports_back(qapp):
+    class Broken(FakeScroller):
+        def window_at(self, _at):
+            if len(self.notches) >= 2:
+                raise OSError("no window")
+            return self.window
+    capture = make_capture(Broken(page(3000)))
+    result = run(capture)
+    assert result is not None and result.height() > VIEW_H and "problem" in capture.note
+
+
+def test_a_key_down_for_a_moment_does_not_stop_it(qapp):
+    class Blip(FakeScroller):
+        def modifiers_down(self):
+            return len(self.notches) == 2 and not getattr(self, "blipped", False) and not setattr(self, "blipped", True)
+    scroller = Blip(page(1200))
+    capture = make_capture(scroller)
+    result = run(capture)
+    assert result.height() == 1200 and capture.note is None
+
+
+def test_picking_a_delay_after_choosing_scrolling_keeps_scrolling(qapp, monkeypatch):
+    from snipforge import capture, countdown
+    monkeypatch.setattr(countdown, "SETTLE_MS", 0)
+    monkeypatch.setattr(capture.scroll_input, "available", lambda: True)
+    session = capture.CaptureSession(lambda image: None)
+    session.start()
+    try:
+        QApplication.sendEvent(session._overlays[0], QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier, "s"))
+        session._overlays[0].toolbar.delay_menu.actions()[1].trigger()  # 3 seconds
+        session.snip_now()
+        QTest.qWait(30)
+        assert session._overlays and all(o.mode == "scroll" for o in session._overlays)
+    finally:
+        session._finish(None)
+        prefs.set_capture_delay(0)
+
+
+def test_a_scrolling_capture_that_cannot_start_says_so(qapp, monkeypatch):
+    from snipforge import capture
+    monkeypatch.setattr(capture.scroll_input, "available", lambda: True)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("no screen")
+    monkeypatch.setattr(capture, "ScrollCapture", broken)
+    results = []
+    session = capture.CaptureSession(results.append)
+    session.start()
+    overlay = session._overlays[0]
+    QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier, "s"))
+    QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    assert results == [None] and "couldn't start" in session.note

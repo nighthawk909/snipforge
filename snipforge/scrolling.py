@@ -36,6 +36,7 @@ STEP_SHARE = 0.6  # of the part that scrolls, per scroll, so views always overla
 MAX_STEPS = 300
 POINTER_SLACK = 3  # pixels the pointer may drift before it counts as the person moving it
 PARK_GAP = 12  # pixels outside the area where the pointer waits during a grab
+KEY_RECHECK_MS = 150  # a key seen down is looked at again this much later (a snip key being pressed)
 RETRIES = {"mismatch": 2}  # extra looks at a view that doesn't line up (grabbed mid-redraw)
 NOTES = {
     "mismatch": "Scrolling capture stopped early: the page changed while it was scrolling. "
@@ -108,7 +109,8 @@ class ScrollCapture(QObject):
         self._scroller = scroller
         self._settle_ms, self._poll_ms, self._max_settle_ms = settle_ms, poll_ms, max_settle_ms
         self._max_steps = max_steps
-        self._stitcher = Stitcher()
+        self._stitcher = Stitcher(scale=screen.devicePixelRatio() or 1.0)
+        self._keys_seen = False  # a key was down at the last look
         self._origin = screen.geometry().topLeft()  # physical: Qt keeps each screen's corner native
         self._target = self._origin + rect.center()  # where the wheel is turned (physical)
         self._park = self._parking_spot()
@@ -202,12 +204,14 @@ class ScrollCapture(QObject):
         if self._done:
             return
         try:
-            frame = self._grab()
-            frame.setDevicePixelRatio(1.0)
+            self._look_and_step()
         except Exception:  # noqa: BLE001 - keep what we have rather than lose the snip
-            log.exception("Scrolling capture failed while grabbing")
+            log.exception("Scrolling capture failed")
             self._finish(keep=True, reason="error")
-            return
+
+    def _look_and_step(self) -> None:
+        frame = self._grab()
+        frame.setDevicePixelRatio(1.0)
         settled = bool(self._looks) and frame == self._looks[-1]
         self._looks = [frame]
         if settled or self._waited >= self._max_settle_ms:
@@ -245,6 +249,12 @@ class ScrollCapture(QObject):
                 self._finish(keep=True, reason="nothing" if outcome == "still" and never_moved
                              else ("end" if outcome == "still" else outcome))
                 return
+        self._before_scroll(frame.height())
+
+    def _before_scroll(self, height: int) -> None:
+        """The checks before the next scroll, then the scroll."""
+        if self._done:
+            return
         if self._person_moved_pointer():
             self._finish(keep=True, reason="moved", restore_pointer=False)
             return
@@ -255,14 +265,26 @@ class ScrollCapture(QObject):
             self._finish(keep=True, reason="desktop")
             return
         if self._scroller.modifiers_down():
-            self._finish(keep=True, reason="keys")
+            if self._keys_seen:  # held, not just on the way to the snip key: a wheel turn would zoom
+                self._finish(keep=True, reason="keys")
+                return
+            self._keys_seen = True  # check again shortly (stop() arrives if it was the snip key)
+            QTimer.singleShot(KEY_RECHECK_MS, self, lambda: self._guarded(lambda: self._before_scroll(height)))
             return
+        self._keys_seen = False
         if self._scroller.window_at(self._target) != self._window:
             self._finish(keep=True, reason="covered")
             return
         if self._steps:
-            self._adapt(frame.height())
+            self._adapt(height)
         self._scroll()
+
+    def _guarded(self, step) -> None:
+        try:
+            step()
+        except Exception:  # noqa: BLE001 - keep what we have rather than lose the snip
+            log.exception("Scrolling capture failed")
+            self._finish(keep=True, reason="error")
 
     def _scroll(self, back: bool = False) -> None:
         """Turn the wheel with the pointer over the part that scrolls, then move it off the area.
@@ -304,18 +326,26 @@ class ScrollCapture(QObject):
         image = None
         try:
             self._timer.stop()
-            if self.status is not None:
-                self.status.close()
-                self.status.deleteLater()
-                self.status = None
-            if restore_pointer and self._saved_pointer is not None and not self._person_moved_pointer():
-                self._scroller.place_pointer(self._saved_pointer)
-            if keep:
+            if keep:  # the snip first: nothing after this may lose it
                 image = self._stitcher.result()
                 if image.isNull():
                     image = None
         except Exception:  # noqa: BLE001 - whatever happens, the session hears back
             log.exception("Scrolling capture failed while finishing")
             self.note = self.note or NOTES["error"]
-        finally:
-            self.finished.emit(image)
+        for tidy in (self._close_status, lambda: self._restore_pointer(restore_pointer)):
+            try:
+                tidy()
+            except Exception:  # noqa: BLE001 - e.g. the pointer can't move on the lock screen
+                log.exception("Scrolling capture couldn't tidy up")
+        self.finished.emit(image)
+
+    def _close_status(self) -> None:
+        if self.status is not None:
+            self.status.close()
+            self.status.deleteLater()
+            self.status = None
+
+    def _restore_pointer(self, wanted: bool) -> None:
+        if wanted and self._saved_pointer is not None and not self._person_moved_pointer():
+            self._scroller.place_pointer(self._saved_pointer)

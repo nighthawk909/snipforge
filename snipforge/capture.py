@@ -410,6 +410,7 @@ class CaptureSession:
         self._overlays: list[_ScreenOverlay] = []
         self._finished = False
         self.focus: _ScreenOverlay | None = None  # the overlay that has the keyboard
+        self._mode: str | None = None  # the mode picked in this snip (kept across a delay's re-freeze)
         self.countdown: Countdown | None = None  # counting down before the screen freezes
         self.scrolling: ScrollCapture | None = None  # Scrolling mode, under way
         self.note: str | None = None  # why a scrolling capture ended early, for the person
@@ -475,8 +476,8 @@ class CaptureSession:
         except OSError:
             infos = []
         windows = [info.rect for info in infos]
-        mode = prefs.capture_mode()
-        if mode == "scroll":  # remembered by an older version: never start in Scrolling
+        mode = self._mode or prefs.capture_mode()
+        if mode == "scroll" and self._mode is None:  # remembered by an older version: never start in it
             mode = "area"
         shot = pointer.grab()  # first: the pointer as it is the moment the screen freezes
         # Every monitor gets the toolbar; the keyboard goes to the one the pointer is on (the main
@@ -506,6 +507,7 @@ class CaptureSession:
     def _set_mode(self, mode: str) -> None:
         """A mode picked on one monitor applies to all of them, and to the next snip, except
         Scrolling: it acts on whatever is under the pointer, so it's chosen afresh every time."""
+        self._mode = mode
         for overlay in self._overlays:
             overlay.set_mode(mode)
         if mode != "scroll":
@@ -533,6 +535,7 @@ class CaptureSession:
             self.scrolling.start()
         except Exception:  # never leave a session that blocks every later snip
             logging.getLogger(__name__).exception("Scrolling capture failed to start")
+            self.note = "Scrolling capture couldn't start. Try again, or snip the area instead."
             self._finish(None)
 
     def _scroll_done(self, image, source) -> None:

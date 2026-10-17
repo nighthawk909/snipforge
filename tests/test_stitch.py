@@ -303,3 +303,128 @@ def test_huge_pages_stop_at_a_pixel_budget():
     for top in range(0, 2601, 200):
         stitcher.add(view(full, top, 400))
     assert stitcher.result().height() <= 1000 and stitcher.full and stitcher.outcome == "full"
+
+
+# --- from the second code review ----------------------------------------------------------------
+
+def log_page(height: int, width: int = WIDTH) -> QImage:
+    """Identical 20 px lines all the way down, with a distinctive block at each end."""
+    line = QImage(width, 20, QImage.Format_RGB32)
+    line.fill(QColor("#ffffff"))
+    p = QPainter(line)
+    p.fillRect(4, 6, width // 2, 8, QColor("#333333"))
+    p.end()
+    full = QImage(width, height, QImage.Format_RGB32)
+    p = QPainter(full)
+    for y in range(0, height, 20):
+        p.drawImage(0, y, line)
+    p.fillRect(0, 0, width, 40, QColor("#aa3355"))
+    p.fillRect(0, height - 40, width, 40, QColor("#33aa55"))
+    p.end()
+    return full
+
+
+@pytest.mark.parametrize("header, footer", [(30, 0), (0, 30), (30, 30)])
+def test_repetitive_content_with_a_sticky_bar_follows_the_expected_scroll(header, footer):
+    full = log_page(2900)
+    stitcher = Stitcher()
+    stitcher.add(view(full, 0, 400, header=header, footer=footer))
+    for top in range(130, 2501, 130):
+        stitcher.expected = 130
+        assert stitcher.add(view(full, top, 400, header=header, footer=footer))
+        assert stitcher.last_shift == 130
+    assert stitcher.result().height() == 2470 + 400  # header + the page between + footer: nothing lost
+
+
+def test_a_banner_taller_than_the_first_scroll_is_taken_back_fully():
+    full = page(2500)
+    frames = []
+    for n, top in enumerate([0, 100] + list(range(300, 1901, 200))):
+        frame = view(full, top, 600)
+        if n >= 1:
+            p = QPainter(frame)
+            p.fillRect(0, 600 - 150, WIDTH, 150, QColor("#ff8800"))
+            p.end()
+        frames.append(frame)
+    result = run_stitch(frames).result()
+    assert result.height() == 2500
+    assert same(result.copy(QRect(0, 0, WIDTH, 2350)), full.copy(QRect(0, 0, WIDTH, 2350)))  # no repeats
+
+
+def test_a_status_bar_with_a_live_counter_appears_once_and_the_end_is_the_end():
+    full = page(1800)
+    stitcher = Stitcher()
+    for n, top in enumerate(list(range(0, 1301, 150)) + [1300, 1300]):
+        frame = view(full, top, 500, footer=60)
+        p = QPainter(frame)
+        p.fillRect(50, 500 - 40, 12, 20, QColor(n * 23 % 256, 200, 90))  # the counter changes every time
+        p.end()
+        stitcher.add(frame)
+    result = stitcher.result()
+    bar_rows = sum(result.pixelColor(5, y).name() == "#405060" for y in range(result.height()))
+    assert bar_rows == 60  # the bar once, at the bottom
+    assert stitcher.outcome == "still"  # the page ended: not "the page changed"
+
+
+def test_a_page_bar_at_the_right_edge_is_not_a_scrollbar():
+    full = page(1800)
+    p = QPainter(full)
+    p.fillRect(WIDTH - 40, 0, 40, 1800, QColor("#ffffff"))  # blank on the right...
+    for y in range(200, 1800, 300):
+        p.fillRect(0, y, WIDTH, 12, QColor("#2255aa"))  # ...crossed by full-width rules
+    p.end()
+    result = run_stitch([view(full, top, 400) for top in list(range(0, 1401, 150)) + [1400]]).result()
+    assert result.width() == WIDTH
+
+
+def wide_page(height: int, width: int) -> QImage:
+    rng = random.Random(3)
+    image = QImage(width, height, QImage.Format_RGB32)
+    p = QPainter(image)
+    for y in range(height):
+        for x in range(0, width, 16):
+            p.fillRect(x, y, 16, 1, QColor(rng.randrange(256), rng.randrange(256), rng.randrange(256)))
+    p.end()
+    return image
+
+
+def scrolled(full: QImage, top: int, height: int, bar: int, rounded: bool = False) -> QImage:
+    frame = full.copy(QRect(0, top, full.width(), height))
+    p = QPainter(frame)
+    x = full.width() - bar
+    p.fillRect(x, 0, bar, height, QColor("#eeeeee"))
+    thumb = round((height - 60) * top / max(1, full.height() - height))
+    p.fillRect(x + 2, thumb + 3, bar - 4, 54, QColor("#888888"))
+    if rounded:  # anti-aliased ends: blended rows above and below
+        blends = ((thumb + 1, "#cccccc"), (thumb + 2, "#aaaaaa"), (thumb + 57, "#aaaaaa"), (thumb + 58, "#cccccc"))
+        for edge, shade in blends:
+            p.fillRect(x + 3, edge, bar - 6, 1, QColor(shade))
+    p.end()
+    return frame
+
+
+def test_a_rounded_thumb_is_still_a_scrollbar():
+    full = wide_page(1800, 300)
+    tops = list(range(0, 1401, 140)) + [1400]
+    result = run_stitch([scrolled(full, top, 400, 14, rounded=True) for top in tops]).result()
+    assert result.width() == 300 - 14
+
+
+def test_scrollbars_are_found_at_any_scaling():
+    full = wide_page(1800, 400)
+    frames = [scrolled(full, top, 400, 34) for top in list(range(0, 1401, 140)) + [1400]]
+    assert run_stitch(frames, Stitcher(scale=2.0)).result().width() == 400 - 34  # 17 px at 200%
+
+
+def test_a_blank_stretch_longer_than_the_view_is_followed_by_the_scrollbar():
+    full = wide_page(3000, 300)
+    p = QPainter(full)
+    p.fillRect(0, 900, 300 - 14, 900, QColor("#ffffff"))  # 900 px of nothing but page background
+    p.end()
+    stitcher = Stitcher()
+    for top in list(range(0, 2601, 130)) + [2600]:
+        stitcher.expected = 130
+        stitcher.add(scrolled(full, top, 400, 14))
+    result = stitcher.result()
+    assert result.height() == 3000
+    assert same(result, full.copy(QRect(0, 0, 300 - 14, 3000)))

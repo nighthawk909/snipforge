@@ -77,3 +77,49 @@ def test_real_wheel_turns_scroll_the_window_under_the_pointer(qapp):
     finally:
         scroll_input.place_pointer(saved)
         area.close()
+
+
+@pytest.mark.desktop
+@pytest.mark.skipif(sys.platform != "win32", reason="real Windows")
+def test_real_window_under_the_pointer_keys_and_scrolling_back_up(qapp):
+    area = QScrollArea()
+    area.setWidget(QLabel("\n".join(f"line {n}" for n in range(400))))
+    area.resize(300, 300)
+    area.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+    area.show()
+    area.raise_()
+    QApplication.processEvents()
+    time.sleep(0.3)
+    QApplication.processEvents()
+    saved = scroll_input.pointer_position()
+    try:
+        center = area.mapToGlobal(area.rect().center())
+        target = QPoint(round(center.x() * area.devicePixelRatioF()), round(center.y() * area.devicePixelRatioF()))
+        window = scroll_input.window_at(target)
+        assert window == int(area.winId()) and not scroll_input.is_desktop(window)
+        assert scroll_input.modifiers_down() is False
+        scroll_input.place_pointer(target)
+        area.verticalScrollBar().setValue(200)
+        QApplication.processEvents()
+        scroll_input.scroll_up(2)
+        deadline = time.time() + 3
+        while area.verticalScrollBar().value() == 200 and time.time() < deadline:
+            QApplication.processEvents()
+            time.sleep(0.02)
+        assert area.verticalScrollBar().value() < 200
+    finally:
+        scroll_input.place_pointer(saved)
+        area.close()
+
+
+@pytest.mark.desktop
+@pytest.mark.skipif(sys.platform != "win32", reason="real Windows")
+def test_the_taskbar_counts_as_desktop(qapp):
+    from PySide6.QtGui import QGuiApplication
+    screen = QGuiApplication.primaryScreen()
+    full, free = screen.geometry(), screen.availableGeometry()
+    if free.bottom() >= full.bottom():
+        pytest.skip("no taskbar at the bottom of the main screen")
+    dpr = screen.devicePixelRatio()
+    point = QPoint(round((full.left() + 5) * dpr), round((full.bottom() - 2) * dpr))
+    assert scroll_input.is_desktop(scroll_input.window_at(point))
