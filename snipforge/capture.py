@@ -74,6 +74,9 @@ class _ScreenOverlay(QWidget):
         self.setCursor(Qt.CrossCursor)
         self.setMouseTracking(True)
         self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setAccessibleName("Choose what to snip")
+        self.setAccessibleDescription(
+            "A to drag an area, W for a window, F for the full screen, Enter for the whole monitor, Esc to cancel")
 
     # ------------------------------------------------------------------ mode and toolbar
     @property
@@ -85,6 +88,10 @@ class _ScreenOverlay(QWidget):
         if mode not in MODES:
             raise ValueError(f"unknown capture mode {mode!r}")
         self._mode = mode
+        self._press = self._current = None  # a press or drag that began in the old mode is dropped
+        self._dragging = False
+        if self.toolbar is not None:
+            self.toolbar.show()
         self._hover = self._target_at(self._cursor) if self._cursor is not None else None
         if self.toolbar is not None:
             self.toolbar.set_mode(mode)
@@ -96,7 +103,7 @@ class _ScreenOverlay(QWidget):
             self.mode_changed.emit(mode)
 
     def hint(self) -> str:
-        return MODES[self._mode].hint
+        return f"{MODES[self._mode].hint}  •  A W F to switch"
 
     def _place_toolbar(self) -> None:
         if self.toolbar is None:
@@ -308,8 +315,8 @@ class CaptureSession:
     def __init__(self, on_done) -> None:
         self._on_done = on_done
         self._overlays: list[_ScreenOverlay] = []
-        self._mode = "area"
         self._finished = False
+        self.focus: _ScreenOverlay | None = None  # the overlay that has the keyboard
         self.source = None  # the window the snip came from (winrects.WindowInfo), when known
 
     def start(self) -> None:
@@ -329,30 +336,27 @@ class CaptureSession:
         except OSError:
             infos = []
         windows = [info.rect for info in infos]
-        self._mode = prefs.capture_mode()
-        # The toolbar and the keyboard go to the monitor the pointer is on (the main one if the
-        # pointer is somewhere Windows doesn't report, e.g. while a remote session reconnects).
+        mode = prefs.capture_mode()
+        # Every monitor gets the toolbar; the keyboard goes to the one the pointer is on (the main
+        # one if the pointer is somewhere Windows doesn't report, e.g. while a remote session reconnects).
         active = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-        focus = None
         for screen in QGuiApplication.screens():
-            overlay = _ScreenOverlay(screen, screen.grabWindow(0), windows, infos,
-                                     mode=self._mode, toolbar=screen is active)
+            overlay = _ScreenOverlay(screen, screen.grabWindow(0), windows, infos, mode=mode, toolbar=True)
             overlay.selected.connect(lambda image, o=overlay: self._finish(image, o.last_source))
             overlay.cancelled.connect(lambda: self._finish(None))
             overlay.mode_changed.connect(self._set_mode)
             self._overlays.append(overlay)
             if screen is active:
-                focus = overlay
+                self.focus = overlay
         for overlay in self._overlays:
             overlay.showFullScreen()
             overlay.raise_()
-        if focus is not None:
-            focus.activateWindow()
-            focus.setFocus()
+        if self.focus is not None:
+            self.focus.activateWindow()
+            self.focus.setFocus()
 
     def _set_mode(self, mode: str) -> None:
         """A mode picked on one monitor applies to all of them, and to the next snip."""
-        self._mode = mode
         for overlay in self._overlays:
             overlay.set_mode(mode)
         prefs.set_capture_mode(mode)

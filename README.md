@@ -23,8 +23,10 @@ for a team, a SharePoint or network-share mirror, or Software Center? See
 
 ## What it does
 
-**Snip.** Win+Shift+S or Print Screen freezes the screen. Hover to highlight a window and click to
-take it, drag for a region, or press Enter for the whole monitor. A magnifier shows exact pixels.
+**Snip.** Win+Shift+S or Print Screen freezes the screen, with a capture toolbar at the top:
+**Area** (drag an area, or hover a window and click to take it), **Window** or **Full screen**, or
+press Enter for the whole monitor. A magnifier shows exact pixels, and the next snip starts in the
+mode you used last.
 The snip is also copied to the clipboard, just like the built-in Snipping Tool. (Either shortcut can
 be handed back to Windows in Settings.)
 

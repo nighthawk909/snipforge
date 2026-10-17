@@ -193,6 +193,7 @@ QToolButton#Chip:checked {{ background: {a.soft}; color: {a.text}; border-color:
 QFrame#CaptureToolbar {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 12px; }}
 #CaptureToolbar QToolButton {{ border-radius: 8px; padding: 6px 10px; color: {p.text2}; }}
 #CaptureToolbar QToolButton:checked {{ background: {a.soft}; color: {a.text}; font-weight: 600; }}
+#CaptureToolbar QToolButton:focus {{ border: 1px solid {a.fill}; }}
 QFrame#CaptureToolbarSeparator {{ background: {p.border}; }}
 
 QWidget#SettingsNav {{ background: {p.bg}; border-right: 1px solid {p.border}; }}

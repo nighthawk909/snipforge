@@ -1,9 +1,11 @@
 """The capture toolbar and its modes: Area (drag an area or click a window), Window and Full screen."""
+from pathlib import Path
+
 import pytest
-from PySide6.QtCore import QEvent, QPointF, QRect, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QKeyEvent, QMouseEvent, QPixmap
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QKeyEvent, QMouseEvent, QPainter, QPixmap
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFrame
 
 from snipforge import prefs
 from snipforge.settings import app_settings
@@ -173,45 +175,138 @@ def test_toolbar_sits_at_the_top_and_steps_aside_while_dragging(qapp):
     o.close()
 
 
-def test_snips_come_from_the_frozen_screen_not_the_toolbar(qapp):
-    o = make_overlay(toolbar=True)
+def shown(mode="area"):
+    """An overlay with its toolbar, shown, so clicks go through the real window like a mouse's."""
+    o = make_overlay(mode, toolbar=True)
     o.show()
     QApplication.processEvents()
-    top = o.toolbar.geometry()
-    drag(o, (top.left() - 20, 0), (top.right() + 20, top.bottom() + 20))
+    return o
+
+
+def window_click(o, pos: QPoint, button=Qt.LeftButton):
+    QTest.mouseClick(o.windowHandle(), button, Qt.NoModifier, pos)
+    QApplication.processEvents()
+
+
+@pytest.mark.parametrize("mode", ["area", "window", "screen"])
+def test_clicks_on_the_toolbar_never_snip_what_is_behind_it(qapp, mode):
+    o = shown(mode)
+    bar = o.toolbar.geometry()
+    for pos in (QPoint(bar.left() + 2, bar.center().y()),  # its padding
+                QPoint(bar.right() - 1, bar.top() + 1),  # its border
+                o.toolbar.findChild(QFrame, "CaptureToolbarSeparator").geometry().center() + bar.topLeft()):
+        window_click(o, pos)
+    assert o.got == []
+    o.close()
+
+
+def test_right_click_on_the_toolbar_cancels_like_anywhere_else(qapp):
+    o = shown()
+    button = o.toolbar.buttons["window"]
+    window_click(o, button.geometry().center() + o.toolbar.pos(), Qt.RightButton)
+    assert o.got == ["cancel"] and o.mode == "area"
+    o.close()
+
+
+def test_switching_modes_mid_drag_drops_the_drag(qapp):
+    o = shown("area")
+    mouse(o, QEvent.MouseButtonPress, (10, 300))
+    mouse(o, QEvent.MouseMove, (200, 400), Qt.NoButton)
+    key(o, Qt.Key_W, "w")
+    assert o.toolbar.isVisible()
+    mouse(o, QEvent.MouseButtonRelease, (200, 400), buttons=Qt.NoButton)
+    assert o.got == [] and o.mode == "window"
+    o.close()
+
+
+def test_enter_presses_a_focused_toolbar_button_instead_of_snipping(qapp):
+    o = shown()
+    for button in (o.toolbar.buttons["window"], o.toolbar.cancel_button):
+        QApplication.sendEvent(button, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    assert o.mode == "window" and o.got == ["cancel"]  # never a whole-monitor snip
+    o.close()
+
+
+def test_clicking_a_toolbar_button_leaves_the_keyboard_with_the_overlay(qapp):
+    o = shown()
+    o.activateWindow()
+    o.setFocus()
+    QApplication.processEvents()
+    button = o.toolbar.buttons["screen"]
+    window_click(o, button.geometry().center() + o.toolbar.pos())
+    assert o.mode == "screen" and not button.hasFocus()
+    o.close()
+
+
+def test_mode_letters_ignore_ctrl_and_alt_but_allow_shift(qapp):
+    o = make_overlay("area")
+    for mods in (Qt.ControlModifier, Qt.AltModifier, Qt.ControlModifier | Qt.ShiftModifier):
+        QApplication.sendEvent(o, QKeyEvent(QEvent.KeyPress, Qt.Key_W, mods, "w"))
+    assert o.mode == "area"
+    QApplication.sendEvent(o, QKeyEvent(QEvent.KeyPress, Qt.Key_W, Qt.ShiftModifier, "W"))
+    assert o.mode == "window"
+
+
+def test_pointer_on_the_toolbar_hides_the_magnifier_and_highlight(qapp):
+    o = shown()
+    mouse(o, QEvent.MouseMove, (200, 150), Qt.NoButton, Qt.NoButton)
+    assert o._cursor is not None and o._hover is not None
+    QApplication.sendEvent(o.toolbar, QEvent(QEvent.Enter))
+    assert o._cursor is None and o._hover is None
+    o.close()
+
+
+def test_toolbar_buttons_show_keyboard_focus_and_hints_mention_the_letters(qapp):
+    from snipforge.theme import styles
+    assert "#CaptureToolbar QToolButton:focus" in Path(styles.__file__).read_text(encoding="utf-8")
+    assert "A W F" in make_overlay().hint()
+
+
+def test_snips_come_from_the_frozen_screen_not_the_toolbar(qapp):
+    from snipforge.capture import _ScreenOverlay
+    screen = QGuiApplication.primaryScreen()
+    pix = QPixmap(screen.geometry().size())
+    pix.fill(QColor("#e8eaee"))
+    painter = QPainter(pix)
+    painter.fillRect(0, 0, pix.width(), 80, QColor("#ff0000"))  # the frozen screen is red behind the toolbar
+    painter.end()
+    o = _ScreenOverlay(screen, pix, [WINDOW], toolbar=True)
+    o.resize(screen.geometry().size())
+    o.got = []
+    o.selected.connect(o.got.append)
+    o.show()
+    QApplication.processEvents()
+    bar = o.toolbar.geometry()
+    drag(o, (bar.left() - 20, 0), (bar.right() + 20, bar.bottom() + 4))
     image = o.got[0]
-    assert {image.pixelColor(x, y).name() for x in range(0, image.width(), 7)
-            for y in range(0, image.height(), 7)} == {"#e8eaee"}
+    assert {image.pixelColor(x, y).name() for x in range(0, image.width(), 5)
+            for y in range(0, image.height(), 5)} == {"#ff0000"}
     o.close()
 
 
 # --- the capture session --------------------------------------------------------------------------
 
-def test_session_puts_one_toolbar_on_the_active_monitor_and_shares_the_mode(qapp):
+def test_every_monitor_gets_the_toolbar_and_they_stay_in_step(qapp):
     from snipforge.capture import CaptureSession
     prefs.set_capture_mode("window")
     session = CaptureSession(lambda image: None)
     session.start()
     try:
-        with_bar = [o for o in session._overlays if o.toolbar is not None]
-        assert len(with_bar) == 1
+        assert session._overlays and all(o.toolbar is not None for o in session._overlays)
         assert all(o.mode == "window" for o in session._overlays)  # starts in the remembered mode
-        QTest.mouseClick(with_bar[0].toolbar.buttons["screen"], Qt.LeftButton)
-        assert all(o.mode == "screen" for o in session._overlays)
+        QTest.mouseClick(session._overlays[0].toolbar.buttons["screen"], Qt.LeftButton)
+        assert all(o.mode == "screen" and o.toolbar.buttons["screen"].isChecked() for o in session._overlays)
         assert prefs.capture_mode() == "screen"  # and the next snip starts there
     finally:
         session._finish(None)
 
 
-def test_session_still_takes_the_keyboard_when_the_pointer_is_off_every_screen(qapp, monkeypatch):
+def test_main_monitor_takes_the_keyboard_when_the_pointer_is_off_every_screen(qapp, monkeypatch):
     from snipforge.capture import CaptureSession
     monkeypatch.setattr(QGuiApplication, "screenAt", staticmethod(lambda _pos: None))
     session = CaptureSession(lambda image: None)
     session.start()
     try:
-        primary = QGuiApplication.primaryScreen()
-        active = [o for o in session._overlays if o.toolbar is not None]
-        assert len(active) == 1 and active[0].screen() is primary
+        assert session.focus is not None and session.focus.screen() is QGuiApplication.primaryScreen()
     finally:
         session._finish(None)
-
