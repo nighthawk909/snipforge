@@ -76,7 +76,9 @@ def _delete_leftover_windows():
         if window.isVisible():
             window.close()  # once: the test may have closed it already
         window.deleteLater()
-    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        # Only these windows: other objects waiting to be deleted (a worker thread still finishing,
+        # say) must go when their own code is done with them, or Qt aborts.
+        QApplication.sendPostedEvents(window, QEvent.DeferredDelete)
 
 
 @pytest.fixture
