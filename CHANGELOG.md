@@ -3,6 +3,23 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.10.0](https://github.com/nighthawk909/snipforge/compare/v0.9.0...v0.10.0) (2026-10-17)
+
+
+### Features
+
+* **capture:** Fixed size mode: a frame of an exact size that follows the pointer ([#40](https://github.com/nighthawk909/snipforge/issues/40)) ([6a333f7](https://github.com/nighthawk909/snipforge/commit/6a333f79f39431f0617fdf082e295dea769ce7af))
+
+
+### Bug fixes
+
+* **install:** SHA256SUMS.txt can be checked with sha256sum on Mac and Linux ([#38](https://github.com/nighthawk909/snipforge/issues/38)) ([21bdab7](https://github.com/nighthawk909/snipforge/commit/21bdab7ad0677d8ccbf5faec678ec9b233df4081))
+
+
+### Documentation
+
+* **readme:** screenshots of the capture toolbar and Settings &gt; Capture ([#37](https://github.com/nighthawk909/snipforge/issues/37)) ([e6f747c](https://github.com/nighthawk909/snipforge/commit/e6f747c3faf3abbdf01a5966d844617fb4adb133))
+
 ## [0.9.0](https://github.com/nighthawk909/snipforge/compare/v0.8.0...v0.9.0) (2026-10-17)
 
 
