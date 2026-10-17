@@ -1,16 +1,19 @@
 name: Release
 
 # On every push to main, release-please keeps an open "release PR" that bumps the version and
-# updates CHANGELOG.md from conventional commits. Merging that PR creates the tag and GitHub
-# release; this workflow then builds, self-tests and attaches the installer.
-# Run it by hand ("Run workflow", with a tag) to rebuild and re-attach assets for an existing release.
+# updates CHANGELOG.md from conventional commits. Merging that PR creates the tag and a *draft*
+# GitHub release; this workflow then builds, self-tests and attaches the installer, and only then
+# publishes the release, so the "latest" download links never point at a release without its files.
+# If the build fails the release stays a draft (only maintainers see it) and the previous release
+# stays "Latest". Run it by hand ("Run workflow", with a tag) to rebuild and re-attach assets for an
+# existing release; a draft is published once its files are attached.
 on:
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag to build and attach assets to (e.g. v0.4.0)"
+        description: "Existing release tag, published or draft, to build and attach assets to (e.g. v0.4.0)"
         type: string
         required: true
 
@@ -43,29 +46,42 @@ jobs:
       # CI runs as a normal PR check, which the "Protect main" ruleset requires before merging.
       - name: Approve CI on the release PR
         if: ${{ steps.release.outputs.prs_created == 'true' }}
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           # Raw JSON, parsed below: step env is evaluated even when the step is skipped, and
           # `pr` is empty on most runs, so fromJSON() here would fail the workflow.
           PR_JSON: ${{ steps.release.outputs.pr }}
         run: |
-          BRANCH=$(printf '%s' "$PR_JSON" | jq -r '.headBranchName // empty' 2>/dev/null || true)
-          if [ -z "$BRANCH" ]; then
+          NUMBER=$(printf '%s' "$PR_JSON" | jq -r '.number // empty' 2>/dev/null || true)
+          if [ -z "$NUMBER" ]; then
             echo "No release PR on this run."
             exit 0
           fi
+          # release-please reuses one branch for every release PR, so only runs for the PR's current
+          # commit are its own; runs left waiting by earlier release PRs stay as they are.
+          SHA=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          approved=0
           for attempt in $(seq 1 12); do
-            ids=$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$BRANCH" --event pull_request \
+            ids=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --event pull_request \
                     --status action_required --json databaseId --jq '.[].databaseId')
-            if [ -n "$ids" ]; then
-              for id in $ids; do
-                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve" && echo "approved run $id"
-              done
+            # The PR's workflows can start a few seconds apart: stop once a check finds no more.
+            if [ -z "$ids" ] && [ "$approved" -gt 0 ]; then
               exit 0
             fi
+            for id in $ids; do
+              if gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"; then
+                echo "approved run $id"
+                approved=$((approved + 1))
+              else
+                echo "::warning::Couldn't approve run $id; approve it from the Actions tab."
+              fi
+            done
             sleep 10
           done
-          echo "::warning::No release-PR runs were waiting for approval; approve them from the Actions tab if CI is missing."
+          if [ "$approved" -eq 0 ]; then
+            echo "::warning::No runs for the release PR's commit $SHA were waiting for approval; approve them from the Actions tab if CI is missing."
+          fi
 
   build:
     needs: release-please
@@ -118,3 +134,34 @@ jobs:
           gh release upload "$TAG" dist/SnipForge-*-setup.exe dist/SnipForge-setup.exe \
             dist/SnipForge-*-portable.zip dist/SHA256SUMS.txt dist/sbom.cdx.json \
             --clobber --repo "$GITHUB_REPOSITORY"
+      # release-please creates the release as a draft (release-please-config.json), so people, the
+      # download links and the in-app updater only see it now that every file is attached.
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          if [ "$draft" != "true" ]; then
+            echo "$TAG is already published; leaving it as it is."
+            exit 0
+          fi
+          # Lookups fail closed: only "404 Not Found" (no stable release yet) counts as "none". If
+          # this stops, the release stays a draft; publish it by hand from the Releases page.
+          err=$(mktemp)
+          if latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$err"); then
+            if [[ ! "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::The latest release has an unexpected tag '$latest'"
+              exit 1
+            fi
+            newest=$(printf '%s\n%s\n' "${latest#v}" "${TAG#v}" | sort -V | tail -n1)
+          elif grep -q "HTTP 404" "$err"; then
+            newest=${TAG#v}
+          else
+            echo "::error::Couldn't read the latest release: $(cat "$err")"
+            exit 1
+          fi
+          # A draft of an older version (rebuilt by hand after a newer release) mustn't take "Latest" back.
+          if [ "$newest" = "${TAG#v}" ]; then make_latest=true; else make_latest=false; fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$make_latest"
+          echo "Published $TAG (latest: $make_latest)."

@@ -1,177 +1,223 @@
-"""In-app updates: check daily, ask, then download, verify and install in place.
+"""The tray's side of updates: balloons and dialogs on top of UpdateController.
 
-Per-user installs update themselves: the installer runs silently, keeps your settings and
-startup choice, and starts SnipForge again. All-users (IT-managed) installs and source
-checkouts just open the download page instead.
+Per-user installs update themselves: the installer runs silently, keeps your settings and startup
+choice, and starts SnipForge again. All-users (IT-managed) installs and source checkouts just open
+the download page instead. The Settings window drives the same controller (`UpdateFlow.controller`).
 """
 from __future__ import annotations
 
-import datetime as dt
 import logging
-import subprocess
-import tempfile
-from pathlib import Path
+from dataclasses import replace
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog, QSystemTrayIcon
+from PySide6.QtWidgets import QMessageBox, QProgressDialog, QSystemTrayIcon
 
-from . import __version__, updates
-from .settings import app_settings
+from . import update_policy, updates
+from .update_controller import UpdateController, UpdateState, check_is_due  # noqa: F401  (check_is_due: older API)
+from .update_policy import MANAGED_MESSAGE
+from .update_prefs import load_prefs, save_prefs
+from .updates import Release
 
 log = logging.getLogger(__name__)
 
-FIRST_CHECK_DELAY_MS = 60_000           # don't compete with startup
-CHECK_EVERY_MS = 6 * 60 * 60 * 1000     # look every 6 hours; actually checks at most daily
-MIN_HOURS_BETWEEN_CHECKS = 20
-AUTO_KEY, LAST_CHECK_KEY, SKIP_KEY = "auto_update", "last_update_check", "skip_version"
-DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "SnipForge" / "updates"
-INSTALLER_ARGS = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/SP-"]
-
 
 def automatic_enabled() -> bool:
-    return app_settings().value(AUTO_KEY, True, bool) and not updates.disabled_by_policy()
+    """Whether SnipForge checks for updates on its own (the tray's "Update automatically")."""
+    policy = update_policy.read_policy()
+    return not policy.disabled and policy.apply(load_prefs()).mode != "manual"
 
 
 def set_automatic(enabled: bool) -> None:
-    app_settings().setValue(AUTO_KEY, enabled)
-
-
-def check_is_due(now: dt.datetime, last_check_iso: str | None) -> bool:
-    if not last_check_iso:
-        return True
-    try:
-        last = dt.datetime.fromisoformat(last_check_iso)
-    except ValueError:
-        return True
-    return now - last >= dt.timedelta(hours=MIN_HOURS_BETWEEN_CHECKS)
+    prefs = load_prefs()
+    if not enabled:
+        save_prefs(replace(prefs, mode="manual"))
+    elif prefs.mode == "manual":
+        save_prefs(replace(prefs, mode="ask"))
 
 
 class UpdateFlow(QObject):
-    def __init__(self, tray: QSystemTrayIcon, parent=None) -> None:
+    def __init__(self, tray: QSystemTrayIcon, parent=None, controller: UpdateController | None = None) -> None:
         super().__init__(parent)
         self._tray = tray
-        self._manual = False
-        self._busy = False
-        self._checker = updates.UpdateChecker(self)
-        self._checker.finished.connect(self._checked)
-        self._downloader: updates.UpdateDownloader | None = None
+        self.controller = controller or UpdateController(self)
+        self._manual = False        # the user clicked Check for updates
+        self._installing = False    # the user chose Update now: show progress and any error
+        self._previous = self.controller.state.kind
         self._progress: QProgressDialog | None = None
-        self._timer = QTimer(self, interval=CHECK_EVERY_MS)
-        self._timer.timeout.connect(self._automatic_check)
+        self._whats_new: Release | None = None
+        self._dialog_open = False
+        self.controller.state_changed.connect(self._on_state)
+        tray.messageClicked.connect(self._show_whats_new)
 
-    # ------------------------------------------------------------------ scheduling
+    # ------------------------------------------------------------------ tray actions
     def start(self) -> None:
-        if updates.disabled_by_policy():
-            return
-        QTimer.singleShot(FIRST_CHECK_DELAY_MS, self._automatic_check)
-        self._timer.start()
-
-    def _automatic_check(self) -> None:
-        if self._busy or not automatic_enabled():
-            return
-        if check_is_due(dt.datetime.now(), app_settings().value(LAST_CHECK_KEY, None)):
-            self._check(manual=False)
+        self.controller.start()
+        release = self.controller.just_updated
+        if release is not None:
+            self._whats_new = release
+            self._tray.showMessage("SnipForge", f"SnipForge was updated to {release.version}. "
+                                   "Click here to see what's new.", QSystemTrayIcon.Information, 8000)
 
     def check_now(self) -> None:
-        if updates.disabled_by_policy():
-            QMessageBox.information(None, "SnipForge", "Updates are managed by your organization.")
+        if self.controller.policy.disabled:
+            self._notice(QMessageBox.Information, MANAGED_MESSAGE)
             return
-        if self._busy:
+        if self.controller.busy:
             return
+        self._manual = True
         self._tray.showMessage("SnipForge", "Checking for updates…", QSystemTrayIcon.Information, 2000)
-        self._check(manual=True)
+        self.controller.check_now()
 
-    def _check(self, manual: bool) -> None:
-        self._manual = manual
-        self._busy = True
-        self._checker.check()
+    # ------------------------------------------------------------------ reacting to the controller
+    def _on_state(self, state: UpdateState) -> None:
+        previous, self._previous = self._previous, state.kind
+        if state.kind != "downloading":
+            self._close_progress()
+        handler = getattr(self, f"_on_{state.kind}", None)
+        if handler is not None:
+            handler(state, previous)
 
-    # ------------------------------------------------------------------ results
-    def _checked(self, status: str, payload) -> None:
-        self._busy = False
-        if status == "error":
-            log.info("Update check failed: %s", payload)
-            if self._manual:
-                QMessageBox.information(None, "SnipForge", f"Couldn't check for updates: {payload}\n\n"
-                                        f"You can check manually at {updates.RELEASES_PAGE}")
-            return
-        app_settings().setValue(LAST_CHECK_KEY, dt.datetime.now().isoformat(timespec="seconds"))
-        release: updates.Release = payload
-        if status == "current":
-            if self._manual:
-                QMessageBox.information(None, "SnipForge", f"You're on the latest version ({__version__}).")
-            return
-        if not self._manual and app_settings().value(SKIP_KEY, "") == release.version:
-            return  # you chose to skip this one; a newer release will ask again
-        self.offer(release)
+    def _on_idle(self, state: UpdateState, previous: str) -> None:
+        if self._manual and state.message:
+            self._manual = False
+            self._later(lambda: self._notice(QMessageBox.Information, state.message))
 
-    def offer(self, release: updates.Release) -> None:
-        mode = updates.install_mode()
-        can_install = mode == "per-user" and release.installer_url is not None
-        box = QMessageBox(QMessageBox.Information, "SnipForge update",
-                          f"SnipForge {release.version} is available (you have {__version__}).")
-        box.setTextFormat(Qt.PlainText)  # release text from the network is never rendered as HTML
-        if can_install:
-            box.setInformativeText("Update now? SnipForge will close for a moment and reopen by itself.")
-        elif mode == "all-users":
-            box.setInformativeText("This PC's SnipForge is managed for all users. Ask your IT team to update it, "
-                                   "or open the download page.")
+    _on_current = _on_idle
+
+    def _on_error(self, state: UpdateState, previous: str) -> None:
+        log.info("Update problem: %s", state.message)
+        if not (self._manual or self._installing):
+            return  # automatic checks fail quietly and try again later
+        self._manual = self._installing = False
+        if self.controller.policy.source == "feed":
+            hint = "If this keeps happening, ask your IT team."
         else:
-            box.setInformativeText("Open the download page?")
+            hint = f"You can also download SnipForge from {updates.RELEASES_PAGE}"
+        self._later(lambda: self._notice(QMessageBox.Warning, f"{state.message}\n\n{hint}"))
+
+    def _on_available(self, state: UpdateState, previous: str) -> None:
+        if self._installing:  # the download was canceled
+            self._installing = False
+            return
+        if self._manual or (previous == "checking" and not self.controller.is_skipped(state.release)):
+            self._manual = False
+            self._later(lambda: self.offer(state.release), state)
+
+    def _on_downloading(self, state: UpdateState, previous: str) -> None:
+        if not self._installing:
+            return
+        if self._progress is None:
+            self._progress = QProgressDialog(f"Downloading SnipForge {state.release.version}…", "Cancel", 0, 100)
+            self._progress.setWindowTitle("SnipForge update")
+            self._progress.setMinimumDuration(0)
+            self._progress.canceled.connect(self.controller.cancel)
+            self._progress.show()
+        self._progress.setValue(state.progress)
+
+    def _on_ready(self, state: UpdateState, previous: str) -> None:
+        if self._installing:
+            return  # install_version() installs it straight away
+        if not (self._manual or previous in ("checking", "downloading")):
+            return  # restored at startup: wait for the next check before asking again
+        manual, self._manual = self._manual, False
+        if self.controller.prefs.mode == "auto" and not manual:
+            self._tray.showMessage("SnipForge", f"SnipForge {state.release.version} will be installed the next "
+                                   "time SnipForge starts.", QSystemTrayIcon.Information, 4000)
+            return
+        self._later(lambda: self.ask_to_install(state.release), state)
+
+    def _on_installing(self, state: UpdateState, previous: str) -> None:
+        self._installing = False
+        self._tray.showMessage("SnipForge", "Updating… SnipForge will reopen in a moment.",
+                               QSystemTrayIcon.Information, 4000)
+
+    # ------------------------------------------------------------------ dialogs
+    def _later(self, show, state: UpdateState | None = None) -> None:
+        """Open a dialog once the controller's signal has reached every listener (the Settings window
+        too), one at a time, and only if the controller is still where it was."""
+        def run() -> None:
+            now = self.controller.state
+            if self._dialog_open:
+                return
+            if state is not None and (now.kind != state.kind or now.release != state.release):
+                return
+            self._dialog_open = True
+            try:
+                show()
+            finally:
+                self._dialog_open = False
+
+        QTimer.singleShot(0, self, run)
+
+    @staticmethod
+    def _notice(icon, text: str) -> None:
+        box = QMessageBox(icon, "SnipForge", text)
+        box.setTextFormat(Qt.PlainText)  # messages can carry text from a server
+        box.addButton(QMessageBox.Ok)
+        box.exec()
+
+    def _box(self, text: str, informative: str, release: Release) -> QMessageBox:
+        box = QMessageBox(QMessageBox.Information, "SnipForge update", text)
+        box.setTextFormat(Qt.PlainText)  # release text from the network is never rendered as HTML
+        box.setInformativeText(informative)
         if release.notes:
             box.setDetailedText(release.notes)
-        primary = box.addButton("Update now" if can_install else "Open download page", QMessageBox.AcceptRole)
+        return box
+
+    def offer(self, release: Release) -> None:
+        blocker = self.controller.install_blocker(release)
+        if blocker:
+            informative = blocker + (" Open the download page?" if release.page else "")
+        else:
+            informative = "Update now? SnipForge will close for a moment and reopen by itself."
+        have = self.controller.current_version
+        box = self._box(f"SnipForge {release.version} is available (you have {have}).", informative, release)
+        primary = None
+        if not blocker:
+            primary = box.addButton("Update now", QMessageBox.AcceptRole)
+        elif release.page:
+            primary = box.addButton("Open download page", QMessageBox.AcceptRole)
         skip = box.addButton("Skip this version", QMessageBox.RejectRole)
-        box.addButton("Later", QMessageBox.RejectRole)
-        box.setDefaultButton(primary)
+        later = box.addButton("Later" if primary else "OK", QMessageBox.RejectRole)
+        box.setDefaultButton(primary or later)
         box.exec()
         clicked = box.clickedButton()
         if clicked is skip:
-            app_settings().setValue(SKIP_KEY, release.version)
-        elif clicked is primary:
-            if can_install:
-                self.download(release)
-            else:
+            self.controller.skip(release.version)
+        elif primary is not None and clicked is primary:
+            if blocker:
                 QDesktopServices.openUrl(QUrl(release.page))
+            else:
+                self._installing = True
+                self.controller.install_version(release.version)
 
-    # ------------------------------------------------------------------ download and install
-    def download(self, release: updates.Release) -> None:
-        self._busy = True
-        self._downloader = updates.UpdateDownloader(DOWNLOAD_DIR, self)
-        self._progress = QProgressDialog(f"Downloading SnipForge {release.version}…", "Cancel", 0, 100)
-        self._progress.setWindowTitle("SnipForge update")
-        self._progress.setMinimumDuration(0)
-        self._progress.canceled.connect(self._downloader.cancel)
-        self._downloader.progress.connect(self._on_progress)
-        self._downloader.finished.connect(self._downloaded)
-        self._progress.show()
-        self._downloader.start(release)
+    def ask_to_install(self, release: Release) -> None:
+        have = self.controller.current_version
+        box = self._box(f"SnipForge {release.version} is ready to install (you have {have}).",
+                        "SnipForge will close for a moment and reopen by itself.", release)
+        install = box.addButton("Install now", QMessageBox.AcceptRole)
+        skip = box.addButton("Skip this version", QMessageBox.RejectRole)
+        box.addButton("Later", QMessageBox.RejectRole)
+        box.setDefaultButton(install)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is install:
+            self.controller.install_ready()
+        elif clicked is skip:
+            self.controller.skip(release.version)
 
-    def _on_progress(self, received: int, total: int) -> None:
-        if self._progress is not None and total > 0:
-            self._progress.setValue(int(received * 100 / total))
+    def _show_whats_new(self) -> None:
+        release, self._whats_new = self._whats_new, None
+        if release is None:
+            return
+        box = self._box(f"What's new in SnipForge {release.version}", release.notes or "Bug fixes and improvements.",
+                        replace(release, notes=""))
+        box.addButton("OK", QMessageBox.AcceptRole)
+        box.exec()
 
-    def _downloaded(self, path, error: str) -> None:
-        self._busy = False
+    def _close_progress(self) -> None:
         if self._progress is not None:
+            self._progress.canceled.disconnect()
             self._progress.close()
             self._progress = None
-        if path is None:
-            if "canceled" not in error.lower():
-                QMessageBox.warning(None, "SnipForge", f"The update wasn't installed. {error}\n\n"
-                                    f"You can download it from {updates.RELEASES_PAGE}")
-            return
-        self.install(path)
-
-    def install(self, installer: Path) -> None:
-        """Run the verified installer silently and quit; the installer starts SnipForge again."""
-        try:
-            subprocess.Popen([str(installer), *INSTALLER_ARGS], close_fds=True,
-                             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
-        except OSError as exc:
-            QMessageBox.warning(None, "SnipForge", f"Couldn't start the update: {exc}")
-            return
-        self._tray.showMessage("SnipForge", "Updating… SnipForge will reopen in a moment.",
-                               QSystemTrayIcon.Information, 4000)
-        QTimer.singleShot(500, QApplication.quit)

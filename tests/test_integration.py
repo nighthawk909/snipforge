@@ -241,6 +241,8 @@ def test_second_launch_hands_command_to_running_instance(qapp, monkeypatch):
     import sys
     import time
 
+    from PySide6.QtNetwork import QLocalSocket
+
     from snipforge import single_instance
     name = "SnipForge-pytest-instance"  # never the real app's server
     monkeypatch.setattr(single_instance, "SERVER_NAME", name)
@@ -257,6 +259,14 @@ def test_second_launch_hands_command_to_running_instance(qapp, monkeypatch):
     launcher.wait(timeout=10)
     server.close()
     assert received == ["snip"]
+    # Let the client's disconnect reach the server before it goes away; a pipe torn down with I/O
+    # still pending crashes whichever later test next runs the event loop.
+    deadline = time.time() + 2
+    while server._server.findChildren(QLocalSocket) and time.time() < deadline:
+        QApplication.processEvents()
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        time.sleep(0.01)
+    server._server.close()
 
 
 # --- packaged self-test (in-process) -------------------------------------------------

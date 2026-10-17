@@ -156,3 +156,33 @@ def test_app_names_come_from_real_processes():
     assert winrects._app_name("C:/Program Files/Microsoft Office/root/Office16/EXCEL.EXE") == "Excel"
     for info in winrects.window_infos():
         assert info.rect is not None and isinstance(info.app, str)
+
+
+def test_update_policy_is_read_from_the_real_registry():
+    """Policy values of each registry type come through winreg as IT would set them (on a test key)."""
+    import os
+
+    from snipforge import update_platform, update_policy
+
+    parent, key_path = r"Software\SnipForgeDesktopTest", r"Software\SnipForgeDesktopTest\Policies"
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+        winreg.SetValueEx(key, "UpdateFeed", 0, winreg.REG_EXPAND_SZ, r"%TEMP%\SnipForgeFeed")
+        winreg.SetValueEx(key, "UpdateMode", 0, winreg.REG_SZ, "Auto")
+        winreg.SetValueEx(key, "AllowRollback", 0, winreg.REG_DWORD, 0)
+        winreg.SetValueEx(key, "DisableUpdateCheck", 0, winreg.REG_DWORD, 0)
+    try:
+        hklm, hkcu = update_platform.read_policy_hives(key_path)
+        assert hklm == {} and hkcu["AllowRollback"] == 0
+        policy = update_policy.parse_policy([hklm, hkcu])
+        assert policy.source == "feed" and policy.feed == os.path.expandvars(r"%TEMP%\SnipForgeFeed")
+        assert policy.mode == "auto" and not policy.allow_rollback and not policy.disabled
+    finally:
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key_path)
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, parent)
+
+
+def test_update_engine_can_tell_windows_is_not_signing_out():
+    """The real GetSystemMetrics(SM_SHUTTINGDOWN) call works, so an install on quit isn't blocked by mistake."""
+    from snipforge import update_platform
+
+    assert update_platform.session_ending() is False
