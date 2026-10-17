@@ -103,7 +103,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
-      id-token: write  # code signing (build.yml)
+      id-token: write  # code signing: build.yml signs only commits that are on main
     with:
       ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
       sign: true

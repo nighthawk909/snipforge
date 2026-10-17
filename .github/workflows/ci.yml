@@ -46,5 +46,3 @@ jobs:
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
-      # build.yml asks for it; PR builds don't sign, and Azure doesn't accept their tokens anyway.
-      id-token: write

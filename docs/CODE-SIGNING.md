@@ -8,15 +8,16 @@ a download history. What it changes:
 - Trust is earned by the **publisher**, not by each file. Unsigned, every new release starts from
   zero and warns again. Signed, reputation builds up over the first few weeks and hundreds of
   installs, and later releases inherit it.
-- Smart App Control (on some Windows 11 PCs) blocks unsigned apps it doesn't already know, with
-  no "Run anyway"; a valid signature lets them run.
+- Smart App Control (on some Windows 11 PCs) blocks unsigned apps it doesn't recognize, with no
+  "Run anyway". Signing is what lets an app pass it (not yet tried with SnipForge, whose bundled
+  libraries stay as their makers ship them).
 
 SnipForge signs with [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/)
 (formerly Trusted Signing). It's what Microsoft recommends for apps outside the Store, costs
 **$9.99 a month** (Basic: 5,000 signatures; each release uses about 3), and needs no hardware
-token. Release and preview builds sign `SnipForge.exe`, the installer and its uninstaller as soon as
-the five repository variables below are set. Until then they build unsigned, with a warning in the
-build log.
+token. Releases, and previews of commits already on `main`, sign `SnipForge.exe`, the installer and
+its uninstaller as soon as the five repository variables below are set. Until then they build
+unsigned, with a warning in the build log.
 
 Microsoft's own guidance on what to expect:
 [SmartScreen reputation for Windows app developers](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation).
@@ -76,8 +77,10 @@ Then in that app: **Certificates & secrets** > **Federated credentials** > **Add
 - **Entity type**: Branch, **Branch**: `main`
 - **Name**: `snipforge-main`
 
-This tells Azure to trust only workflow runs from `main`: releases, previews and manual builds.
-Pull requests can't sign. Don't create a client secret; nothing needs one.
+This tells Azure to trust only workflow runs started from `main`. SnipForge adds its own rule on
+top: it signs only commits that are already on `main`, and checks that before checking out any
+code. Pull requests, and previews of branches that aren't merged yet, build in jobs that can't
+sign at all. Don't create a client secret; nothing needs one.
 
 ### 7. Let that app sign
 
@@ -104,19 +107,33 @@ Or with the GitHub CLI: `gh variable set ARTIFACT_SIGNING_ENDPOINT --body https:
 
 ### 9. Try it without releasing anything
 
-GitHub > **Actions** > **Build** > **Run workflow** > branch `main` > tick **Sign it** > **Run**.
-The **Check signatures** step lists each file and who signed it, and the run summary shows
-"Signed by: CN=...". The signed installer is in the run's `snipforge-windows` artifact. Right-click
-it > **Properties** > **Digital Signatures** shows the same.
+GitHub > **Actions** > **Signing test** > **Run workflow** (branch `main`) > **Run workflow**. It
+builds `main`, signs it and checks the signatures, and publishes nothing. The build's **Check
+signatures** step lists each file and who signed it, and the run summary shows "Signed by: CN=...".
+The signed installer is in the run's `snipforge-windows` artifact: right-click it > **Properties** >
+**Digital Signatures** shows the same. The run fails if the build wasn't signed.
 
-From then on every release and preview is signed. If signing fails, the build fails: a release
-never quietly goes out unsigned once signing is set up.
+From then on every release is signed, and if signing fails the build fails rather than shipping
+unsigned.
+
+### 10. Make signing required
+
+Once the signing test passes, add an empty file `packaging/SIGNING_REQUIRED` to the repository
+(through a pull request, like any change). From then on a release build fails if the variables are
+ever removed, instead of going out unsigned with a warning.
 
 ## How it works
 
-- [`build.yml`](../.github/workflows/build.yml) checks the five variables (none: unsigned with a
-  warning; some: fails and names the missing ones), signs in to Azure with GitHub's OpenID Connect
-  token through `azure/login`, and builds with `scripts/build.py --sign`.
+- Only the jobs that sign can ask GitHub for the token Azure accepts (`id-token: write`):
+  [`release.yml`](../.github/workflows/release.yml),
+  [`sign-test.yml`](../.github/workflows/sign-test.yml) and
+  [`preview.yml`](../.github/workflows/preview.yml)'s build of a commit on `main`. CI and previews
+  of other branches use the same [`build.yml`](../.github/workflows/build.yml) without it.
+- In a signing job, `build.yml` first checks, before checking anything out, that the run is from
+  `main` and the commit is on `main`, then checks out exactly that commit. It checks the five
+  variables (none: unsigned with a warning, or an error once `packaging/SIGNING_REQUIRED` exists;
+  some: fails and names the missing ones), signs in to Azure through `azure/login`, fetches the
+  signing token, builds with `scripts/build.py --sign`, and signs out of Azure.
 - [`scripts/codesign.py`](../scripts/codesign.py) downloads Microsoft's signtool and the Artifact
   Signing client from nuget.org, pinned to exact versions and SHA-256 checksums, and writes the
   `metadata.json` naming the account and profile.
@@ -125,6 +142,11 @@ never quietly goes out unsigned once signing is set up.
   command, then everything is verified (`signtool verify /pa`) before the checksums are written.
   Every signature is timestamped (Artifact Signing certificates last three days; the timestamp keeps
   signatures valid after that).
+- The build's own dependencies (pinned in `requirements*.txt`) run in the signing job too, as in
+  any build that signs its output; that's one more reason they only change through reviewed PRs.
+- Rebuilding a release made before signing existed (Release > Run workflow with an old tag) fails
+  once signing is set up, because that tag doesn't have the signing scripts. Make a new release
+  instead.
 
 ### Signing on your own PC
 
@@ -136,9 +158,9 @@ az login
 python scripts/codesign.py setup --dest $env:LOCALAPPDATA\SnipForgeSigning --endpoint https://eus.codesigning.azure.net --account snipforge --profile snipforge-public
 ```
 
-Set the three variables it prints (`SIGNTOOL`, `ARTIFACT_SIGNING_DLIB`,
-`ARTIFACT_SIGNING_METADATA`), then `python scripts/build.py --installer --sign`. The signing client
-needs the [.NET 8 runtime](https://dotnet.microsoft.com/download/dotnet/8.0).
+Paste the three `$env:...` lines it prints into the same PowerShell window, then run
+`python scripts/build.py --installer --sign`. The signing client needs the
+[.NET 8 runtime](https://dotnet.microsoft.com/download/dotnet/8.0) or newer.
 
 ## Inside a company
 

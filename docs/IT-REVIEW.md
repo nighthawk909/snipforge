@@ -132,8 +132,9 @@ Copy each `sha256` from the release's `SHA256SUMS.txt`. Entries that don't follo
   containing only the runtime dependencies in `requirements.txt`.
 - **Dependencies** are pinned (`requirements.txt`) and updated through Dependabot pull requests that
   must pass CI. GitHub Actions are pinned to full commit SHAs. Workflows run with read-only
-  permissions except the release-publishing job. The build job can also request an OpenID Connect
-  token, which only release and preview builds use, to sign in to Azure for code signing.
+  permissions except the release-publishing job, and the jobs that code-sign a commit already on
+  `main` (releases and previews of it), which can request an OpenID Connect token to sign in to
+  Azure. CI and builds of unmerged branches can't.
 - **Build provenance** and **code scanning (CodeQL)** turn on automatically once the repository is
   public. With them, release files can be verified with
   `gh attestation verify SnipForge-<version>-setup.exe --repo nighthawk909/snipforge`.

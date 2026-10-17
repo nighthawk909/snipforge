@@ -9,13 +9,14 @@ profile from a metadata.json. build.py finds all three through environment varia
     ARTIFACT_SIGNING_METADATA  metadata.json
 
 `setup` downloads pinned, checksum-checked copies of signtool and the dlib, writes metadata.json
-and prints those variables (or adds them to $GITHUB_ENV in CI):
+and prints those variables as PowerShell lines to paste (in CI, --github-env also adds them to
+$GITHUB_ENV for the later steps):
 
-    python scripts/codesign.py setup --dest %LOCALAPPDATA%\\SnipForgeSigning \\
+    python scripts/codesign.py setup --dest $env:LOCALAPPDATA\\SnipForgeSigning `
         --endpoint https://eus.codesigning.azure.net --account <account> --profile <profile>
 
 The Azure side (account, identity validation, certificate profile, GitHub login) is in
-docs/CODE-SIGNING.md. The dlib needs the .NET 8 runtime.
+docs/CODE-SIGNING.md. The dlib needs the .NET 8 runtime or newer.
 """
 from __future__ import annotations
 
@@ -166,14 +167,21 @@ def main(argv: list[str] | None = None) -> None:
     cmd.add_argument("--endpoint", required=True, help="the signing account's endpoint, e.g. https://eus.codesigning.azure.net")
     cmd.add_argument("--account", required=True, help="Artifact Signing account name")
     cmd.add_argument("--profile", required=True, help="certificate profile name")
-    cmd.add_argument("--github-env", action="store_true", help="add the variables to $GITHUB_ENV (CI)")
+    cmd.add_argument("--github-env", action="store_true", help="also add the variables to $GITHUB_ENV (CI)")
     args = parser.parse_args(argv)
+    github_env = os.environ.get("GITHUB_ENV") if args.github_env else None
+    if args.github_env and not github_env:
+        sys.exit("--github-env only works in GitHub Actions ($GITHUB_ENV isn't set)")
     variables = setup(args.dest, args.endpoint, args.account, args.profile)
-    lines = [f"{name}={value}" for name, value in variables.items()]
-    if args.github_env:
-        with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-            env_file.write("\n".join(lines) + "\n")
-    print("\n".join(lines))
+    if github_env:
+        with open(github_env, "a", encoding="utf-8") as env_file:
+            env_file.write("".join(f"{name}={value}\n" for name, value in variables.items()))
+    print(powershell_lines(variables))
+
+
+def powershell_lines(variables: Mapping[str, str]) -> str:
+    """`$env:NAME = 'value'` lines to paste into PowerShell before `build.py --sign`."""
+    return "\n".join(f"$env:{name} = '{value.replace(chr(39), chr(39) * 2)}'" for name, value in variables.items())
 
 
 if __name__ == "__main__":

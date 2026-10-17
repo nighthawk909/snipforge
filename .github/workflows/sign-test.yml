@@ -1,0 +1,36 @@
+name: Signing test
+
+# Run by hand (Actions > Signing test > Run workflow, from main) after setting up code signing
+# (docs/CODE-SIGNING.md). It builds main, signs it and checks the signatures, and publishes nothing:
+# the signed files are in the run's snipforge-windows artifact.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      id-token: write  # code signing (build.yml)
+    with:
+      sign: true
+
+  check:
+    name: Signed
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The build was signed
+        env:
+          SIGNED: ${{ needs.build.outputs.signed }}
+        run: |
+          if [ "$SIGNED" != "true" ]; then
+            echo "::error::The build wasn't signed: set the code signing repository variables first (docs/CODE-SIGNING.md)."
+            exit 1
+          fi
+          echo "Signed. The signatures are listed in the build job's \"Check signatures\" step."

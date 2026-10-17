@@ -4,9 +4,12 @@ name: Build
 # permanent download link) and the portable zip, proves the packaged app works (--self-test), and
 # writes checksums and an SBOM, uploaded as the "snipforge-windows" artifact.
 # Read-only: publishing is a separate job in release.yml (stable) and preview.yml (prereleases).
-# Those two pass `sign: true`: once the repository variables in docs/CODE-SIGNING.md are set,
-# SnipForge.exe, the installer and its uninstaller are signed with Azure Artifact Signing. Azure
-# accepts only tokens for workflows running from main, so PR builds can't sign.
+#
+# Code signing (docs/CODE-SIGNING.md): callers that pass `sign: true` also grant `id-token: write`,
+# which lets this job sign in to Azure. Only release.yml, sign-test.yml and preview.yml's build of a
+# commit that's already on main do; CI and previews of other branches never get the token. A signed
+# build checks, before checking anything out, that the run is from main and the commit is on main,
+# so no unreviewed code runs where it could sign. Permissions come from the caller (none set here).
 on:
   workflow_call:
     inputs:
@@ -21,10 +24,14 @@ on:
         required: false
         default: ""
       sign:
-        description: "Sign with Azure Artifact Signing when the repository has it set up (docs/CODE-SIGNING.md)"
+        description: "Sign with Azure Artifact Signing when the repository has it set up (the caller must grant id-token: write)"
         type: boolean
         required: false
         default: false
+    outputs:
+      signed:
+        description: "'true' when the build was code-signed"
+        value: ${{ jobs.build.outputs.signed }}
   workflow_dispatch:
     inputs:
       version:
@@ -32,27 +39,42 @@ on:
         type: string
         required: false
         default: ""
-      sign:
-        description: "Sign it (run from main, once code signing is set up), to check signing without a release"
-        type: boolean
-        required: false
-        default: false
-
-permissions:
-  contents: read
 
 jobs:
   build:
     name: Build and self-test
     runs-on: windows-latest
     timeout-minutes: 40
-    permissions:
-      contents: read
-      id-token: write  # Azure login for code signing; only builds with `sign: true` use it
+    outputs:
+      signed: ${{ steps.signing.outputs.enabled }}
     steps:
+      # Runs before any of the code being built: a signed build must come from main's reviewed code.
+      - name: Check the commit is on main
+        id: source
+        if: ${{ inputs.sign }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ENTERPRISE_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref || github.ref }}
+        run: |
+          export GH_HOST="${GITHUB_SERVER_URL#https://}"
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Signed builds run only from main; this run is from $GITHUB_REF."
+            exit 1
+          fi
+          ref="${REF#refs/heads/}"
+          ref="${ref#refs/tags/}"
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$ref" --jq .sha)
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...main" --jq .status)
+          case "$status" in
+            ahead|identical) echo "sha=$sha" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::$REF ($sha) isn't on main ($status), so it can't be signed. Merge it first, or build it unsigned."
+               exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ steps.source.outputs.sha || inputs.ref || github.ref }}  # exactly the commit checked above
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -66,7 +88,8 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
-      # Builds stay unsigned (with a warning) until every variable is set; half a setup fails the build.
+      # Unsigned (with a warning) while none of the variables are set, unless packaging/SIGNING_REQUIRED
+      # says signing is required; half a setup always fails the build.
       - name: Code signing setup
         id: signing
         if: ${{ inputs.sign }}
@@ -84,6 +107,10 @@ jobs:
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ "${#missing[@]}" -eq "${#required[@]}" ]; then
+            if [ -f packaging/SIGNING_REQUIRED ]; then
+              echo "::error::Releases must be signed (packaging/SIGNING_REQUIRED), but the code signing repository variables are missing (docs/CODE-SIGNING.md)."
+              exit 1
+            fi
             echo "::warning::This build isn't code-signed: code signing isn't set up for this repository yet (docs/CODE-SIGNING.md)."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -104,6 +131,11 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
+      # Fetch the signing token now: it fails fast if Azure isn't set up right, and the cached token
+      # outlasts the build, unlike the short-lived GitHub token the sign-in used.
+      - name: Get the signing token
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        run: az account get-access-token --resource https://codesigning.azure.net --output none
       - name: Build
         env:
           SET_VERSION: ${{ inputs.version }}
@@ -112,6 +144,9 @@ jobs:
           $preview = if ($env:SET_VERSION) { @('--set-version', $env:SET_VERSION) } else { @() }
           $sign = if ($env:SIGN -eq 'true') { @('--sign') } else { @() }
           python scripts/build.py --installer @preview @sign
+      - name: Sign out of Azure
+        if: ${{ always() && steps.signing.outputs.enabled == 'true' }}
+        run: az account clear
       - name: Self-test the packaged app
         shell: pwsh
         timeout-minutes: 5

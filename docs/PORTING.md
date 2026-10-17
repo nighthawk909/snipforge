@@ -90,7 +90,9 @@ your server. A `chore:` commit doesn't trigger a release. Keeping the public rep
 - **Code signing** is optional and off until you set its repository variables
   ([CODE-SIGNING.md](CODE-SIGNING.md)), for your company's Azure tenant and certificate. Leave them
   unset to build unsigned, for example when IT signs or deploys the installer itself. Software Center
-  installs don't show the SmartScreen prompt either way.
+  installs don't show the SmartScreen prompt either way. Either way the build workflow names
+  `azure/login`, and GitHub fetches every action a job names when it starts, so it must be allowed
+  (on GHE Server, through GitHub Connect or a synced copy) even if you never sign.
 
 ## 4. Push, and give release-please its starting point
 
