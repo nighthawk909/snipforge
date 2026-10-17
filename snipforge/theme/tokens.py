@@ -21,6 +21,16 @@ def _channels(hex_color: str) -> tuple[int, int, int]:
     return int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
 
 
+def to_qcolor(value: str):
+    """'#RRGGBB' or the 'rgba(r, g, b, a)' strings this module makes -> QColor (for painted widgets)."""
+    from PySide6.QtGui import QColor
+
+    if value.startswith("rgba("):
+        r, g, b, a = (int(part) for part in value[5:-1].split(","))
+        return QColor(r, g, b, a)
+    return QColor(value)
+
+
 def rgba(hex_color: str, alpha: float) -> str:
     """'#RRGGBB' and a 0..1 alpha -> 'rgba(r, g, b, a)' with the 0..255 alpha Qt stylesheets expect."""
     r, g, b = _channels(hex_color)

@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import QSettings
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from snipforge.settings import app_settings
 
@@ -45,3 +45,14 @@ def gradient_image(qapp):
         for y in range(100):
             img.setPixelColor(x, y, QColor(x * 2, y * 2, 0))
     return img
+
+
+@pytest.fixture
+def no_dialogs(monkeypatch):
+    """Record message boxes instead of blocking on them."""
+    shown = []
+    for name in ("information", "warning", "about"):
+        monkeypatch.setattr(QMessageBox, name, lambda *a, n=name, **k: shown.append((n, a)))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: shown.append(("question", a)) or QMessageBox.No)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(("question", self.text())) or QMessageBox.No)
+    return shown

@@ -14,6 +14,7 @@ from .capture import CaptureSession
 from .editor.window import EditorWindow
 from .home import HomeWindow
 from .hotkey import HotkeyListener
+from .indexer import TextIndexer
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
 from .single_instance import InstanceServer, send_to_running
@@ -48,6 +49,7 @@ class SnipForgeApp:
     def __init__(self, app: QApplication, library: Library | None = None) -> None:
         self._app = app
         self.library = library or Library()
+        self.indexer = TextIndexer(self.library)  # reads the words in snips so Library search finds them
         self._session: CaptureSession | None = None
         self._windows: list = []  # editors and pins kept alive until closed
         self._home: HomeWindow | None = None
@@ -63,6 +65,7 @@ class SnipForgeApp:
         self._rehook.start()
         self._build_tray()
         app.aboutToQuit.connect(self._hotkey.stop)
+        app.aboutToQuit.connect(self.indexer.close)
 
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
@@ -128,8 +131,9 @@ class SnipForgeApp:
     # ------------------------------------------------------------------ windows
     def show_home(self) -> None:
         if self._home is None:
-            self._home = HomeWindow(self.library, self.capture, self.open_entry)
-        self._home.refresh()
+            self._home = HomeWindow(self.library, self.capture, self.open_entry, indexer=self.indexer)
+        if self._home.isVisible():
+            self._home.refresh()  # already open: pick up anything new (opening it refreshes by itself)
         self._home.showNormal()
         self._bring_to_front(self._home)
 
@@ -140,18 +144,21 @@ class SnipForgeApp:
         QTimer.singleShot(CAPTURE_DELAY_MS, self._session.start)
 
     def _on_captured(self, image: QImage | None) -> None:
+        source = self._session.source if self._session is not None else None
         self._session = None
         if image is None:
             return
         QGuiApplication.clipboard().setImage(image)  # like Win+Shift+S: the raw snip is on the clipboard too
         try:
-            entry = self.library.create(image)
+            entry = self.library.create(image, source=source)
         except OSError as exc:
             log.warning("Couldn't add snip to library: %s", exc)
             entry = None
+        if entry is not None:
+            self.indexer.index(entry)
         self._open_editor(image, entry, None)
-        if self._home is not None and self._home.isVisible():
-            self._home.refresh()
+        if self._home is not None and self._home.isVisible() and entry is not None:
+            self._home.update_entry(entry.id)
 
     def open_entry(self, entry_id: str) -> None:
         for window in self._windows:
@@ -203,8 +210,12 @@ class SnipForgeApp:
     def _forget(self, window) -> None:
         if window in self._windows:
             self._windows.remove(window)
+        entry = getattr(window, "_entry", None)
+        if entry is None:
+            return  # a pin: nothing in the library changed
+        self.indexer.index(entry, again=True)  # its saved markup cleared the old words: read it again
         if self._home is not None and self._home.isVisible():
-            self._home.refresh()
+            self._home.update_entry(entry.id)
 
     @staticmethod
     def _bring_to_front(window) -> None:

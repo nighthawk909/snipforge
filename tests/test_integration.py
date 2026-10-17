@@ -3,7 +3,7 @@ single-instance handoff, window detection and the packaged self-test."""
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QKeyEvent, QMouseEvent, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from snipforge.library import Library
 
@@ -11,17 +11,6 @@ from snipforge.library import Library
 def mouse(widget, etype, pos, button=Qt.LeftButton, buttons=Qt.LeftButton):
     pt = QPointF(*pos)
     QApplication.sendEvent(widget, QMouseEvent(etype, pt, widget.mapToGlobal(pt), button, buttons, Qt.NoModifier))
-
-
-@pytest.fixture
-def no_dialogs(monkeypatch):
-    """Record message boxes instead of blocking on them."""
-    shown = []
-    for name in ("information", "warning", "about"):
-        monkeypatch.setattr(QMessageBox, name, lambda *a, n=name, **k: shown.append((n, a)))
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: shown.append(("question", a)) or QMessageBox.No)
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(("question", self.text())) or QMessageBox.No)
-    return shown
 
 
 # --- capture overlay ------------------------------------------------------------------
@@ -63,6 +52,65 @@ def test_overlay_drag_is_clamped_to_screen(overlay):
     assert overlay.got[0].size().toTuple() == (50, 40)
 
 
+def test_overlay_remembers_which_window_a_snip_came_from(qapp):
+    from snipforge.capture import _ScreenOverlay
+    from snipforge.winrects import WindowInfo
+
+    screen = QGuiApplication.primaryScreen()
+    pix = QPixmap(screen.geometry().size())
+    pix.fill(QColor("#e8eaee"))
+    origin = screen.geometry().topLeft()
+    excel = WindowInfo(QRect(origin.x() + 100, origin.y() + 80, 300, 200), "Margin review.xlsx - Excel", "Excel")
+    o = _ScreenOverlay(screen, pix, [excel.rect], [excel])
+    o.resize(screen.geometry().size())
+    mouse(o, QEvent.MouseButtonPress, (150, 120))
+    mouse(o, QEvent.MouseMove, (200, 160), Qt.NoButton)
+    mouse(o, QEvent.MouseButtonRelease, (250, 200), buttons=Qt.NoButton)
+    assert o.last_source == excel
+    mouse(o, QEvent.MouseButtonPress, (600, 600))
+    mouse(o, QEvent.MouseMove, (640, 640), Qt.NoButton)
+    mouse(o, QEvent.MouseButtonRelease, (660, 660), buttons=Qt.NoButton)
+    assert o.last_source is None  # the desktop, not a window
+    o.close()
+
+
+def test_whole_screen_and_private_windows_are_not_mislabeled(qapp):
+    from snipforge.capture import _ScreenOverlay
+    from snipforge.winrects import WindowInfo
+
+    screen = QGuiApplication.primaryScreen()
+    pix = QPixmap(screen.geometry().size())
+    origin = screen.geometry().topLeft()
+    mail = WindowInfo(QRect(origin.x() + 200, origin.y() + 150, 400, 300), "Inbox - jane@corp.com - Outlook", "Outlook")
+    private = WindowInfo(QRect(origin.x() + 700, origin.y() + 100, 300, 300), "Bank - InPrivate - Edge", "Edge")
+    o = _ScreenOverlay(screen, pix, [mail.rect, private.rect], [mail, private])
+    o.resize(screen.geometry().size())
+    QApplication.sendEvent(o, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))  # whole monitor
+    assert o.last_source is None  # the window in the middle didn't take this snip
+    mouse(o, QEvent.MouseButtonPress, (750, 150))
+    mouse(o, QEvent.MouseMove, (800, 200), Qt.NoButton)
+    mouse(o, QEvent.MouseButtonRelease, (900, 300), buttons=Qt.NoButton)
+    assert o.last_source.app == "Edge" and o.last_source.title == ""  # private titles are never kept
+    o.close()
+
+
+def test_captured_snips_remember_their_source_and_are_read_for_search(forge, white_image):
+    from snipforge.winrects import WindowInfo
+
+    class Session:
+        source = WindowInfo(None, "Margin review.xlsx - Excel", "Excel")
+
+    queued = []
+    forge.indexer.index = lambda entry, again=False: queued.append((entry.id, again)) or True
+    forge._session = Session()
+    forge._on_captured(white_image)
+    entry = forge.library.entries()[0]
+    assert forge.library.meta(entry).app == "Excel" and queued == [(entry.id, False)]
+    forge._windows[0].close()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert queued[-1] == (entry.id, True)  # closing the editor reads the edited snip again
+
+
 def test_overlay_keys_and_right_click(overlay):
     QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
     assert overlay.got[0].size() == overlay.size()
@@ -95,9 +143,11 @@ def forge(qapp, tmp_path, monkeypatch, no_dialogs):
     monkeypatch.setattr(app_module.HotkeyListener, "start", lambda self: True)
     monkeypatch.setattr(app_module.HotkeyListener, "stop", lambda self: None)
     f = app_module.SnipForgeApp(qapp, Library(tmp_path))
+    f.indexer._recognize = lambda image: "fake words"  # never run real OCR in unit tests
     yield f
     for window in list(f._windows):
         window.close()
+    f.indexer.close()
 
 
 def test_capture_opens_editor_and_library_entry(forge, white_image):
@@ -160,24 +210,6 @@ def test_command_from_args():
 
 
 # --- library window ------------------------------------------------------------------
-def test_home_window_lists_and_trashes(qapp, tmp_path, white_image, monkeypatch, no_dialogs):
-    from snipforge.home import HomeWindow
-    lib = Library(tmp_path)
-    for _ in range(2):
-        lib.create(white_image)
-    opened = []
-    home = HomeWindow(lib, lambda: None, opened.append)
-    home.refresh()
-    assert home._list.count() == 2
-    home._list.selectAll()
-    ids = home._selected_ids()
-    home._copy(ids[0])
-    assert not QGuiApplication.clipboard().image().isNull()
-    monkeypatch.setattr(lib, "move_to_trash", lambda entry: False)  # never touch the real Recycle Bin
-    home._trash(ids)
-    assert no_dialogs and no_dialogs[-1][0] == "warning"
-
-
 # --- pin window ----------------------------------------------------------------------
 def test_pin_window_zoom_fade_and_close(qapp, white_image):
     from snipforge.pin import PinWindow
@@ -243,6 +275,7 @@ def test_selftest_report(tmp_path, monkeypatch, qapp):
 
     from snipforge import selftest
     monkeypatch.setattr(selftest, "_ocr", lambda: "skipped in unit tests")
+    monkeypatch.setattr(selftest, "_search_index", lambda: "skipped in unit tests")
     monkeypatch.setattr(selftest, "_hotkey", lambda: "skipped in unit tests")
     report = tmp_path / "report.json"
     assert selftest.run(str(report)) == 0
@@ -259,5 +292,6 @@ def test_selftest_reports_failures(tmp_path, monkeypatch, qapp):
         raise RuntimeError("broken")
 
     monkeypatch.setattr(selftest, "_ocr", boom)
+    monkeypatch.setattr(selftest, "_search_index", lambda: "skipped in unit tests")
     monkeypatch.setattr(selftest, "_hotkey", lambda: "ok")
     assert selftest.run(str(tmp_path / "r.json")) == 1

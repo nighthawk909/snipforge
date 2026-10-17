@@ -69,10 +69,14 @@ async def _recognize_async(png: bytes):
     return await engine.recognize_async(bitmap)
 
 
+OCR_MAX_SIDE = 9000  # under OcrEngine.MaxImageDimension (10000)
+
+
 def _upscale_small(image: QImage) -> tuple[QImage, float]:
     """Windows OCR misses small UI text; upscaling small snips helps a lot."""
     short = min(image.width(), image.height())
-    scale = 2.0 if short < 600 else 1.0
+    # Windows OCR refuses images over 10000 px on a side, so long, thin snips aren't doubled.
+    scale = 2.0 if short < 600 and max(image.width(), image.height()) * 2 <= OCR_MAX_SIDE else 1.0
     if scale == 1.0:
         return image, 1.0
     return image.scaled(int(image.width() * scale), int(image.height() * scale)), scale

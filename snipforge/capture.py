@@ -7,6 +7,7 @@ region, Enter takes the whole monitor. A magnifier shows exact pixels.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
@@ -16,6 +17,13 @@ from . import theme
 
 DIM = QColor(0, 0, 0, 120)
 DRAG_THRESHOLD = 4
+SOURCE_OVERLAP = 0.9  # share of a snip that must lie inside one window to credit that window
+PRIVATE_MARKERS = ("inprivate", "incognito", "private browsing")
+
+
+def _private(title: str) -> bool:
+    lowered = title.lower()
+    return any(marker in lowered for marker in PRIVATE_MARKERS)
 MAG_SAMPLE = 15  # physical pixels sampled around the cursor
 MAG_SIZE = 120
 
@@ -30,13 +38,18 @@ class _ScreenOverlay(QWidget):
     selected = Signal(QImage)
     cancelled = Signal()
 
-    def __init__(self, screen, pixmap: QPixmap, window_rects: list[QRect]) -> None:
+    def __init__(self, screen, pixmap: QPixmap, window_rects: list[QRect], sources: list | None = None) -> None:
+        """`sources` (optional) describes each of `window_rects`: a winrects.WindowInfo, same order."""
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self._pixmap = pixmap
         self._image = pixmap.toImage()
         self._dpr = pixmap.devicePixelRatio() or 1.0
         self.setGeometry(screen.geometry())
-        self._windows = self._to_local(screen.geometry().topLeft(), window_rects)
+        origin = screen.geometry().topLeft()
+        self._windows = self._to_local(origin, window_rects)
+        self._sources = [(local, info) for r, info in zip(window_rects, sources or [], strict=False)
+                         if (local := self._map(origin, r)) is not None]
+        self.last_source = None  # the window the latest selection came from, if any
         self._press: QPoint | None = None
         self._current: QPoint | None = None
         self._dragging = False
@@ -46,16 +59,32 @@ class _ScreenOverlay(QWidget):
         self.setMouseTracking(True)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
-    def _to_local(self, origin: QPoint, rects: list[QRect]) -> list[QRect]:
-        local = []
+    def _map(self, origin: QPoint, r: QRect) -> QRect | None:
+        """A window frame in physical screen pixels -> this overlay's coordinates (None if off-screen)."""
         bounds = QRect(0, 0, self.width(), self.height())
-        for r in rects:
-            mapped = QRect(round((r.x() - origin.x()) / self._dpr), round((r.y() - origin.y()) / self._dpr),
-                           round(r.width() / self._dpr), round(r.height() / self._dpr)).intersected(bounds)
-            if not mapped.isEmpty():
-                local.append(mapped)
-        local.append(bounds)  # hovering the desktop offers the whole monitor
+        mapped = QRect(round((r.x() - origin.x()) / self._dpr), round((r.y() - origin.y()) / self._dpr),
+                       round(r.width() / self._dpr), round(r.height() / self._dpr)).intersected(bounds)
+        return None if mapped.isEmpty() else mapped
+
+    def _to_local(self, origin: QPoint, rects: list[QRect]) -> list[QRect]:
+        local = [m for r in rects if (m := self._map(origin, r)) is not None]
+        local.append(QRect(0, 0, self.width(), self.height()))  # hovering the desktop offers the whole monitor
         return local
+
+    def _source_for(self, sel: QRect):
+        """The window a snip came from: the topmost window that holds nearly all of the selection
+        (so a whole-monitor snip isn't credited to whatever sits in the middle). Private browsing
+        windows keep their app name but never their title."""
+        area = sel.width() * sel.height()
+        if area <= 0:
+            return None
+        for local, info in self._sources:
+            overlap = local.intersected(sel)
+            if overlap.width() * overlap.height() >= SOURCE_OVERLAP * area:
+                return info if not _private(info.title) else replace(info, title="")
+            if local.contains(sel.center()):
+                return None  # the window on top doesn't hold the snip: don't guess
+        return None
 
     # ------------------------------------------------------------------ geometry
     def _selection(self) -> QRect | None:
@@ -198,6 +227,7 @@ class _ScreenOverlay(QWidget):
     def _emit(self, sel: QRect) -> None:
         image = self._image.copy(self._to_physical(sel))
         image.setDevicePixelRatio(1.0)
+        self.last_source = self._source_for(sel)
         self.selected.emit(image)
 
 
@@ -208,6 +238,7 @@ class CaptureSession:
         self._on_done = on_done
         self._overlays: list[_ScreenOverlay] = []
         self._finished = False
+        self.source = None  # the window the snip came from (winrects.WindowInfo), when known
 
     def start(self) -> None:
         try:
@@ -221,13 +252,14 @@ class CaptureSession:
 
     def _show_overlays(self) -> None:
         try:
-            from .winrects import visible_windows
-            windows = visible_windows()
+            from .winrects import window_infos
+            infos = window_infos()
         except OSError:
-            windows = []
+            infos = []
+        windows = [info.rect for info in infos]
         for screen in QGuiApplication.screens():
-            overlay = _ScreenOverlay(screen, screen.grabWindow(0), windows)
-            overlay.selected.connect(self._finish)
+            overlay = _ScreenOverlay(screen, screen.grabWindow(0), windows, infos)
+            overlay.selected.connect(lambda image, o=overlay: self._finish(image, o.last_source))
             overlay.cancelled.connect(lambda: self._finish(None))
             self._overlays.append(overlay)
         active = QGuiApplication.screenAt(QCursor.pos())
@@ -238,10 +270,11 @@ class CaptureSession:
                 overlay.activateWindow()
                 overlay.setFocus()
 
-    def _finish(self, image: QImage | None) -> None:
+    def _finish(self, image: QImage | None, source=None) -> None:
         if self._finished:
             return
         self._finished = True
+        self.source = source if image is not None else None
         for overlay in self._overlays:
             overlay.close()
         self._overlays.clear()
