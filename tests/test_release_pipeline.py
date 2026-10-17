@@ -18,6 +18,7 @@ RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
 APPROVE_STEP = "Approve CI on the release PR"
 PUBLISH_STEP = "Publish the release"
 HEAD_SHA = "abc123"
+LAGGING_SHA = "old999"  # the PR's head right after release-please pushes, before GitHub catches up
 STALE_RUN = "900"  # left on the reused release-please branch by an earlier release PR
 
 # A stand-in for the GitHub CLI. Calls are logged to fd 3 so `$(gh ... 2>&1)` doesn't capture them.
@@ -44,7 +45,10 @@ gh() {
         fail) echo "gh: Server Error (HTTP 500)" >&2; return 1 ;;
         *) echo "notice: something on stderr" >&2; echo "$FAKE_LATEST" ;;
       esac ;;
-    "pr view") echo "$FAKE_HEAD_SHA" ;;
+    "pr view") echo "$FAKE_LAGGING_SHA" ;;
+    "api repos/$GITHUB_REPOSITORY/git/ref/heads/"*)
+      if [ "$FAKE_REF" = fail ]; then echo "gh: Not Found (HTTP 404)" >&2; return 1; fi
+      echo "$FAKE_HEAD_SHA" ;;
     "run list")
       case " $* " in
         *" --commit $FAKE_HEAD_SHA "*)
@@ -101,7 +105,7 @@ def run_step(name, **fake_env):
         (pytest.fail if os.environ.get("CI") else pytest.skip)("needs Git Bash (or bash) to run the workflow step")
     env = {**os.environ, "GITHUB_REPOSITORY": "owner/snipforge", "GH_TOKEN": "fake",
            "FAKE_PYTHON": sys.executable, "FAKE_JQ": FAKE_JQ,
-           "FAKE_HEAD_SHA": HEAD_SHA, "FAKE_STALE_RUN": STALE_RUN, **fake_env}
+           "FAKE_HEAD_SHA": HEAD_SHA, "FAKE_LAGGING_SHA": LAGGING_SHA, "FAKE_STALE_RUN": STALE_RUN, **fake_env}
     script = FAKE_GH + step_script(name)
     # GitHub's flags for `shell: bash`. Bytes, so Windows doesn't turn the newlines into CRLF.
     proc = subprocess.run([bash, "--noprofile", "--norc", "-eo", "pipefail", "-s"], input=script.encode(),
@@ -115,8 +119,8 @@ def run_publish(tag, is_draft, latest):
     return run_step(PUBLISH_STEP, TAG=tag, FAKE_IS_DRAFT=is_draft, FAKE_LATEST=latest)
 
 
-def run_approve(pr_json, runs):
-    return run_step(APPROVE_STEP, PR_JSON=pr_json, FAKE_RUNS=runs)
+def run_approve(pr_json, runs, **fake_env):
+    return run_step(APPROVE_STEP, PR_JSON=pr_json, FAKE_RUNS=runs, **fake_env)
 
 
 def edits(calls):
@@ -160,7 +164,30 @@ def test_approves_the_release_prs_current_runs_only():
     code, calls, out = run_approve(RELEASE_PR, "/11 12/13/")
     assert code == 0, out
     assert approved(calls) == ["11", "12", "13"]
-    assert "pr view 10 --repo owner/snipforge --json headRefOid --jq .headRefOid" in calls
+
+
+def test_reads_the_new_commit_from_the_branch_not_the_lagging_pr():
+    # Seconds after release-please updates an existing release PR, GitHub can still report the PR's
+    # previous commit; the branch itself has the new one. 0.8.0's CI sat unapproved because of this.
+    code, calls, out = run_approve(RELEASE_PR, "/11/")
+    assert code == 0, out
+    assert "api repos/owner/snipforge/git/ref/heads/release-please--branches--main--components--snipforge" \
+           " --jq .object.sha" in calls
+    assert not [c for c in calls if c.startswith("pr view")]
+    assert STALE_RUN not in approved(calls)
+
+
+def test_unreadable_branch_warns_instead_of_failing_the_release_run():
+    code, calls, out = run_approve(RELEASE_PR, "/11/", FAKE_REF="fail")
+    assert code == 0, out
+    assert approved(calls) == []
+    assert "::warning::" in out and "Actions tab" in out
+
+
+def test_release_pr_without_a_branch_name_warns():
+    code, calls, out = run_approve(json.dumps({"number": 10}), "/11/")
+    assert code == 0, out
+    assert approved(calls) == [] and "::warning::" in out
 
 
 def test_no_release_pr_on_this_run_does_nothing():
