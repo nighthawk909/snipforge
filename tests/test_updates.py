@@ -14,6 +14,7 @@ from PySide6.QtCore import QCoreApplication, QUrl
 from PySide6.QtNetwork import QNetworkReply
 
 from snipforge import (
+    project,
     update_flow,
     update_platform,
     update_policy,
@@ -26,20 +27,24 @@ from snipforge.settings import app_settings
 from snipforge.update_policy import PolicyInfo, feed_location, parse_policy
 from snipforge.update_prefs import UpdatePrefs, load_prefs, save_prefs
 
-API = "https://api.github.com/repos/nighthawk909/snipforge/releases?per_page=20"
+API = f"{project.API_URL}/repos/{project.REPO}/releases?per_page=20"
+# A repository on a GitHub Enterprise Server, for the tests that move SnipForge off github.com.
+GHE = {"repo": "fixture-org/snipforge", "server_url": "https://ghe.example.test"}
+GHE_RELEASES = "https://ghe.example.test/fixture-org/snipforge/releases"
+GHE_API = "https://ghe.example.test/api/v3/repos/fixture-org/snipforge/releases?per_page=20"
 UPDATE_KEYS = ("auto_update", "update_mode", "update_channel", "update_pinned_version", "skip_version",
                "last_update_check", "update_ready", "update_installed")
 
 
 def dl(version, name):
-    return f"https://github.com/nighthawk909/snipforge/releases/download/v{version}/{name}"
+    return f"{project.RELEASES_URL}/download/v{version}/{name}"
 
 
 def release_json(version="9.0.0", **overrides):
     setup = f"SnipForge-{version}-setup.exe"
     data = {
         "tag_name": f"v{version}",
-        "html_url": f"https://github.com/nighthawk909/snipforge/releases/tag/v{version}",
+        "html_url": f"{project.RELEASES_URL}/tag/v{version}",
         "body": "### Features\n* better crop",
         "prerelease": False,
         "draft": False,
@@ -149,7 +154,8 @@ def test_parse_release_picks_matching_installer_and_sums():
 def test_parse_release_rejects_untrusted_urls_and_links():
     data = release_json(html_url="https://evil.example/page")
     data["assets"][0]["browser_download_url"] = "https://evil.example/SnipForge-9.0.0-setup.exe"
-    data["assets"][1]["browser_download_url"] = "https://github.com/someone-else/repo/releases/download/v9/SHA256SUMS.txt"
+    other_repo = f"{project.SERVER_URL}/someone-else/repo"
+    data["assets"][1]["browser_download_url"] = f"{other_repo}/releases/download/v9/SHA256SUMS.txt"
     release = updates.parse_release(data)
     assert release.page == updates.RELEASES_PAGE and release.installer_url is None and release.sums_url is None
     with pytest.raises(ValueError):
@@ -196,9 +202,12 @@ def test_expected_hash_and_trusted_hosts():
     windows_lines = sums.replace("\n", "\r\n")  # SHA256SUMS.txt is written on Windows
     assert updates.expected_hash(windows_lines, "SnipForge-9.0.0-setup.exe") == digest
     assert updates.expected_hash(sums, "missing.exe") is None
-    assert updates.trusted_download("https://objects.githubusercontent.com/x")
-    assert not updates.trusted_download("http://github.com/x")
-    assert not updates.trusted_download("https://github.com.evil.example/x")
+    github = project.download_hosts("https://github.com")
+    assert updates.trusted_download("https://objects.githubusercontent.com/x", github)
+    assert not updates.trusted_download("http://github.com/x", github)
+    assert not updates.trusted_download("https://github.com.evil.example/x", github)
+    assert updates.trusted_download(f"{project.REPO_URL}/x")  # the configured server's hosts by default
+    assert not updates.trusted_download("https://objects.githubusercontent.com/x", {"ghe.example.test"})
 
 
 def test_release_round_trips_through_settings_dict():
@@ -483,7 +492,7 @@ def test_github_source_refuses_a_list_from_another_host():
     redirected = (json.dumps([release_json("0.6.0")]).encode(), "https://evil.example/releases")
     results, done = collect()
     update_sources.GitHubSource(transport=FakeTransport({API: redirected})).fetch(done)
-    assert results[0][0] is None and "unexpected" in results[0][1]
+    assert results[0][0] is None and "UpdateFeed" in results[0][1]
 
 
 def test_github_source_reports_bad_responses_and_network_errors():
@@ -495,14 +504,15 @@ def test_github_source_reports_bad_responses_and_network_errors():
         update_sources.GitHubSource(api_base="http://api.github.com")
 
 
-def github_download(tmp_path, data, sums, sums_final=None, installer_final=None):
-    release = updates.parse_release(release_json())
+def github_download(tmp_path, data, sums, sums_final=None, installer_final=None, source=None, release=None):
+    release = release or updates.parse_release(release_json())
     sums_answer = (sums, sums_final) if sums_final else sums
     installer_answer = (data, installer_final) if installer_final else data
     transport = FakeTransport({release.sums_url: sums_answer, release.installer_url: installer_answer})
     results, done = collect()
     progress = []
-    update_sources.GitHubSource(transport=transport).download(release, tmp_path, done, lambda *a: progress.append(a))
+    source = source or update_sources.GitHubSource
+    source(transport=transport).download(release, tmp_path, done, lambda *a: progress.append(a))
     path, error, digest = results[0]
     assert (digest == updates.sha256_bytes(data)) if path else digest == ""
     return (path, error), progress
@@ -511,10 +521,88 @@ def github_download(tmp_path, data, sums, sums_final=None, installer_final=None)
 def test_github_download_verifies_checksum_and_saves(tmp_path):
     data = b"installer bytes"
     sums = f"{updates.sha256_bytes(data)}  SnipForge-9.0.0-setup.exe\n".encode()
-    (path, error), progress = github_download(tmp_path, data, sums, "https://objects.githubusercontent.com/s",
-                                              "https://release-assets.githubusercontent.com/i")
+    (path, error), progress = github_download(tmp_path, data, sums)
     assert error == "" and path == tmp_path / "SnipForge-9.0.0-setup.exe" and path.read_bytes() == data
     assert progress and not list(tmp_path.glob("*.part"))
+
+
+def test_github_com_downloads_may_redirect_to_its_file_storage(tmp_path):
+    public = {"repo": "owner/snipforge", "server_url": "https://github.com"}
+    data = release_json()
+    for asset in data["assets"]:
+        asset["browser_download_url"] = asset["browser_download_url"].replace(
+            project.RELEASES_URL, "https://github.com/owner/snipforge/releases")
+    release = updates.parse_release(data, public["repo"], server_url=public["server_url"])
+    payload = b"installer bytes"
+    sums = f"{updates.sha256_bytes(payload)}  SnipForge-9.0.0-setup.exe\n".encode()
+    (path, error), _ = github_download(tmp_path, payload, sums, "https://objects.githubusercontent.com/s",
+                                       "https://release-assets.githubusercontent.com/i",
+                                       source=lambda **kw: update_sources.GitHubSource(**public, **kw),
+                                       release=release)
+    assert error == "" and path.read_bytes() == payload
+
+
+def ghe_release_json(version="9.0.0"):
+    data = release_json(version, html_url=f"{GHE_RELEASES}/tag/v{version}")
+    for asset in data["assets"]:
+        asset["browser_download_url"] = asset["browser_download_url"].replace(project.RELEASES_URL, GHE_RELEASES)
+    return data
+
+
+def test_github_source_reads_releases_from_an_enterprise_server(tmp_path):
+    transport = FakeTransport({GHE_API: json.dumps([ghe_release_json("0.6.0")]).encode()})
+    results, done = collect()
+    source = update_sources.GitHubSource(**GHE, transport=transport)
+    source.fetch(done)
+    assert transport.requests == [GHE_API]
+    release = results[0][0][0]
+    assert release.page == f"{GHE_RELEASES}/tag/v0.6.0"
+    assert release.installer_url == f"{GHE_RELEASES}/download/v0.6.0/SnipForge-0.6.0-setup.exe"
+    payload = b"enterprise installer"
+    transport.responses[release.sums_url] = f"{updates.sha256_bytes(payload)}  SnipForge-0.6.0-setup.exe\n".encode()
+    transport.responses[release.installer_url] = payload
+    downloads, done = collect()
+    source.download(release, tmp_path, done)
+    assert downloads[0][1] == "" and downloads[0][0].read_bytes() == payload
+
+
+def test_enterprise_downloads_refuse_github_com_storage(tmp_path):
+    """Only github.com hands downloads to its file storage; an enterprise copy's must stay on its server."""
+    release = updates.parse_release(ghe_release_json(), GHE["repo"], server_url=GHE["server_url"])
+    payload = b"x"
+    sums = f"{updates.sha256_bytes(payload)}  SnipForge-9.0.0-setup.exe\n".encode()
+    transport = FakeTransport({release.sums_url: (sums, "https://objects.githubusercontent.com/s"),
+                               release.installer_url: payload})
+    results, done = collect()
+    update_sources.GitHubSource(**GHE, transport=transport).download(release, tmp_path, done)
+    assert results[0][0] is None and "unexpected" in results[0][1] and not any(tmp_path.iterdir())
+
+
+def test_enterprise_releases_ignore_links_to_other_servers():
+    release = updates.parse_release(release_json(), GHE["repo"], server_url=GHE["server_url"])
+    assert release.page == f"{GHE_RELEASES}/latest" and release.installer_url is None and release.sums_url is None
+
+
+@pytest.mark.parametrize("answer", [
+    FakeTransport.Error(update_transport.NEEDS_SIGN_IN),
+    FakeTransport.Error(update_transport.NOT_FOUND),
+    (b"<html>Sign in to your account</html>", "https://login.example.com/sso"),
+], ids=["sign-in", "not-found", "sign-in-page"])
+def test_github_source_explains_a_repository_it_cant_see(answer):
+    """A private or internal repository on GitHub Enterprise needs a sign-in the updater doesn't do,
+    so the message points at the organization's own update location instead."""
+    results, done = collect()
+    update_sources.GitHubSource(**GHE, transport=FakeTransport({GHE_API: answer})).fetch(done)
+    found, error = results[0]
+    assert found is None
+    assert GHE_RELEASES in error and "sign-in" in error
+    assert "IT team" in error and "UpdateFeed" in error
+
+
+def test_github_source_keeps_other_errors_as_they_are():
+    results, done = collect()
+    update_sources.GitHubSource(**GHE, transport=FakeTransport({GHE_API: FakeTransport.Error("offline")})).fetch(done)
+    assert results[0] == (None, "offline")
 
 
 def test_github_download_rejects_checksum_mismatch_and_missing_checksum(tmp_path):
@@ -615,6 +703,17 @@ def test_url_feed_reads_manifest_and_installers_over_https(tmp_path):
     assert downloads[0][0] is None
 
 
+def test_url_feed_explains_a_sign_in_or_a_missing_list():
+    base = "https://contoso.sharepoint.com/sites/it/SnipForge/"
+    cases = [(update_transport.NEEDS_SIGN_IN, ["sign-in", "synced folder", base]),
+             (update_transport.NOT_FOUND, ["releases.json", base])]
+    for error, words in cases:
+        results, done = collect()
+        transport = FakeTransport({base + "releases.json": FakeTransport.Error(error)})
+        update_sources.FolderFeedSource(base, transport=transport).fetch(done)
+        assert results[0][0] is None and all(word in results[0][1] for word in words), results[0][1]
+
+
 def test_feed_sources_refuse_bad_locations():
     for bad in ("http://it.example.com/feed", r"relative\feed", ""):
         with pytest.raises(ValueError):
@@ -633,8 +732,17 @@ def test_source_follows_policy():
 
 # --- transports ---------------------------------------------------------------------------
 class FakeReply:
-    def __init__(self, body=b"", error=QNetworkReply.NoError, url="https://github.com/x", status=200):
+    def __init__(self, body=b"", error=QNetworkReply.NoError, url="https://github.com/x", status=200, headers=None):
         self.body, self.err, self._url, self.status = body, error, url, status
+        self.headers = {k.lower(): v for k, v in (headers or {}).items()}
+
+    def hasRawHeader(self, name):
+        assert isinstance(name, str), "PySide6 takes header names as str"
+        return name.lower() in self.headers
+
+    def rawHeader(self, name):
+        assert isinstance(name, str), "PySide6 takes header names as str"
+        return self.headers.get(name.lower(), b"")
 
     def deleteLater(self):
         pass
@@ -660,7 +768,8 @@ def test_network_transport_handles_replies(qapp):
     cases = [
         (FakeReply(b"ok"), {}, (b"ok", "", "https://github.com/x")),
         (FakeReply(error=QNetworkReply.HostNotFoundError), {}, (None, "offline", "https://github.com/x")),
-        (FakeReply(error=QNetworkReply.ContentAccessDenied, status=403), {}, None),
+        (FakeReply(error=QNetworkReply.ContentAccessDenied, status=403, headers={"X-RateLimit-Remaining": b"0"}),
+         {}, None),
         (FakeReply(b"x" * 20), {}, None),
         (FakeReply(error=QNetworkReply.OperationCanceledError), {"cancelled": True}, None),
         (FakeReply(error=QNetworkReply.OperationCanceledError), {}, None),
@@ -677,6 +786,22 @@ def test_network_transport_handles_replies(qapp):
     assert outcomes[3][0] is None and "larger" in outcomes[3][1]
     assert outcomes[4][1] == update_transport.CANCELED
     assert outcomes[5][0] is None and "timed out" in outcomes[5][1]
+
+
+@pytest.mark.parametrize("status, error, headers, expected", [
+    (401, QNetworkReply.AuthenticationRequiredError, {}, update_transport.NEEDS_SIGN_IN),
+    (403, QNetworkReply.ContentAccessDenied, {}, update_transport.NEEDS_SIGN_IN),
+    (403, QNetworkReply.ContentAccessDenied, {"Retry-After": b"60"}, update_transport.RATE_LIMITED),
+    (403, QNetworkReply.ContentAccessDenied, {"X-RateLimit-Remaining": b"0"}, update_transport.RATE_LIMITED),
+    (429, QNetworkReply.UnknownContentError, {}, update_transport.RATE_LIMITED),
+    (404, QNetworkReply.ContentNotFoundError, {}, update_transport.NOT_FOUND),
+    (500, QNetworkReply.InternalServerError, {}, "offline"),
+])
+def test_network_transport_names_http_refusals(qapp, status, error, headers, expected):
+    reply = FakeReply(error=error, status=status, headers=headers)
+    results, done = collect()
+    update_transport.NetworkTransport()._finished(reply, update_transport._ReplyTransfer(reply), 10, done)
+    assert results[0] == (None, expected, "https://github.com/x")
 
 
 def test_network_transport_refuses_plain_http(qapp):

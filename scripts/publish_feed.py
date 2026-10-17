@@ -5,10 +5,16 @@ that the in-app updater can read instead of GitHub.
     python scripts/publish_feed.py --github v0.6.0-preview.1 --target "C:\\Users\\me\\Company\\SnipForge"
     python scripts/publish_feed.py --dist dist --target D:\\feed --notes-file notes.md
 
+--github reads the repository snipforge/project.py names (or --server-url and --repo) without
+signing in. For a private repository, download the release with gh first and use --dist:
+
+    gh release download v0.6.0 --repo <host>/<owner>/<repo> --dir dist
+    gh release view v0.6.0 --repo <host>/<owner>/<repo> --json body --jq .body > notes.md
+
 Each installer is checked against the release's SHA256SUMS.txt, copied into the target folder and
 checked again there; only then is the release merged into <target>/releases.json (newest first,
 written atomically). Re-running with the same release changes nothing. Needs only the Python
-standard library.
+standard library (and snipforge/project.py next door).
 """
 from __future__ import annotations
 
@@ -29,22 +35,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from snipforge import project  # noqa: E402 - standard library only; names the repository
+
 SCHEMA = 1
 FEED_FILE = "releases.json"
 SUMS_FILE = "SHA256SUMS.txt"
-DEFAULT_REPO = "nighthawk909/snipforge"
 CHANNELS = ("stable", "preview")
 # One installer per platform; the updater picks the asset for the platform it runs on.
 INSTALLER_NAMES = {"windows": "SnipForge-{version}-setup.exe"}
 INSTALLER_RE = re.compile(r"SnipForge-(.+)-setup\.exe")  # the version-less SnipForge-setup.exe doesn't match
 VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-preview\.(\d+))?")
 TAG_RE = re.compile(r"v?(\d+\.\d+\.\d+(?:-preview\.\d+)?)")
-REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 SHA256_RE = re.compile(r"[0-9a-fA-F]{64}")
 SAFE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-# Release downloads start at github.com and redirect to GitHub's asset storage.
-DOWNLOAD_HOSTS = {"github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"}
-API_ROOT = "https://api.github.com/repos/"
 USER_AGENT = "snipforge-publish-feed"
 TIMEOUT_S = 60
 CHUNK = 1 << 20
@@ -256,35 +260,40 @@ def release_from_dist(dist: Path, version: str | None, channel: str | None, note
     return Release(version, resolve_channel(version, channel, channel_for(version)), published, notes, tuple(assets))
 
 
-def trusted_download(url: str) -> bool:
+def trusted_download(url: str, hosts) -> bool:
     parsed = urlparse(url or "")
-    return parsed.scheme == "https" and parsed.hostname in DOWNLOAD_HOSTS
+    return parsed.scheme == "https" and parsed.hostname in hosts
 
 
-def fetch_json(url: str) -> dict:
-    if not url.startswith(API_ROOT):
+def fetch_json(url: str, api_root: str) -> dict:
+    """GET a GitHub API URL under `api_root` (https://<api>/repos/), without signing in."""
+    if not (api_root.startswith("https://") and api_root.endswith("/repos/") and url.startswith(api_root)):
         raise FeedError(f"Refusing to query {url}")
     headers = {"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT, "X-GitHub-Api-Version": "2022-11-28"}
-    # S310: only https://api.github.com/ (checked above) and GitHub's download hosts are ever opened.
+    # S310: only the GitHub API (checked above) and the server's download hosts are ever opened.
     request = urllib.request.Request(url, headers=headers)  # noqa: S310
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:  # noqa: S310
             return json.load(response)
     except urllib.error.HTTPError as e:
+        private = ("If the repository is private, download the release with `gh release download <tag> "
+                   "--dir <folder>` and publish it with --dist <folder>.")
         if e.code == 404:
-            raise FeedError(f"GitHub has no published release at {url}") from e
+            raise FeedError(f"GitHub has no published release at {url}. {private}") from e
+        if e.code in (401, 403):
+            raise FeedError(f"GitHub returned HTTP {e.code} for {url}; this script doesn't sign in. {private}") from e
         raise FeedError(f"GitHub returned HTTP {e.code} for {url}") from e
     except (OSError, json.JSONDecodeError) as e:  # URLError, timeouts and resets are OSErrors
         raise FeedError(f"Couldn't read {url}: {e}") from e
 
 
-def download(url: str, dest: Path) -> None:
-    if not trusted_download(url):
+def download(url: str, dest: Path, hosts) -> None:
+    if not trusted_download(url, hosts):
         raise FeedError(f"Refusing to download from {url}")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})  # noqa: S310
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:  # noqa: S310
-            if not trusted_download(response.geturl()):
+            if not trusted_download(response.geturl(), hosts):
                 raise FeedError(f"{url} redirected to an unexpected host: {response.geturl()}")
             with dest.open("wb") as out:
                 shutil.copyfileobj(response, out, CHUNK)
@@ -293,17 +302,21 @@ def download(url: str, dest: Path) -> None:
 
 
 def release_from_github(tag: str, staging: Path, repo: str, channel: str | None, notes: str | None,
-                        published: str | None) -> Release:
+                        published: str | None, server_url: str = project.SERVER_URL) -> Release:
     """Download a GitHub release's installers and SHA256SUMS.txt into `staging`."""
-    if not REPO_RE.fullmatch(repo) or ".." in repo:
-        raise FeedError(f"{repo!r} isn't an owner/name GitHub repository")
+    try:
+        project.check_repo(repo)
+        api_root = f"{project.api_url(server_url)}/repos/"
+        hosts = project.download_hosts(server_url)
+    except ValueError as e:
+        raise FeedError(str(e)) from e
     if tag == "latest":
-        url = f"{API_ROOT}{repo}/releases/latest"
+        url = f"{api_root}{repo}/releases/latest"
     elif match := TAG_RE.fullmatch(tag):
-        url = f"{API_ROOT}{repo}/releases/tags/v{match.group(1)}"
+        url = f"{api_root}{repo}/releases/tags/v{match.group(1)}"
     else:
         raise FeedError(f'{tag!r} isn\'t "latest" or a release tag like v0.6.0 or v0.6.0-preview.1')
-    data = fetch_json(url)
+    data = fetch_json(url, api_root)
     if data.get("draft"):
         raise FeedError(f"{data.get('tag_name')} is a draft; publish it first")
     tag_match = TAG_RE.fullmatch(str(data.get("tag_name", "")))
@@ -318,16 +331,16 @@ def release_from_github(tag: str, staging: Path, repo: str, channel: str | None,
     if SUMS_FILE not in urls:
         raise FeedError(f"The {version} release has no {SUMS_FILE}")
     for name in [SUMS_FILE, *installers.values()]:  # check every link before downloading anything
-        if not trusted_download(urls[name]):
+        if not trusted_download(urls[name], hosts):
             raise FeedError(f"{name} on the {version} release points somewhere unexpected: {urls[name]}")
 
-    download(urls[SUMS_FILE], staging / SUMS_FILE)
+    download(urls[SUMS_FILE], staging / SUMS_FILE, hosts)
     sums = parse_sums((staging / SUMS_FILE).read_text(encoding="utf-8-sig"))
     assets = []
     for platform, name in installers.items():
         if name not in sums:
             raise FeedError(f"{name} isn't listed in the release's {SUMS_FILE}")
-        download(urls[name], staging / name)
+        download(urls[name], staging / name, hosts)
         assets.append(Asset(platform, name, staging / name, sums[name]))
     default_channel = "preview" if data.get("prerelease") else channel_for(version)
     body = str(data.get("body") or "").replace("\r\n", "\n").strip()
@@ -439,7 +452,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                                             "--dist entry)")
     parser.add_argument("--replace", action="store_true",
                         help="let a rebuilt installer replace a different one already in the feed")
-    parser.add_argument("--repo", default=DEFAULT_REPO, help=f"GitHub repository (default {DEFAULT_REPO})")
+    parser.add_argument("--repo", default=project.REPO,
+                        help=f"with --github: the repository (default {project.REPO}, from snipforge/project.py)")
+    parser.add_argument("--server-url", default=project.SERVER_URL,
+                        help=f"with --github: the GitHub server (default {project.SERVER_URL}); in Actions, "
+                             "pass $GITHUB_SERVER_URL")
     args = parser.parse_args(argv)
     if args.version and args.github:
         parser.error("--version only applies to --dist; --github takes the version from the tag")
@@ -462,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory(prefix="snipforge-feed-") as staging:
             if args.github:
                 release = release_from_github(args.github, Path(staging), args.repo, args.channel, notes,
-                                              args.published)
+                                              args.published, args.server_url)
             else:
                 release = release_from_dist(args.dist, args.version, args.channel, notes, args.published)
             outcome = publish(release, args.target, replace=args.replace)

@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import REPO, __version__, prefs, theme
+from . import __version__, prefs, project, theme
 from .capture import CaptureSession
 from .editor.window import EditorWindow
 from .home import HomeWindow
@@ -131,7 +131,7 @@ class SnipForgeApp:
             f"<br><br>Built with Python, Qt and PySide6 (LGPL-3.0). License texts are in the install folder."
             f"<br><br>MIT License. Your snips stay on this PC. SnipForge only goes online to check for "
             f"updates (choose how in Settings) or when you use Share."
-            f"<br><br><a href='https://github.com/{REPO}'>github.com/{REPO}</a>")
+            f"<br><br><a href='{project.REPO_URL}'>{project.REPO_URL.removeprefix('https://')}</a>")
 
     def handle_command(self, command: str) -> None:
         if command == "snip":

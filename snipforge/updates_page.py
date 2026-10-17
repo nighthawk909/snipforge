@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, updates
+from . import __version__, project, updates
 from .icons import icon
 from .widgets import Segmented, SettingRow, ToggleSwitch, stack
 
@@ -256,7 +256,8 @@ class UpdatesPage(QWidget):
             self._source_row.set_description(f"Updates come from {policy.feed or 'a location your IT team chose'}.")
         else:
             self._source_row.title.setText("GitHub releases")
-            self._source_row.set_description(f"github.com/{updates.REPO}: public releases, each with a checksum file.")
+            where = project.REPO_URL.removeprefix("https://")
+            self._source_row.set_description(f"{where}: releases, each with a checksum file.")
         self._loading = False
 
     def _set_prefs(self, **changes) -> None:

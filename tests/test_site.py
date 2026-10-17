@@ -4,10 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from snipforge import project
+
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "docs" / "site"
-PERMANENT_LINK = "https://github.com/nighthawk909/snipforge/releases/latest/download/SnipForge-setup.exe"
-REPO_URL = "https://github.com/nighthawk909/snipforge"
+REPO_URL = project.REPO_URL
+PERMANENT_LINK = f"{REPO_URL}/releases/latest/download/SnipForge-setup.exe"
 
 
 class Page(HTMLParser):

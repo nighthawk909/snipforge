@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import REPO, __version__, autostart, prefs, theme
+from . import __version__, autostart, prefs, project, theme
 from .icons import icon
 from .settings import app_settings
 from .theme.tokens import DARK, LIGHT
@@ -419,9 +419,9 @@ class SettingsWindow(QMainWindow):
         links = QWidget()
         lrow = QHBoxLayout(links)
         lrow.setContentsMargins(0, 0, 0, 0)
-        for label, url in (("Source code", f"https://github.com/{REPO}"),
-                           ("Release notes", f"https://github.com/{REPO}/releases"),
-                           ("Report a problem", f"https://github.com/{REPO}/issues")):
+        for label, url in (("Source code", project.REPO_URL),
+                           ("Release notes", project.RELEASES_URL),
+                           ("Report a problem", f"{project.REPO_URL}/issues")):
             button = QPushButton(label)
             button.setProperty("variant", "ghost")
             button.clicked.connect(lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
@@ -444,7 +444,7 @@ class SettingsWindow(QMainWindow):
         base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
         path = base / "THIRD_PARTY_NOTICES.md"
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)) if path.exists()
-                                 else QUrl(f"https://github.com/{REPO}/blob/main/THIRD_PARTY_NOTICES.md"))
+                                 else QUrl(f"{project.REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md"))
 
     def _open_folder(self, path: Path | None) -> None:
         if path is None:

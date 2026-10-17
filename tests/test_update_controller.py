@@ -12,7 +12,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtWidgets import QMessageBox, QSystemTrayIcon
 
-from snipforge import update_controller, update_flow, update_sources, updates
+from snipforge import project, update_controller, update_flow, update_sources, updates
 from snipforge.settings import app_settings
 from snipforge.update_controller import UpdateController, UpdateState, check_is_due
 from snipforge.update_policy import PolicyInfo, parse_policy
@@ -24,8 +24,8 @@ UPDATE_KEYS = ("auto_update", "update_mode", "update_channel", "update_pinned_ve
 
 def rel(version, notes="What's new", prerelease=None):
     name = f"SnipForge-{version}-setup.exe"
-    base = f"https://github.com/nighthawk909/snipforge/releases/download/v{version}/"
-    return updates.Release(version, f"https://github.com/nighthawk909/snipforge/releases/tag/v{version}", notes,
+    base = f"{project.RELEASES_URL}/download/v{version}/"
+    return updates.Release(version, f"{project.RELEASES_URL}/tag/v{version}", notes,
                            name, base + name, base + "SHA256SUMS.txt",
                            prerelease="-" in version if prerelease is None else prerelease,
                            published=dt.datetime(2026, 10, 1, tzinfo=dt.UTC))
@@ -574,7 +574,7 @@ def test_tray_managed_install_opens_the_download_page(tray):
     h = tray([rel("0.6.0")], mode="ask", install_mode="all-users", answer="Open download page")
     h.c._automatic_check()
     pump()
-    assert h.opened == ["https://github.com/nighthawk909/snipforge/releases/tag/v0.6.0"] and h.launched == []
+    assert h.opened == [f"{project.RELEASES_URL}/tag/v0.6.0"] and h.launched == []
 
 
 def test_tray_progress_dialog_for_a_chosen_install(tray):

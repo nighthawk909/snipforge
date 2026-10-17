@@ -1,13 +1,14 @@
 """Build the download page for GitHub Pages: docs/site plus the current release's details.
 
-    gh api "repos/nighthawk909/snipforge/releases?per_page=50" > releases.json
+    gh api "repos/<owner>/<repo>/releases?per_page=50" > releases.json
     python scripts/build_site.py --releases releases.json --site docs/site --out _site
 
 docs/site/index.html works on its own (opened as a file, uploaded to SharePoint). This fills its
 <!-- generated:NAME --> ... <!-- /generated:NAME --> markers with the latest stable version, date,
-size and release notes, plus a download for a newer preview build when there is one. Nothing is
-fetched when someone views the page: .github/workflows/pages.yml rebuilds it after every release.
-Needs only the Python standard library.
+size and release notes, plus a download for a newer preview build when there is one, and points
+every link at the repository it's built for (--server-url and --repo; snipforge/project.py's by
+default). Nothing is fetched when someone views the page: .github/workflows/pages.yml rebuilds it
+after every release. Needs only the Python standard library.
 """
 from __future__ import annotations
 
@@ -22,9 +23,8 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from publish_feed import REPO_RE, TAG_RE, version_key  # noqa: E402 - sibling script, not a package
+from publish_feed import TAG_RE, project, version_key  # noqa: E402 - sibling script, not a package
 
-DEFAULT_REPO = "nighthawk909/snipforge"
 MAX_NOTES = 6
 # release-please sections people care about; refactors, tests and CI stay out of the page.
 NOTE_SECTIONS = ("Features", "Bug fixes", "Performance")
@@ -142,6 +142,16 @@ def replace_marker(page: str, name: str, content: str) -> str:
     return pattern.sub(lambda m: m.group(1) + content + m.group(2), page, count=1)
 
 
+def point_at_repository(page: str, url: str) -> str:
+    """The template links to its own repository (the brand link at the top); a copy elsewhere (say
+    on GitHub Enterprise) links to that copy instead."""
+    brand = re.search(r'<a\b[^>]*\bclass="brand"[^>]*\bhref="([^"]+)"', page)
+    if not brand:
+        raise SiteError('docs/site/index.html has no <a class="brand" href="..."> link to the repository')
+    own = html.unescape(brand.group(1)).rstrip("/")
+    return page if own == url else page.replace(html.escape(own), html.escape(url))
+
+
 def set_download_link(page: str, url: str) -> str:
     pattern = re.compile(r'(<a\b[^>]*\bid="download"[^>]*\bhref=")[^"]*(")')
     if not pattern.search(page):
@@ -174,10 +184,12 @@ def preview_card(release: Release, installer_url: str, release_url: str) -> str:
             f' &nbsp; <a href="{html.escape(release_url)}">What\'s in it</a></p></div>\n      ')
 
 
-def render(template: str, releases: object, repo: str) -> str:
-    if not REPO_RE.fullmatch(repo) or ".." in repo:
-        raise SiteError(f"{repo!r} isn't an owner/name GitHub repository")
-    base = f"https://github.com/{repo}/releases"
+def render(template: str, releases: object, repo: str, server_url: str = project.SERVER_URL) -> str:
+    try:
+        repo_url = project.repo_url(server_url, repo)
+    except ValueError as e:
+        raise SiteError(str(e)) from e
+    base = f"{repo_url}/releases"
     published = parse_releases(releases)
     stable, preview = pick(published)
     # .../latest/download/ follows GitHub's newest stable release, so use it only when that's the one
@@ -189,7 +201,7 @@ def render(template: str, releases: object, repo: str) -> str:
     size = round(stable.assets[stable.installer] / 1_048_576)
     note = " · ".join(part for part in (f"Version {stable.version}", long_date(stable.published), f"{size} MB") if part)
 
-    page = set_download_link(template, download)
+    page = set_download_link(point_at_repository(template, repo_url), download)
     page = replace_marker(page, "download-note", html.escape(note))
     page = replace_marker(page, "whats-new", whats_new(stable, f"{base}/tag/{stable.tag}"))
     card = (preview_card(preview, f"{base}/download/{preview.tag}/{preview.installer}", f"{base}/tag/{preview.tag}")
@@ -206,11 +218,14 @@ def main(argv: list[str] | None = None) -> int:
                         help='JSON from gh api "repos/<owner>/<repo>/releases?per_page=50"')
     parser.add_argument("--site", type=Path, default=Path("docs/site"), help="the page's source folder")
     parser.add_argument("--out", type=Path, required=True, help="output folder (must be new or empty)")
-    parser.add_argument("--repo", default=DEFAULT_REPO, help=f"GitHub repository (default {DEFAULT_REPO})")
+    parser.add_argument("--repo", default=project.REPO,
+                        help=f"the repository (default {project.REPO}, from snipforge/project.py)")
+    parser.add_argument("--server-url", default=project.SERVER_URL,
+                        help=f"the GitHub server (default {project.SERVER_URL}); in Actions, pass $GITHUB_SERVER_URL")
     args = parser.parse_args(argv)
     try:
         releases = json.loads(args.releases.read_text(encoding="utf-8-sig"))
-        page = render((args.site / "index.html").read_text(encoding="utf-8"), releases, args.repo)
+        page = render((args.site / "index.html").read_text(encoding="utf-8"), releases, args.repo, args.server_url)
         if args.out.exists() and any(args.out.iterdir()):
             raise SiteError(f"{args.out} isn't empty; give a new folder")
         shutil.copytree(args.site, args.out, dirs_exist_ok=True)
