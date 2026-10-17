@@ -8,15 +8,18 @@ editor with arrows, callouts, stamps, blur and more.
 
 ## Install
 
-1. Download `SnipForge-<version>-setup.exe` from the [latest release](https://github.com/nighthawk909/snipforge/releases/latest).
-2. Run it. It installs just for you (no admin rights) and adds Start menu and desktop shortcuts.
-   Tick **Start SnipForge when I sign in** so Win+Shift+S always works.
+1. **[Download SnipForge for Windows](https://github.com/nighthawk909/snipforge/releases/latest/download/SnipForge-setup.exe)** (this link always gets the newest version).
+2. Open `SnipForge-setup.exe`. If Windows shows "Windows protected your PC", choose
+   **More info → Run anyway** (the installer isn't code-signed yet). It installs just for you
+   (no admin rights) and adds Start menu and desktop shortcuts. Tick **Start SnipForge when I sign
+   in** so Win+Shift+S always works.
 3. To pin it to the taskbar: open Start, right-click **SnipForge**, choose **Pin to taskbar**.
    (Windows doesn't let apps pin themselves.)
 
-Windows may show "Windows protected your PC" because the installer isn't code-signed yet; choose
-**More info → Run anyway**. Each release lists SHA-256 checksums so you can verify the download.
-There's also a portable zip if you'd rather not install anything.
+Each [release](https://github.com/nighthawk909/snipforge/releases) lists SHA-256 checksums so you
+can verify the download, and has a portable zip if you'd rather not install anything. Setting it up
+for a team, a SharePoint or network-share mirror, or Software Center? See
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 ## What it does
 
