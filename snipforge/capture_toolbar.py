@@ -1,5 +1,5 @@
-"""The toolbar at the top of the capture overlay: how to choose what to snip, a delay, whether the
-mouse pointer is included, and Cancel.
+"""The toolbar at the top of the capture overlay: how to choose what to snip (and, in Fixed size
+mode, the size), a delay, whether the mouse pointer is included, and Cancel.
 
 Its buttons never take keyboard focus from the overlay when clicked (Tab still reaches them, and
 Enter or Space presses the focused one), so Esc, Enter and the mode letters keep working however
@@ -12,10 +12,21 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QActionGroup
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QMenu, QToolButton
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QPushButton,
+    QSpinBox,
+    QToolButton,
+    QWidget,
+    QWidgetAction,
+)
 
 from .icons import icon
-from .prefs import DELAYS
+from .prefs import DEFAULT_FIXED_SIZE, DELAYS, MAX_FIXED, MIN_FIXED
 
 
 @dataclass(frozen=True)
@@ -34,6 +45,9 @@ MODES = {
                           "Click a window  •  Enter for the whole screen  •  Esc to cancel"),
     "screen": CaptureMode("Full screen", "monitor", "F", "Click a monitor to take all of it",
                           "Click a monitor, or press Enter  •  Esc to cancel"),
+    "fixed": CaptureMode("Fixed size", "fixed", "X", "A frame of an exact size: move it and click",
+                         "Move the frame and click to snip  •  arrow keys nudge it  •  Enter to snip"
+                         "  •  Esc to cancel"),
     "scroll": CaptureMode("Scrolling", "scroll", "S", "A long page or list, captured as one image",
                           "Drag over the part that scrolls, or click a window  •  SnipForge scrolls to the end"
                           "  •  move the mouse to stop  •  Esc to cancel"),
@@ -62,6 +76,70 @@ def delay_label(seconds: int) -> str:
     return "No delay" if seconds == 0 else f"{seconds} s delay"
 
 
+def size_label(width: int, height: int) -> str:
+    return f"{width} × {height}"
+
+
+# Fixed size mode's menu: (width, height, what it's good for). Sizes are screen pixels.
+FIXED_PRESETS = (
+    (640, 480, ""),
+    (800, 600, ""),
+    (1024, 768, ""),
+    (1280, 720, "HD"),
+    (1920, 1080, "Full HD"),
+    (1080, 1080, "square"),
+)
+
+
+class _CustomSize(QWidget):
+    """The last row of the size menu: type a width and height, then Use (or Enter)."""
+
+    picked = Signal(int, int)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(12, 6, 12, 8)
+        row.setSpacing(6)
+        row.addWidget(QLabel("Custom"))
+        self.width_box = self._box("Width in pixels")
+        self.height_box = self._box("Height in pixels")
+        row.addWidget(self.width_box)
+        row.addWidget(QLabel("×"))
+        row.addWidget(self.height_box)
+        self.use_button = QPushButton("Use")
+        self.use_button.setAccessibleName("Use this size")
+        self.use_button.clicked.connect(self._pick)
+        row.addWidget(self.use_button)
+        # Arrowing onto this row in the menu puts the keyboard in the width box (Tab: the height).
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusProxy(self.width_box)
+
+    def _box(self, name: str) -> QSpinBox:
+        box = QSpinBox(self)
+        box.setRange(MIN_FIXED, MAX_FIXED)
+        box.setAccessibleName(name)
+        box.setToolTip(name)
+        box.lineEdit().returnPressed.connect(self._pick)
+        return box
+
+    def set_size(self, width: int, height: int) -> None:
+        self.width_box.setValue(width)
+        self.height_box.setValue(height)
+
+    def focusNextPrevChild(self, forward: bool) -> bool:  # noqa: N802 - Qt API
+        """Tab and Shift+Tab go round the boxes and Use, instead of on to the menu's other rows."""
+        chain = [self.width_box, self.height_box, self.use_button]
+        focused = self.window().focusWidget()
+        if focused not in chain:
+            return super().focusNextPrevChild(forward)
+        chain[(chain.index(focused) + (1 if forward else -1)) % len(chain)].setFocus(Qt.TabFocusReason)
+        return True
+
+    def _pick(self) -> None:
+        self.picked.emit(self.width_box.value(), self.height_box.value())
+
+
 class _DelayButton(_ToolbarButton):
     """Opens the Delay menu; its highlight says whether a delay is on, so opening and closing the
     menu must not toggle it (set_delay is the only thing that does)."""
@@ -72,12 +150,14 @@ class _DelayButton(_ToolbarButton):
 
 class CaptureToolbar(QFrame):
     mode_picked = Signal(str)
+    size_picked = Signal(int, int)  # Fixed size mode's frame, in screen pixels
     delay_picked = Signal(int)  # seconds; picking one (other than none) starts the countdown
     pointer_toggled = Signal(bool)
     cancel_clicked = Signal()
 
     def __init__(self, mode: str, parent=None, *, delay: int = 0, pointer: bool = False,
-                 pointer_available: bool = True, pointer_why: str = "", scrolling: bool = True) -> None:
+                 pointer_available: bool = True, pointer_why: str = "", scrolling: bool = True,
+                 fixed_size: tuple[int, int] = DEFAULT_FIXED_SIZE) -> None:
         super().__init__(parent)
         self.setObjectName("CaptureToolbar")
         self.setAccessibleName("Capture")
@@ -101,6 +181,10 @@ class CaptureToolbar(QFrame):
             self._group.addButton(button)
             self.buttons[key] = button
             row.addWidget(button)
+        self._size_separator = self._separator()
+        self._size_shown = True  # the size button (only in Fixed size mode)
+        row.addWidget(self._size_separator)
+        row.addWidget(self._size_control())
         row.addWidget(self._separator())
         row.addWidget(self._delay_control())
         self.pointer_button = self._button("select", "", "Include the mouse pointer (P)")
@@ -114,10 +198,62 @@ class CaptureToolbar(QFrame):
         self.cancel_button.setAccessibleName("Cancel")
         self.cancel_button.clicked.connect(self.cancel_clicked)
         row.addWidget(self.cancel_button)
+        self.set_fixed_size(*fixed_size)
         self.set_mode(mode)
         self.set_delay(delay)
         self.set_pointer(pointer)
         self.set_pointer_available(pointer_available, pointer_why)
+
+    def _size_control(self) -> QToolButton:
+        """Fixed size mode's size: presets, and a row to type any size. Shown only in that mode."""
+        self.size_button = self._button("chevron_down", "", "The frame's size, in screen pixels")
+        self.size_button.setObjectName("SizeButton")
+        self.size_button.setAccessibleName("Size")
+        self.size_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.size_button.setLayoutDirection(Qt.RightToLeft)  # the arrow after the size
+        self.size_button.setPopupMode(QToolButton.InstantPopup)
+        self.size_menu = QMenu(self.size_button)
+        self.size_menu.setLayoutDirection(Qt.LeftToRight)  # not the button's right-to-left
+        self.size_menu.setAccessibleName("Size")
+        group = QActionGroup(self.size_menu)
+        group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)  # a custom size is none of them
+        self._size_actions = {}
+        for width, height, note in FIXED_PRESETS:
+            action = self.size_menu.addAction(size_label(width, height) + (f"  ({note})" if note else ""))
+            action.setCheckable(True)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, w=width, h=height: self.size_picked.emit(w, h))
+            self._size_actions[(width, height)] = action
+        self.size_menu.addSeparator()
+        self.custom_size = _CustomSize(self.size_menu)
+        self.custom_size.picked.connect(self._custom_picked)
+        custom = QWidgetAction(self.size_menu)
+        custom.setDefaultWidget(self.custom_size)
+        self.size_menu.addAction(custom)
+        self.size_button.setMenu(self.size_menu)
+        return self.size_button
+
+    def _custom_picked(self, width: int, height: int) -> None:
+        self.size_menu.close()
+        self.size_picked.emit(width, height)
+
+    def set_fixed_size(self, width: int, height: int) -> None:
+        """Show this as Fixed size mode's size, without announcing it."""
+        for size, action in self._size_actions.items():
+            action.setChecked(size == (width, height))
+        self.custom_size.set_size(width, height)
+        self.size_button.setText(size_label(width, height))
+        self.size_button.setToolTip(f"The frame is {size_label(width, height)} screen pixels. Click to change it")
+        if self._size_shown:
+            self.adjustSize()
+
+    def widest(self) -> int:
+        """Its width with the size button showing. The overlay places the toolbar by this, so
+        switching to or from Fixed size never slides a button out from under the pointer."""
+        if self._size_shown:
+            return self.width()
+        gap = self.layout().spacing()
+        return self.width() + self.size_button.sizeHint().width() + self._size_separator.width() + 2 * gap
 
     def _delay_control(self) -> QToolButton:
         self.delay_button = self._button("timer", "", "Wait before freezing the screen, to snip menus and tooltips (D)",
@@ -191,6 +327,12 @@ class CaptureToolbar(QFrame):
     def set_mode(self, mode: str) -> None:
         """Show `mode` as the chosen one, without announcing it (for changes made elsewhere)."""
         self.buttons[mode].setChecked(True)
+        fixed = mode == "fixed"
+        if fixed != self._size_shown:
+            self._size_shown = fixed
+            self.size_button.setVisible(fixed)
+            self._size_separator.setVisible(fixed)
+            self.adjustSize()
 
     def mousePressEvent(self, e) -> None:  # noqa: N802 - Qt API
         if e.button() == Qt.RightButton:

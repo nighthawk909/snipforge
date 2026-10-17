@@ -166,7 +166,8 @@ def test_toolbar_sits_at_the_top_and_steps_aside_while_dragging(qapp):
     QApplication.processEvents()
     bar = o.toolbar
     assert bar.isVisible() and bar.y() < 40
-    assert abs(bar.geometry().center().x() - o.rect().center().x()) <= 1
+    # Centred as it is in Fixed size mode (with its size button), so switching never moves a button.
+    assert abs(bar.x() + bar.widest() / 2 - o.width() / 2) <= 1
     mouse(o, QEvent.MouseButtonPress, (10, 300))
     mouse(o, QEvent.MouseMove, (60, 340), Qt.NoButton)
     assert not bar.isVisible()

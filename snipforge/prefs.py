@@ -11,8 +11,10 @@ from .settings import app_settings
 
 DEFAULT_EXPORT_DIR = Path.home() / "Pictures" / "SnipForge"
 FORMATS = ("png", "jpg")
-CAPTURE_MODES = ("area", "window", "screen", "scroll")  # the capture toolbar's modes, in its order
+CAPTURE_MODES = ("area", "window", "screen", "fixed", "scroll")  # the capture toolbar's modes, in its order
 DELAYS = (0, 3, 5, 10)  # seconds the capture toolbar's Delay menu offers
+DEFAULT_FIXED_SIZE = (800, 600)  # Fixed size mode's frame, in screen pixels
+MIN_FIXED, MAX_FIXED = 16, 10000  # the smallest and largest side it can have
 KEYS = {
     "copy_on_capture": "capture/copy_to_clipboard",
     "hotkey_win_shift_s": "capture/hotkey_win_shift_s",
@@ -21,6 +23,7 @@ KEYS = {
     "capture_mode": "capture/mode",
     "capture_delay": "capture/delay",
     "capture_pointer": "capture/pointer",
+    "capture_fixed_size": "capture/fixed_size",
     "export_dir": "output/folder",
     "export_format": "output/format",
 }
@@ -101,6 +104,24 @@ def capture_pointer() -> bool:
 
 def set_capture_pointer(on: bool) -> None:
     _set("capture_pointer", bool(on))
+
+
+def capture_fixed_size() -> tuple[int, int]:
+    """Fixed size mode's frame (width, height) in screen pixels: the last size picked."""
+    value = app_settings().value(KEYS["capture_fixed_size"], "")
+    try:
+        width, height = (int(part) for part in str(value).split("x"))
+    except ValueError:
+        return DEFAULT_FIXED_SIZE
+    if not (MIN_FIXED <= width <= MAX_FIXED and MIN_FIXED <= height <= MAX_FIXED):
+        return DEFAULT_FIXED_SIZE
+    return width, height
+
+
+def set_capture_fixed_size(width: int, height: int) -> None:
+    if not (MIN_FIXED <= width <= MAX_FIXED and MIN_FIXED <= height <= MAX_FIXED):
+        raise ValueError(f"each side must be {MIN_FIXED} to {MAX_FIXED} pixels, got {width} x {height}")
+    _set("capture_fixed_size", f"{int(width)}x{int(height)}")
 
 
 def export_dir() -> Path:

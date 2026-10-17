@@ -24,9 +24,10 @@ for a team, a SharePoint or network-share mirror, or Software Center? See
 ## What it does
 
 **Snip.** Win+Shift+S or Print Screen freezes the screen, with a capture toolbar at the top:
-**Area** (drag an area, or hover a window and click to take it), **Window**, **Full screen** or
-**Scrolling** (SnipForge scrolls a long page or list to the end and stitches it into one image), or
-press Enter for the whole monitor. A magnifier shows exact pixels, and the next snip starts in the
+**Area** (drag an area, or hover a window and click to take it), **Window**, **Full screen**,
+**Fixed size** (a frame of an exact size, like 1280 × 720 or one you type, follows the pointer;
+click to snip it) or **Scrolling** (SnipForge scrolls a long page or list to the end and stitches it
+into one image), or press Enter for the whole monitor. A magnifier shows exact pixels, and the next snip starts in the
 mode you used last. **Delay** counts down 3, 5 or 10 seconds first, so you can open the menu or
 tooltip you want to snip, and **Include the mouse pointer** draws the pointer into the snip.
 The snip is also copied to the clipboard, just like the built-in Snipping Tool. (Either shortcut can
@@ -78,7 +79,7 @@ Pin a snip on top of other windows · Beautify (backdrop, rounded corners, shado
 | | |
 |---|---|
 | ![The capture toolbar over a window being snipped](docs/screenshots/capture-dark.png) | ![Settings, Capture page](docs/screenshots/settings-capture.png) |
-| **Capture.** Area, Window, Full screen or Scrolling, a delay, and the mouse pointer, with a magnifier for exact pixels. | **Settings > Capture.** Which keys start a snip, and how each snip starts: mode, delay and the pointer. |
+| **Capture.** Area, Window, Full screen, Fixed size or Scrolling, a delay, and the mouse pointer, with a magnifier for exact pixels. | **Settings > Capture.** Which keys start a snip, and how each snip starts: mode, delay and the pointer. |
 | ![Editor in dark mode](docs/screenshots/editor-dark.png) | ![Library with search, favorites and tags](docs/screenshots/library-light.png) |
 | **Editor, dark.** Tools on the left, quick styles and properties on the right, recent snips along the bottom. | **Library.** Every snip by day, searchable by the words inside it, with favorites, tags and app filters. |
 | ![Settings, Updates page](docs/screenshots/settings-updates.png) | ![Settings, Appearance page](docs/screenshots/settings-appearance.png) |

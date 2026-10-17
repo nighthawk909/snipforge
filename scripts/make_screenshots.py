@@ -137,6 +137,19 @@ def editor_shot(theme_manager, library, mode: str, name: str) -> None:
     editor.close()
 
 
+def rename_when_free(src: Path, dst: Path, seconds: float = 10) -> None:
+    """Rename a folder that antivirus may still be scanning (Windows refuses until it's done)."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.1)
+
+
 def library_shot(theme_manager, mode: str) -> None:
     from snipforge.home import HomeWindow
     from snipforge.library import DOCUMENT, Library
@@ -158,7 +171,7 @@ def library_shot(theme_manager, mode: str) -> None:
         entry = lib.create(sample_app(accent=colors[n]), source=WindowInfo(None, title, app))
         when = now - dt.timedelta(days=(0 if n < 4 else 1 if n < 7 else 3), minutes=n * 7)
         moved = entry.path.with_name(when.strftime("%Y%m%d-%H%M%S-%f")[:19] + f"-{n}")
-        os.replace(entry.path, moved)
+        rename_when_free(entry.path, moved)
         entry = lib.get(moved.name)
         lib.update_meta(entry, favorite=favorite, tags=tags, indexed=True, text="sample")
         if favorite:
