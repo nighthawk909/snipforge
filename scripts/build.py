@@ -177,7 +177,8 @@ def write_checksums(files: list[Path], out_dir: Path = DIST) -> Path:
         digest = hashlib.sha256(f.read_bytes()).hexdigest()
         lines.append(f"{digest}  {f.name}")
     out = out_dir / "SHA256SUMS.txt"
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Unix line endings, so `sha256sum -c` on a Mac or Linux machine can check them too.
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return out
 
 

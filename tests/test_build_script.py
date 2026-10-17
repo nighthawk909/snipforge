@@ -50,6 +50,12 @@ def test_checksums_list_every_file_including_the_alias(tmp_path):
     ]
 
 
+def test_checksums_use_unix_line_endings_so_sha256sum_can_check_them(tmp_path):
+    (tmp_path / "a.zip").write_bytes(b"zip")
+    sums = build.write_checksums([tmp_path / "a.zip"], tmp_path)
+    assert b"\r" not in sums.read_bytes()  # `sha256sum -c` on Mac and Linux reads "a.zip\r" as the name
+
+
 @pytest.mark.parametrize("version, numeric", [
     ("0.5.0", "0.5.0.0"),
     ("0.6.0-preview.1", "0.6.0.1"),
