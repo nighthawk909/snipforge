@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ctypes
 import uuid
-from ctypes import POINTER, Structure, c_long, c_ubyte, c_uint, c_ulong, c_ushort, c_void_p
+from ctypes import POINTER, Structure, c_long, c_ubyte, c_uint, c_uint32, c_ushort, c_void_p
 from functools import cache
 
 _FUNCTYPE = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)  # COM is __stdcall (the same as cdecl on x64)
@@ -22,7 +22,7 @@ class ComError(OSError):
 
 
 class GUID(Structure):
-    _fields_ = [("d1", c_ulong), ("d2", c_ushort), ("d3", c_ushort), ("d4", c_ubyte * 8)]
+    _fields_ = [("d1", c_uint32), ("d2", c_ushort), ("d3", c_ushort), ("d4", c_ubyte * 8)]
 
     def __init__(self, text: str) -> None:
         b = uuid.UUID(text).bytes
