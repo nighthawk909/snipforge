@@ -5,6 +5,7 @@ import tempfile
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+import shiboken6
 from PySide6.QtCore import QEvent, QSettings
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -72,13 +73,17 @@ def _delete_leftover_windows():
     yield
     if QApplication.instance() is None:
         return
-    for window in QApplication.topLevelWidgets():
-        if window.isVisible():
-            window.close()  # once: the test may have closed it already
-        window.deleteLater()
-        # Only these windows: other objects waiting to be deleted (a worker thread still finishing,
-        # say) must go when their own code is done with them, or Qt aborts.
-        QApplication.sendPostedEvents(window, QEvent.DeferredDelete)
+    windows = QApplication.topLevelWidgets()
+    for window in windows:
+        if shiboken6.isValid(window):  # closing one window can delete others (its menus, say)
+            if window.isVisible():
+                window.close()  # once: the test may have closed it already
+            window.deleteLater()
+    # Only these windows: other objects waiting to be deleted (a worker thread still finishing, say)
+    # must go when their own code is done with them, or Qt aborts.
+    for window in windows:
+        if shiboken6.isValid(window):
+            QApplication.sendPostedEvents(window, QEvent.DeferredDelete)
 
 
 @pytest.fixture
