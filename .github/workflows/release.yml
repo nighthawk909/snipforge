@@ -1,16 +1,19 @@
 name: Release
 
 # On every push to main, release-please keeps an open "release PR" that bumps the version and
-# updates CHANGELOG.md from conventional commits. Merging that PR creates the tag and GitHub
-# release; this workflow then builds, self-tests and attaches the installer.
-# Run it by hand ("Run workflow", with a tag) to rebuild and re-attach assets for an existing release.
+# updates CHANGELOG.md from conventional commits. Merging that PR creates the tag and a *draft*
+# GitHub release; this workflow then builds, self-tests and attaches the installer, and only then
+# publishes the release, so the "latest" download links never point at a release without its files.
+# If the build fails the release stays a draft (only maintainers see it) and the previous release
+# stays "Latest". Run it by hand ("Run workflow", with a tag) to rebuild and re-attach assets for an
+# existing release; a draft is published once its files are attached.
 on:
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag to build and attach assets to (e.g. v0.4.0)"
+        description: "Existing release tag, published or draft, to build and attach assets to (e.g. v0.4.0)"
         type: string
         required: true
 
@@ -118,3 +121,34 @@ jobs:
           gh release upload "$TAG" dist/SnipForge-*-setup.exe dist/SnipForge-setup.exe \
             dist/SnipForge-*-portable.zip dist/SHA256SUMS.txt dist/sbom.cdx.json \
             --clobber --repo "$GITHUB_REPOSITORY"
+      # release-please creates the release as a draft (release-please-config.json), so people, the
+      # download links and the in-app updater only see it now that every file is attached.
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          if [ "$draft" != "true" ]; then
+            echo "$TAG is already published; leaving it as it is."
+            exit 0
+          fi
+          # Lookups fail closed: only "404 Not Found" (no stable release yet) counts as "none". If
+          # this stops, the release stays a draft; publish it by hand from the Releases page.
+          err=$(mktemp)
+          if latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$err"); then
+            if [[ ! "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::The latest release has an unexpected tag '$latest'"
+              exit 1
+            fi
+            newest=$(printf '%s\n%s\n' "${latest#v}" "${TAG#v}" | sort -V | tail -n1)
+          elif grep -q "HTTP 404" "$err"; then
+            newest=${TAG#v}
+          else
+            echo "::error::Couldn't read the latest release: $(cat "$err")"
+            exit 1
+          fi
+          # A draft of an older version (rebuilt by hand after a newer release) mustn't take "Latest" back.
+          if [ "$newest" = "${TAG#v}" ]; then make_latest=true; else make_latest=false; fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$make_latest"
+          echo "Published $TAG (latest: $make_latest)."
