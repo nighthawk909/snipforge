@@ -6,8 +6,9 @@ They are Qt's own LGPL build, loaded from the PySide6 folder, so nothing extra i
 9.0.1's headers; they only change between major versions, so any other version is refused
 (FFmpegUnavailable) until it has been checked, rather than misread.
 
-Every file is opened with FFmpeg's protocol whitelist set to "file": the libraries can speak http,
-rtsp and more, and SnipForge never lets them go online.
+Every file is opened with FFmpeg's protocol whitelist set to "file" (the libraries can speak http,
+rtsp and more, and SnipForge never lets them go online) and only the container formats SnipForge
+records are read (MP4, Matroska, AVI), so a strange file never reaches FFmpeg's other readers.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ WINDOWS_NAMES = {"avutil": "avutil-61.dll", "avcodec": "avcodec-63.dll", "avform
 AV_NOPTS_VALUE = -0x8000000000000000
 AV_TIME_BASE = 1_000_000
 AVMEDIA_TYPE_VIDEO, AVMEDIA_TYPE_AUDIO = 0, 1
+FORMATS = b"mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi"  # the containers SnipForge reads
 
 
 class FFmpegError(RuntimeError):
@@ -118,8 +120,11 @@ def _library_files() -> dict[str, Path]:
     if sys.platform == "win32":
         return {name: folder / filename for name, filename in WINDOWS_NAMES.items()}
     found = {}
+    lib = folder / "Qt" / "lib"
     for name, major in TESTED.items():
-        matches = sorted(folder.rglob(f"lib{name}.{major}*.dylib")) or sorted(folder.rglob(f"lib{name}*.so.{major}*"))
+        patterns = (f"lib{name}.{major}*.dylib", f"lib{name}.so.{major}*")
+        matches = [m for p in patterns for m in sorted(lib.glob(p))]
+        matches = matches or [m for p in patterns for m in sorted(folder.rglob(p))]
         if not matches:
             raise FFmpegUnavailable(f"Qt's lib{name} wasn't found under {folder}")
         found[name] = matches[0]
@@ -194,11 +199,23 @@ def _seconds(value: int, base: AVRational) -> float | None:
     return value * base.num / base.den
 
 
+def local_options(formats: bytes | None = None) -> c_void_p:
+    """An AVDictionary that limits FFmpeg to local files (and to `formats`, when reading); the
+    caller frees it with av_dict_free."""
+    util = _libs()["avutil"]
+    options = c_void_p()
+    settings = [(b"protocol_whitelist", b"file")] + ([(b"format_whitelist", formats)] if formats else [])
+    for key, value in settings:
+        if util.av_dict_set(byref(options), key, value, 0) < 0:
+            util.av_dict_free(byref(options))
+            raise FFmpegError("Couldn't limit FFmpeg to local files")  # never open anything without it
+    return options
+
+
 def open_input(path: str | os.PathLike) -> ctypes._Pointer:
     """Open a local file for reading; the caller closes it with close_input()."""
     libs = _libs()
-    options = c_void_p()
-    libs["avutil"].av_dict_set(byref(options), b"protocol_whitelist", b"file", 0)
+    options = local_options(FORMATS)
     ctx = POINTER(AVFormatContext)()
     name = os.fspath(path)
     try:

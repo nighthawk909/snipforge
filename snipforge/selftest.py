@@ -226,7 +226,7 @@ def run(report_path: str) -> int:
     _check(results, "windows", _windows, required=False)
     _check(results, "hotkey", _hotkey if windows else _not_on_this_platform, required=windows)
     _check(results, "share", _share, required=False)
-    _check(results, "video", _video, required=windows)  # on a Mac too, once a Mac has confirmed it
+    _check(results, "video", _video)
     passed = all(r["ok"] for r in results.values() if r["required"])
     report = {"version": __version__, "platform": sys.platform, "passed": passed, "checks": results}
     try:

@@ -8,7 +8,7 @@ import pytest
 from snipforge.video import clip, ffmpeg
 
 needs_ffmpeg = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
-                                  reason=f"Qt's FFmpeg isn't usable here: {ffmpeg.unavailable_reason()}")
+                                   reason="Qt's FFmpeg isn't usable here (ffmpeg.unavailable_reason() says why)")
 
 
 @needs_ffmpeg
@@ -30,6 +30,44 @@ def test_a_clip_that_cant_be_written_is_reported(tmp_path, qapp):
 
     with pytest.raises(clip.ClipError):
         clip.make_test_clip(folder, seconds=0.2)
+
+
+def test_a_recorder_error_is_reported(tmp_path, qapp):
+    with pytest.raises(clip.ClipError, match="Couldn't record"):
+        clip.make_test_clip(tmp_path / "no such folder" / "clip.mp4", seconds=0.2)
+
+
+def test_a_recording_that_takes_too_long_is_stopped_and_lets_go_of_its_file(tmp_path, monkeypatch, qapp):
+    monkeypatch.setattr(clip, "TIMEOUT_MS", 1)
+    path = tmp_path / "slow.mp4"
+
+    with pytest.raises(clip.ClipError, match="timed out"):
+        clip.make_test_clip(path, seconds=5.0)
+    path.unlink(missing_ok=True)  # Windows refuses to delete a file that's still open
+
+
+def test_recorders_dont_outlive_their_clip(tmp_path, qapp):
+    import gc
+
+    from PySide6.QtMultimedia import QMediaRecorder
+
+    def alive():
+        gc.collect()
+        return sum(isinstance(o, QMediaRecorder) for o in gc.get_objects())
+
+    before = alive()
+    for i in range(3):
+        clip.make_test_clip(tmp_path / f"clip{i}.mp4", seconds=0.2)
+
+    assert alive() == before
+
+
+def test_a_relative_name_is_kept_where_it_says(tmp_path, monkeypatch, qapp):
+    monkeypatch.chdir(tmp_path)
+
+    path = clip.make_test_clip("relative.mp4", seconds=0.2)
+
+    assert path == tmp_path / "relative.mp4" and path.is_file()
 
 
 def test_the_app_doesnt_load_qt_multimedia_until_it_records():

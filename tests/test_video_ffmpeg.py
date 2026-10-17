@@ -8,7 +8,7 @@ from snipforge.video import clip, ffmpeg
 
 # Required on Windows; elsewhere (the Mac port) the run says why they were skipped.
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
-                                reason=f"Qt's FFmpeg isn't usable here: {ffmpeg.unavailable_reason()}")
+                                 reason="Qt's FFmpeg isn't usable here (ffmpeg.unavailable_reason() says why)")
 
 
 @pytest.fixture(scope="module")
@@ -41,9 +41,32 @@ def test_a_missing_file_is_reported(tmp_path):
 
 
 def test_only_local_files_are_opened():
-    """The libraries can speak http, rtsp and more; SnipForge never lets them go online."""
-    with pytest.raises(ffmpeg.FFmpegError):
-        ffmpeg.probe("http://127.0.0.1:9/clip.mp4")
+    """The libraries can speak http, rtsp and more; SnipForge never lets them go online. A server
+    is listening here, so only the whitelist can stop the connection."""
+    import socket
+
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        server.settimeout(0.5)
+        with pytest.raises(ffmpeg.FFmpegError):
+            ffmpeg.probe(f"http://127.0.0.1:{server.getsockname()[1]}/clip.mp4")
+        with pytest.raises(TimeoutError):
+            server.accept()  # nobody connected
+
+
+def test_only_the_containers_snipforge_records_are_read(tmp_path):
+    import wave
+
+    sound = tmp_path / "sound.wav"
+    with wave.open(str(sound), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(bytes(1600))
+
+    with pytest.raises(ffmpeg.FFmpegError, match="sound.wav"):
+        ffmpeg.probe(sound)
 
 
 def test_names_outside_ascii_work(test_clip, tmp_path):

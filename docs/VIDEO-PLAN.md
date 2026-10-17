@@ -245,8 +245,8 @@ The choices above were made so the Mac version reuses most of the work
 | Microphone | WASAPI | `SCStream` `captureMicrophone` (macOS 15+), or `QAudioSource` / AVFoundation on macOS 14 | No |
 | Pointer and clicks | `GetCursorInfo`, `GetAsyncKeyState` | `NSCursor` image, `CGEventSourceButtonState` (polling, no permission) | No (behind `pointer.py`) |
 | Mixer, compositor, control bar, webcam (QCamera), pause | | | **Yes** |
-| Encoding | Qt `QMediaRecorder` | Qt `QMediaRecorder`; Qt's Mac FFmpeg is expected to use Apple's hardware encoder (VideoToolbox), to confirm on a Mac. Fallback: `AVAssetWriter` through PyObjC behind the same interface | **Yes** (if confirmed) |
-| Trim, GIF, editor | Qt's FFmpeg via ctypes | the same, loading `libavformat.*.dylib` instead of the DLLs | **Yes** |
+| Encoding | Qt `QMediaRecorder` | Qt `QMediaRecorder`: confirmed by the macOS build workflow (the packaged app's self-test records H.264 + AAC on Apple silicon and on Intel under Rosetta; Qt's Mac build is the same FFmpeg 9.0.1 LGPL). Fallback if ever needed: `AVAssetWriter` through PyObjC | **Yes** |
+| Trim, GIF, editor | Qt's FFmpeg via ctypes | the same, loading `libavformat.63.dylib` and so on from `PySide6/Qt/lib` (works in the macOS build workflow) | **Yes** |
 
 Permissions on the Mac: Screen & System Audio Recording (already needed for snips), Microphone and
 Camera (usage descriptions in `Info.plist`). Without the paid Apple account the app is ad-hoc
