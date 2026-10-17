@@ -6,10 +6,10 @@ import logging
 import sys
 
 from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import REPO, __version__, autostart, theme
+from . import REPO, __version__, prefs, theme
 from .capture import CaptureSession
 from .editor.window import EditorWindow
 from .home import HomeWindow
@@ -17,10 +17,10 @@ from .hotkey import HotkeyListener
 from .indexer import TextIndexer
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
+from .settings_window import SettingsWindow
 from .single_instance import InstanceServer, send_to_running
 from .theme.tokens import BRAND
-from .update_flow import UpdateFlow, automatic_enabled, set_automatic
-from .updates import disabled_by_policy
+from .update_flow import UpdateFlow
 
 log = logging.getLogger(__name__)
 CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing the screen
@@ -53,11 +53,13 @@ class SnipForgeApp:
         self._session: CaptureSession | None = None
         self._windows: list = []  # editors and pins kept alive until closed
         self._home: HomeWindow | None = None
+        self._settings: SettingsWindow | None = None
         self._icon = build_icon()
         app.setWindowIcon(self._icon)
         app.setQuitOnLastWindowClosed(False)
 
         self._hotkey = HotkeyListener()
+        self._hotkey.set_keys(*prefs.hotkeys())
         self._hotkey.triggered.connect(self.capture, Qt.QueuedConnection)
         self._hook_ok = self._hotkey.start()
         self._rehook = QTimer(interval=REHOOK_MS)
@@ -72,23 +74,13 @@ class SnipForgeApp:
         self._tray = QSystemTrayIcon(self._icon)
         self._tray.setToolTip(f"SnipForge {__version__} — Win+Shift+S or Print Screen")
         self._updates = UpdateFlow(self._tray)
+        self._updates.ui_shows_updates = self._settings_shows_updates
         menu = QMenu()
         menu.addAction("New snip", self.capture)
         menu.addAction("Library", self.show_home)
-        menu.addSeparator()
-        start = QAction("Start with Windows", menu)
-        start.setCheckable(True)
-        start.setChecked(autostart.is_enabled())
-        start.toggled.connect(self._toggle_autostart)
-        menu.addAction(start)
+        menu.addAction("Settings…", self.show_settings)
         menu.addSeparator()
         menu.addAction("Check for updates…", self.check_updates)
-        if not disabled_by_policy():
-            auto = QAction("Update automatically", menu)
-            auto.setCheckable(True)
-            auto.setChecked(automatic_enabled())
-            auto.toggled.connect(set_automatic)
-            menu.addAction(auto)
         menu.addAction("About SnipForge", self.about)
         menu.addAction("Quit", self._app.quit)
         self._menu = menu
@@ -101,25 +93,35 @@ class SnipForgeApp:
                                    "won't work. Use the tray icon to snip.", QSystemTrayIcon.Warning)
         self._updates.start()
 
-    def _toggle_autostart(self, on: bool) -> None:
-        try:
-            autostart.set_enabled(on)
-        except OSError as exc:
-            QMessageBox.warning(None, "SnipForge", f"Couldn't change the startup setting: {exc}")
-        if not on and autostart.enabled_for_all_users():
-            QMessageBox.information(None, "SnipForge", "SnipForge is set to start for everyone on this PC "
-                                    "(set by your administrator), so it will still start when you sign in.")
-
     def check_updates(self) -> None:
-        self._updates.check_now()
+        """Open Settings > Updates and check there (the tray flow explains when IT turned updates off)."""
+        if self._updates.controller.policy.disabled:
+            self._updates.check_now()
+            return
+        self.show_settings("updates")
+        if not self._updates.controller.busy:
+            self._updates.controller.check_now()
+
+    def _settings_shows_updates(self) -> bool:
+        return (self._settings is not None and self._settings.isVisible()
+                and not self._settings.isMinimized() and self._settings.current_section() == "updates")
+
+    def show_settings(self, section: str = "general") -> None:
+        if self._settings is None:
+            self._settings = SettingsWindow(theme_manager=theme.get_manager(),
+                                            update_controller=self._updates.controller,
+                                            hotkey=self._hotkey, library_root=self.library.root)
+        self._settings.show_section(section)
+        self._settings.showNormal()
+        self._bring_to_front(self._settings)
 
     def about(self) -> None:
         QMessageBox.about(
             None, "About SnipForge",
             f"<b>SnipForge {__version__}</b><br>Open-source screenshot and markup tool for Windows."
             f"<br><br>Built with Python, Qt and PySide6 (LGPL-3.0). License texts are in the install folder."
-            f"<br><br>MIT License. Your snips stay on this PC. SnipForge only goes online to check GitHub "
-            f"for updates (turn off in the tray menu) or when you use Share."
+            f"<br><br>MIT License. Your snips stay on this PC. SnipForge only goes online to check for "
+            f"updates (choose how in Settings) or when you use Share."
             f"<br><br><a href='https://github.com/{REPO}'>github.com/{REPO}</a>")
 
     def handle_command(self, command: str) -> None:
@@ -127,11 +129,14 @@ class SnipForgeApp:
             self.capture()
         elif command == "home":
             self.show_home()
+        elif command == "settings":
+            self.show_settings()
 
     # ------------------------------------------------------------------ windows
     def show_home(self) -> None:
         if self._home is None:
-            self._home = HomeWindow(self.library, self.capture, self.open_entry, indexer=self.indexer)
+            self._home = HomeWindow(self.library, self.capture, self.open_entry, indexer=self.indexer,
+                                    on_settings=self.show_settings)
         if self._home.isVisible():
             self._home.refresh()  # already open: pick up anything new (opening it refreshes by itself)
         self._home.showNormal()
@@ -148,7 +153,8 @@ class SnipForgeApp:
         self._session = None
         if image is None:
             return
-        QGuiApplication.clipboard().setImage(image)  # like Win+Shift+S: the raw snip is on the clipboard too
+        if prefs.copy_on_capture():  # like Win+Shift+S: the raw snip is on the clipboard too
+            QGuiApplication.clipboard().setImage(image)
         try:
             entry = self.library.create(image, source=source)
         except OSError as exc:

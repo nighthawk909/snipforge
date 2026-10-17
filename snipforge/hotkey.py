@@ -66,7 +66,8 @@ def _is_down(vk: int) -> bool:
 
 
 class HotkeyListener(QObject):
-    """Emits `triggered` when Win+Shift+S or Print Screen is pressed."""
+    """Emits `triggered` when Win+Shift+S or Print Screen is pressed (each can be turned off in
+    Settings; a turned-off shortcut is passed through to Windows untouched)."""
 
     triggered = Signal()
 
@@ -77,6 +78,16 @@ class HotkeyListener(QObject):
         self._ready = threading.Event()
         self._hook = None
         self._proc = HOOKPROC(self._callback)  # keep a reference or it is GC'd
+        self._win_shift_s = True
+        self._print_screen = True
+
+    @property
+    def keys(self) -> tuple[bool, bool]:
+        return self._win_shift_s, self._print_screen
+
+    def set_keys(self, win_shift_s: bool, print_screen: bool) -> None:
+        # Plain bools read by the hook thread; assignment is atomic.
+        self._win_shift_s, self._print_screen = bool(win_shift_s), bool(print_screen)
 
     def start(self) -> bool:
         self._thread = threading.Thread(target=self._run, name="snipforge-hotkey", daemon=True)
@@ -121,7 +132,8 @@ class HotkeyListener(QObject):
     def _callback(self, n_code, w_param, l_param):
         if n_code >= 0 and w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
             info = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-            if not info.flags & LLKHF_INJECTED and self._matches(info.vkCode):
+            if not info.flags & LLKHF_INJECTED and self._matches(info.vkCode, self._win_shift_s,
+                                                                 self._print_screen):
                 if info.vkCode == VK_S:
                     self._cancel_start_menu()
                 self.triggered.emit()
@@ -129,12 +141,12 @@ class HotkeyListener(QObject):
         return _user32.CallNextHookEx(None, n_code, w_param, l_param)
 
     @staticmethod
-    def _matches(vk: int) -> bool:
+    def _matches(vk: int, win_shift_s: bool = True, print_screen: bool = True) -> bool:
         win = _is_down(VK_LWIN) or _is_down(VK_RWIN)
         if vk == VK_SNAPSHOT:
             # Plain Print Screen only: Alt+PrtSc (active window) and Win+PrtSc stay with Windows.
-            return not (win or _is_down(VK_MENU) or _is_down(VK_CONTROL))
-        return vk == VK_S and win and _is_down(VK_SHIFT)
+            return print_screen and not (win or _is_down(VK_MENU) or _is_down(VK_CONTROL))
+        return win_shift_s and vk == VK_S and win and _is_down(VK_SHIFT)
 
     @staticmethod
     def _cancel_start_menu() -> None:

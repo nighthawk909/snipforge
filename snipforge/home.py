@@ -5,10 +5,9 @@ import datetime as dt
 import logging
 import os
 
-from PySide6.QtCore import QLocale, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QKeySequence, QPainter, QShortcut
+from PySide6.QtCore import QLocale, Qt, QTimer
+from PySide6.QtGui import QGuiApplication, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractButton,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -28,8 +27,7 @@ from .icons import icon
 from .library import DOCUMENT, META, EntryMeta, Library
 from .library_search import PERIODS, Item, group_by_date, select, tag_counts, top_apps
 from .library_view import SnipGrid
-from .theme.tokens import to_qcolor
-from .widgets import Segmented
+from .widgets import NavItem, Segmented
 
 log = logging.getLogger(__name__)
 VIEWS = {"all": ("All captures", "grid"), "favorites": ("Favorites", "star"), "edited": ("Recently edited", "pen")}
@@ -46,79 +44,6 @@ def _stamp(path, ns: bool):
     except OSError:
         return None
     return info.st_mtime_ns if ns else info.st_mtime
-
-
-class NavItem(QAbstractButton):
-    """A sidebar row: icon (or colored dot), label and a count, with a bar when selected."""
-
-    def __init__(self, text: str, icon_name: str | None = None, dot: str | None = None, parent=None) -> None:
-        super().__init__(parent)
-        self.setText(text)
-        self.setCheckable(True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setAccessibleName(text)
-        self._icon_name, self._dot, self._count = icon_name, dot, ""
-
-    def set_count(self, count: int | None) -> None:
-        self._count = "" if count is None else str(count)
-        self.update()
-
-    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API
-        return QSize(SIDEBAR_WIDTH - 24, 34)
-
-    @staticmethod
-    def _colors(t) -> dict:
-        """On a branded (colored) sidebar, draw with the header band's colors."""
-        h, pal = t.header, t.palette
-        if h.branded:
-            return {"text": h.text, "text2": h.text2, "hover": h.hover, "select": h.button_border,
-                    "bar": h.primary_bg, "icon_on": h.text}
-        return {"text": pal.text, "text2": pal.text3, "hover": pal.hover, "select": pal.select,
-                "bar": t.accent.fill, "icon_on": t.accent.text}
-
-    def paintEvent(self, _e) -> None:  # noqa: N802 - Qt API
-        t = theme.current()
-        c = self._colors(t)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect())
-        if self.isChecked() or self.underMouse():
-            p.setPen(Qt.NoPen)
-            p.setBrush(to_qcolor(c["select"] if self.isChecked() else c["hover"]))
-            p.drawRoundedRect(r, 6, 6)
-        if self.isChecked():
-            p.setBrush(to_qcolor(c["bar"]))
-            p.drawRoundedRect(QRectF(0, r.height() / 2 - 8, 3, 16), 1.5, 1.5)
-        if self._dot:
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(self._dot))
-            p.drawEllipse(QRectF(15, r.height() / 2 - 5, 10, 10))
-        elif self._icon_name:
-            color = c["icon_on"] if self.isChecked() else c["text2"]
-            icon(self._icon_name, color, color, color).paint(p, 12, int(r.height() / 2 - 9), 18, 18)
-        font = self.font()
-        font.setBold(self.isChecked())
-        p.setFont(font)
-        p.setPen(to_qcolor(c["text"]))
-        p.drawText(r.adjusted(40, 0, -40, 0), Qt.AlignLeft | Qt.AlignVCenter, self.text())
-        if self._count:
-            font.setBold(False)
-            p.setFont(font)
-            p.setPen(to_qcolor(c["text2"]))
-            p.drawText(r.adjusted(0, 0, -10, 0), Qt.AlignRight | Qt.AlignVCenter, self._count)
-        if self.hasFocus():
-            p.setPen(QColor(t.accent.fill))
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(r.adjusted(1, 1, -1, -1), 6, 6)
-        p.end()
-
-    def enterEvent(self, e) -> None:  # noqa: N802 - Qt API
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802 - Qt API
-        self.update()
-        super().leaveEvent(e)
 
 
 class HomeWindow(QMainWindow):
@@ -164,7 +89,7 @@ class HomeWindow(QMainWindow):
         col.addSpacing(12)
         self._nav: dict[str, NavItem] = {}
         for key, (label, icon_name) in VIEWS.items():
-            item = NavItem(label, icon_name)
+            item = NavItem(label, icon_name, on_band=True)
             item.clicked.connect(lambda _=False, k=key: self.show_view(k))
             self._nav[key] = item
             col.addWidget(item)
@@ -177,16 +102,16 @@ class HomeWindow(QMainWindow):
         self._tags_box.setSpacing(2)
         col.addLayout(self._tags_box)
         col.addStretch(1)
-        self._folder = NavItem("Open library folder", "folder")
+        self._folder = NavItem("Open library folder", "folder", on_band=True)
         self._folder.setCheckable(False)
         self._folder.clicked.connect(lambda: self._reveal(self._library.root))
         col.addWidget(self._folder)
-        self._bin = NavItem("Recycle Bin", "trash")
+        self._bin = NavItem("Recycle Bin", "trash", on_band=True)
         self._bin.setCheckable(False)
         self._bin.setToolTip("Snips you delete go to the Windows Recycle Bin, so you can restore them")
         self._bin.clicked.connect(self._open_recycle_bin)
         col.addWidget(self._bin)
-        self._settings = NavItem("Settings", "settings")
+        self._settings = NavItem("Settings", "settings", on_band=True)
         self._settings.setCheckable(False)
         self._settings.setVisible(self._on_settings is not None)
         if self._on_settings is not None:
@@ -335,13 +260,14 @@ class HomeWindow(QMainWindow):
         while self._tags_box.count():
             widget = self._tags_box.takeAt(0).widget()
             if widget:
+                widget.hide()
                 widget.deleteLater()
         tags = tag_counts(self._items)
         self._tags_label.setVisible(bool(tags))
         if self._tag is not None and self._tag not in dict(tags):
             self._tag = None
         for n, (tag, count) in enumerate(tags[:12]):
-            nav = NavItem(tag, dot=TAG_COLORS[n % len(TAG_COLORS)])  # by position, so neighbors differ
+            nav = NavItem(tag, dot=TAG_COLORS[n % len(TAG_COLORS)], on_band=True)  # by position: neighbors differ
             nav.set_count(count)
             nav.setChecked(tag == self._tag)
             nav.clicked.connect(lambda _=False, t=tag: self.show_tag(t))
@@ -351,6 +277,7 @@ class HomeWindow(QMainWindow):
         while self._apps_box.count():
             widget = self._apps_box.takeAt(0).widget()
             if widget:
+                widget.hide()
                 widget.deleteLater()
         apps = top_apps(self._items)
         if self._app is not None and self._app not in apps:

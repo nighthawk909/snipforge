@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import ocr, redact, theme
+from .. import ocr, prefs, redact, theme
 from ..dragout import DragOutButton
 from ..icons import icon
 from ..library import Entry, Library
@@ -51,7 +51,6 @@ TOOLS = [
     None,
     ("crop", "Crop (C)"),
 ]
-EXPORT_DIR = Path.home() / "Pictures" / "SnipForge"
 AUTOSAVE_MS = 700
 
 
@@ -332,15 +331,27 @@ class EditorWindow(QMainWindow):
         QGuiApplication.clipboard().setImage(self.final_image())
         self.statusBar().showMessage("Copied to clipboard", 2500)
 
+    @staticmethod
+    def _new_export_path() -> Path:
+        """In the Save folder chosen in Settings (Pictures\\SnipForge by default), PNG or JPG."""
+        folder = prefs.export_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / dt.datetime.now().strftime(f"snip-%Y%m%d-%H%M%S.{prefs.export_format()}")
+
     def save(self) -> None:
         if self._export_path is None:
-            EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-            self._export_path = EXPORT_DIR / dt.datetime.now().strftime("snip-%Y%m%d-%H%M%S.png")
+            try:
+                self._export_path = self._new_export_path()
+            except OSError as exc:
+                QMessageBox.warning(self, "SnipForge", f"Couldn't use the save folder: {exc}")
+                return
         self._write(self._export_path)
 
     def save_as(self) -> None:
-        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-        start = self._export_path or EXPORT_DIR / dt.datetime.now().strftime("snip-%Y%m%d-%H%M%S.png")
+        try:
+            start = self._export_path or self._new_export_path()
+        except OSError:
+            start = Path.home() / "Pictures"
         path, _ = QFileDialog.getSaveFileName(self, "Save snip", str(start),
                                               "PNG (*.png);;JPEG (*.jpg *.jpeg);;Bitmap (*.bmp)")
         if path:
