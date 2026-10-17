@@ -66,27 +66,39 @@ def find_shift(prev: list[int], cur: list[int], header: int = 0, footer: int = 0
     prev_band, cur_band = prev[header:len(prev) - footer], cur[header:len(cur) - footer]
     size = min(len(prev_band), len(cur_band))
     min_overlap = max(MIN_OVERLAP, size // 10)
-    if size <= min_overlap:
-        return None
-    candidates = _candidates(prev_band, cur_band, size - min_overlap)
-    best, best_score = None, MIN_MATCH
-    for shift in candidates:
+    if size <= min_overlap or prev_band == cur_band:
+        return None  # too small to tell, or nothing moved
+
+    def score(shift: int) -> float:
         overlap = size - shift
-        score = sum(cur_band[i] == prev_band[i + shift] for i in range(overlap)) / overlap
-        if score > best_score or (score == best_score and best is not None and shift < best):
-            best, best_score = shift, score
+        return sum(cur_band[i] == prev_band[i + shift] for i in range(overlap)) / overlap
+
+    still = score(0)  # how well "it didn't move" explains the new frame
+    best, best_score = None, MIN_MATCH
+    for shift in _candidates(prev_band, cur_band, size - min_overlap):
+        value = score(shift)
+        if value > still and (value > best_score or (value == best_score and best is not None and shift < best)):
+            best, best_score = shift, value
     return best
 
 
+def _anchors(band: list[int]) -> list[tuple[int, tuple[int, int]]]:
+    """(row, key) where a row differs from the one above it, keyed by the pair: the edge of a line of
+    text or a block. Pairs are far more distinctive than single rows on pages of solid blocks and
+    blank space."""
+    return [(i, (band[i - 1], band[i])) for i in range(1, len(band)) if band[i] != band[i - 1]]
+
+
 def _candidates(prev_band: list[int], cur_band: list[int], max_shift: int) -> list[int]:
-    """Likely shifts: where rows that appear once in the old frame turn up in the new one."""
-    counts = Counter(prev_band)
-    where = {sig: i for i, sig in enumerate(prev_band) if counts[sig] == 1}
-    votes = Counter(where[sig] - i for i, sig in enumerate(cur_band) if sig in where)
+    """Likely shifts: where edges that appear once in the old frame turn up in the new one."""
+    prev_edges = _anchors(prev_band)
+    counts = Counter(key for _, key in prev_edges)
+    where = {key: i for i, key in prev_edges if counts[key] == 1}
+    votes = Counter(where[key] - i for i, key in _anchors(cur_band) if key in where)
     likely = [shift for shift, _ in votes.most_common(5) if 0 < shift <= max_shift]
     if likely or votes:
         return likely
-    return list(range(1, max_shift + 1))  # no distinctive rows (a plain page): try every shift
+    return list(range(1, max_shift + 1))  # nothing distinctive (a plain page): try every shift
 
 
 class Stitcher:
@@ -105,6 +117,10 @@ class Stitcher:
         self._footer_image: QImage | None = None
         self._height = 0
         self.full = False  # stopped at max_height
+        self.last_shift = 0  # rows the content moved in the last frame that added any
+        # What the last add() found: "added", "still" (nothing moved: the end, or not redrawn yet),
+        # "mismatch" (doesn't line up: e.g. grabbed mid-redraw) or "full" (the height limit).
+        self.outcome = ""
 
     def _signatures(self, frame: QImage, columns: tuple[int, int] | None = None) -> list[int]:
         margin = self._right_margin
@@ -123,26 +139,32 @@ class Stitcher:
             self._first, self._prev_frame, self._size = frame, frame, frame.size()
             self._prev = self._signatures(frame)
             self._height = frame.height()
+            self.outcome = "added"
             return True
         if frame.size() != self._size:
             raise ValueError("every frame of a scrolling capture must be the same size")
         if self.full:
+            self.outcome = "full"
             return False
         rows = frame.height()
         columns, prev = self._columns, self._prev
         if columns is None:  # until the first scroll: work out which columns move
             columns = changed_columns(self._prev_frame, frame)
             if columns is None:
-                return False  # nothing moved
+                self.outcome = "still"
+                return False
             prev = self._signatures(self._prev_frame, columns)
         signatures = self._signatures(frame, columns)
         header, footer = self._header, self._footer
         if header is None:
             header, footer = self._still_rows(prev, signatures)
             if header + footer >= rows:
-                return False  # nothing moved
+                self.outcome = "still"
+                return False
         shift = find_shift(prev, signatures, header, footer)
         if shift is None:
+            band = slice(header, rows - footer)
+            self.outcome = "still" if prev[band] == signatures[band] else "mismatch"
             return False
         if self._header is None:
             self._columns = columns
@@ -150,16 +172,20 @@ class Stitcher:
         room = self.max_height - self._height
         if room <= 0:
             self.full = True
+            self.outcome = "full"
             return False
         take = min(shift, room)
         bottom = rows - footer
         self._body.append(frame.copy(QRect(0, bottom - shift, frame.width(), take)))
         self._footer_image = frame.copy(QRect(0, bottom, frame.width(), footer)) if footer else None
         self._height += take
+        self.last_shift = shift
         self._prev, self._prev_frame = signatures, frame
         if take < shift:
             self.full = True
+            self.outcome = "full"
             return False
+        self.outcome = "added"
         return True
 
     def _still_rows(self, prev: list[int], cur: list[int]) -> tuple[int, int]:

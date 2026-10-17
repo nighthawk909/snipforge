@@ -17,12 +17,14 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
-from . import pointer, prefs, theme
+from . import pointer, prefs, scroll_input, theme
 from .capture_toolbar import MODES, CaptureToolbar
 from .countdown import Countdown
+from .scrolling import ScrollCapture
 
 DIM = QColor(0, 0, 0, 120)
 DRAG_THRESHOLD = 4
+DRAG_MODES = ("area", "scroll")  # modes where a drag chooses an area
 TOOLBAR_TOP = 18
 HINT_BOTTOM = 40  # gap between the hint and the bottom of the monitor
 SOURCE_OVERLAP = 0.9  # share of a snip that must lie inside one window to credit that window
@@ -57,11 +59,13 @@ class _ScreenOverlay(QWidget):
     cancelled = Signal()
     mode_changed = Signal(str)  # the user picked another mode here (toolbar or letter key)
     delay_changed = Signal(int)  # the user picked a delay (seconds) on the toolbar
+    scroll_requested = Signal(QRect)  # Scrolling mode: this area (overlay coordinates) is to be scrolled
     pointer_changed = Signal(bool)  # the user switched the pointer on or off here
 
     def __init__(self, screen, pixmap: QPixmap, window_rects: list[QRect], sources: list | None = None,
                  *, mode: str = "area", toolbar: bool = False, delay: int = 0,
-                 pointer_shot: pointer.PointerShot | None = None, include_pointer: bool = False) -> None:
+                 pointer_shot: pointer.PointerShot | None = None, include_pointer: bool = False,
+                 scrolling: bool | None = None) -> None:
         """`sources` (optional) describes each of `window_rects`: a winrects.WindowInfo, same order.
         `toolbar`: show the capture toolbar on this monitor. `pointer_shot`: the pointer as it was
         when the screen froze, drawn into the snip while `include_pointer` is on."""
@@ -75,6 +79,8 @@ class _ScreenOverlay(QWidget):
         self.setGeometry(screen.geometry())
         origin = screen.geometry().topLeft()
         self._origin = origin
+        self.capture_screen = screen
+        self._scrolling = scroll_input.available() if scrolling is None else scrolling
         self._windows = self._to_local(origin, window_rects)
         self._sources = [(local, info) for r, info in zip(window_rects, sources or [], strict=False)
                          if (local := self._map(origin, r)) is not None]
@@ -85,12 +91,13 @@ class _ScreenOverlay(QWidget):
         self._dragging = False
         self._cursor: QPoint | None = None
         self._hover: QRect | None = None
-        self._mode = mode if mode in MODES else "area"
+        self._mode = mode if mode in MODES and (mode != "scroll" or self._scrolling) else "area"
         self.toolbar: CaptureToolbar | None = None
         if toolbar:
             self.toolbar = CaptureToolbar(self._mode, self, delay=delay, pointer=self._pointer_shown(),
                                           pointer_available=pointer_shot is not None,
-                                          pointer_why=_pointer_unavailable_reason())
+                                          pointer_why=_pointer_unavailable_reason(),
+                                          scrolling=self._scrolling)
             self.toolbar.mode_picked.connect(self._pick_mode)
             self.toolbar.delay_picked.connect(self.delay_changed)
             self.toolbar.pointer_toggled.connect(self._pick_pointer)
@@ -169,6 +176,8 @@ class _ScreenOverlay(QWidget):
         self.update()
 
     def _pick_mode(self, mode: str) -> None:
+        if mode == "scroll" and not self._scrolling:
+            return
         if mode != self._mode:
             self.set_mode(mode)
             self.mode_changed.emit(mode)
@@ -179,7 +188,9 @@ class _ScreenOverlay(QWidget):
     def _place_toolbar(self) -> None:
         if self.toolbar is None:
             return
-        self.toolbar.adjustSize()
+        self.toolbar.set_compact(False)
+        if self.toolbar.width() > self.width() - 2 * TOOLBAR_TOP:  # a narrow monitor: icons only
+            self.toolbar.set_compact(True)
         self.toolbar.move((self.width() - self.toolbar.width()) // 2, TOOLBAR_TOP)
 
     def resizeEvent(self, e) -> None:  # noqa: N802 - Qt API
@@ -232,7 +243,7 @@ class _ScreenOverlay(QWidget):
         if self._mode == "screen":
             return self.rect()
         # The last entry is the whole monitor, offered when Area mode hovers the desktop.
-        windows = self._windows if self._mode == "area" else self._windows[:-1]
+        windows = self._windows if self._mode in DRAG_MODES else self._windows[:-1]
         return next((r for r in windows if r.contains(pos)), None)
 
     def _to_physical(self, r: QRect) -> QRect:
@@ -334,7 +345,7 @@ class _ScreenOverlay(QWidget):
         self._cursor = pos
         if self._press is not None:
             self._current = pos
-            if self._mode == "area" and (pos - self._press).manhattanLength() >= DRAG_THRESHOLD:
+            if self._mode in DRAG_MODES and (pos - self._press).manhattanLength() >= DRAG_THRESHOLD:
                 self._dragging = True
                 if self.toolbar is not None:
                     self.toolbar.hide()  # out of the way of the area being chosen
@@ -380,6 +391,9 @@ class _ScreenOverlay(QWidget):
             super().keyPressEvent(e)
 
     def _emit(self, sel: QRect) -> None:
+        if self._mode == "scroll":
+            self.scroll_requested.emit(QRect(sel))
+            return
         image = self._image.copy(self._to_physical(sel))
         image.setDevicePixelRatio(1.0)
         self.last_source = self._source_for(sel)
@@ -395,6 +409,7 @@ class CaptureSession:
         self._finished = False
         self.focus: _ScreenOverlay | None = None  # the overlay that has the keyboard
         self.countdown: Countdown | None = None  # counting down before the screen freezes
+        self.scrolling: ScrollCapture | None = None  # Scrolling mode, under way
         self.source = None  # the window the snip came from (winrects.WindowInfo), when known
 
     def start(self) -> None:
@@ -405,9 +420,12 @@ class CaptureSession:
             self._freeze()
 
     def snip_now(self) -> None:
-        """Skip the rest of a countdown (the snip key pressed again)."""
+        """The snip key pressed again: skip the rest of a countdown, or stop scrolling and keep
+        what's been captured."""
         if self.countdown is not None:
             self.countdown.snip_now()
+        elif self.scrolling is not None:
+            self.scrolling.stop()
 
     def cancel(self) -> None:
         """Stop this snip, whatever stage it's at (the tray's Cancel snip)."""
@@ -462,12 +480,14 @@ class CaptureSession:
         for screen in QGuiApplication.screens():
             overlay = _ScreenOverlay(screen, _grab_screen(screen), windows, infos, mode=mode, toolbar=True,
                                      delay=prefs.capture_delay(), pointer_shot=shot,
-                                     include_pointer=prefs.capture_pointer())
+                                     include_pointer=prefs.capture_pointer(),
+                                     scrolling=scroll_input.available())
             overlay.selected.connect(lambda image, o=overlay: self._finish(image, o.last_source))
             overlay.cancelled.connect(lambda: self._finish(None))
             overlay.mode_changed.connect(self._set_mode)
             overlay.delay_changed.connect(self._set_delay)
             overlay.pointer_changed.connect(self._set_pointer)
+            overlay.scroll_requested.connect(lambda rect, o=overlay: self._scroll(o, rect))
             self._overlays.append(overlay)
             if screen is active:
                 self.focus = overlay
@@ -494,6 +514,20 @@ class CaptureSession:
             self._close_overlays()
             self._count_down(seconds)
 
+    def _scroll(self, overlay: _ScreenOverlay, rect: QRect) -> None:
+        """Scrolling mode: the overlays step aside and the chosen area is scrolled and stitched."""
+        physical = overlay._to_physical(rect)
+        source = overlay._source_for(rect)
+        screen = overlay.capture_screen
+        self._close_overlays()
+        try:
+            self.scrolling = ScrollCapture(screen, physical)
+            self.scrolling.finished.connect(lambda image: self._finish(image, source))
+            self.scrolling.start()
+        except Exception:  # never leave a session that blocks every later snip
+            logging.getLogger(__name__).exception("Scrolling capture failed to start")
+            self._finish(None)
+
     def _set_pointer(self, on: bool) -> None:
         prefs.set_capture_pointer(on)
         for overlay in self._overlays:
@@ -511,5 +545,9 @@ class CaptureSession:
         self._finished = True
         self.source = source if image is not None else None
         self._drop_countdown()
+        if self.scrolling is not None:
+            self.scrolling.blockSignals(True)  # it already reported, or is being cancelled now
+            self.scrolling.cancel()
+            self.scrolling = None
         self._close_overlays()
         self._on_done(image)

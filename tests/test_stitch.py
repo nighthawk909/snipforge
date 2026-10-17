@@ -14,11 +14,11 @@ def page(height: int, seed: int = 7) -> QImage:
     """A long page: every row a different pattern, so any slice of it has one right place."""
     rng = random.Random(seed)
     image = QImage(WIDTH, height, QImage.Format_RGB32)
+    p = QPainter(image)
     for y in range(height):
         for x in range(0, WIDTH, 8):
-            color = QColor(rng.randrange(256), rng.randrange(256), rng.randrange(256))
-            for dx in range(8):
-                image.setPixelColor(x + dx, y, color)
+            p.fillRect(x, y, 8, 1, QColor(rng.randrange(256), rng.randrange(256), rng.randrange(256)))
+    p.end()
     return image
 
 
