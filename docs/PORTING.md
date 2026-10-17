@@ -74,7 +74,8 @@ your server. A `chore:` commit doesn't trigger a release. Keeping the public rep
 - **Runners**: the workflows use `windows-latest` and `ubuntu-latest`. On GHE Cloud these are
   GitHub-hosted (private repositories use your Actions minutes). On GHE Server, use self-hosted
   runners with those labels or change `runs-on`. The Windows build installs Inno Setup 6 with
-  Chocolatey if it's missing.
+  Chocolatey if it's missing. The manually run **macOS build** (`mac.yml`, see
+  [MAC-PLAN.md](MAC-PLAN.md)) needs `macos-latest`; without a macOS runner, just don't run it.
 - **Workflow permissions** (Settings → Actions → General): keep the default read-only token, and
   turn on **Allow GitHub Actions to create and approve pull requests**. release-please opens the
   release PR and approves its CI runs. Your organization may have to allow this first.

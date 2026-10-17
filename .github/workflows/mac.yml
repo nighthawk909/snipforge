@@ -1,0 +1,148 @@
+name: macOS build
+
+# Groundwork for the Mac version (docs/MAC-PLAN.md): runs the tests on macOS, builds SnipForge.app
+# into an unsigned SnipForge-<version>.dmg, proves the packaged app starts (--self-test, then a
+# real start), and uploads the .dmg as the "snipforge-macos" artifact.
+#
+# Run by hand only (Actions > macOS build > Run workflow). It never runs on pull requests or pushes,
+# so it can't block the required checks. macOS runners are free for public repositories. Read-only
+# and no secrets: the app has only a free ad-hoc signature and isn't notarized, so it needs
+# "Open Anyway" on first launch.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional: build as this version (e.g. 0.9.0-preview.1)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test, build and self-test on macOS
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install
+        run: python -m pip install -r requirements-dev.txt
+      - name: Show the Mac and the Python it builds with
+        run: |
+          sw_vers
+          python -c "import platform, sysconfig; print(platform.machine(), sysconfig.get_platform())"
+          lipo -archs "$(python -c 'import sys; print(sys.executable)')"
+      - name: Lint
+        run: python -m ruff check .
+      # Tests marked `windows` (registry, Explorer, Win32) are skipped here; see tests/conftest.py.
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q -rfs
+      - name: Build SnipForge.app and the .dmg
+        env:
+          SET_VERSION: ${{ inputs.version }}
+        run: python scripts/build_mac.py ${SET_VERSION:+--set-version "$SET_VERSION"}
+      # Installs the app from the .dmg the way a person would, so the image's copy is what's tested.
+      - name: Install the app from the .dmg
+        run: |
+          dmg=$(ls dist/SnipForge-*.dmg)
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg"
+          ls -la "$RUNNER_TEMP/dmg"
+          mkdir -p "$RUNNER_TEMP/Applications"
+          ditto "$RUNNER_TEMP/dmg/SnipForge.app" "$RUNNER_TEMP/Applications/SnipForge.app"
+          hdiutil detach "$RUNNER_TEMP/dmg"
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/Applications/SnipForge.app"
+          codesign --display --verbose=2 "$RUNNER_TEMP/Applications/SnipForge.app"
+          lipo -archs "$RUNNER_TEMP/Applications/SnipForge.app/Contents/MacOS/SnipForge"
+          # What Gatekeeper makes of it: "rejected" is expected for an app that isn't notarized.
+          spctl --assess --type execute --verbose=4 "$RUNNER_TEMP/Applications/SnipForge.app" || true
+      - name: Self-test the packaged app
+        timeout-minutes: 5
+        env:
+          SET_VERSION: ${{ inputs.version }}
+        run: |
+          app="$RUNNER_TEMP/Applications/SnipForge.app/Contents/MacOS/SnipForge"
+          status=0
+          "$app" --self-test dist/selftest.json || status=$?
+          cat dist/selftest.json || true
+          if [ "$status" -ne 0 ]; then echo "::error::Packaged app failed its self-test (exit $status)"; exit 1; fi
+          if [ -n "$SET_VERSION" ]; then
+            reported=$(python -c "import json; print(json.load(open('dist/selftest.json'))['version'])")
+            [ "$reported" = "$SET_VERSION" ] || { echo "::error::App reports $reported, expected $SET_VERSION"; exit 1; }
+          fi
+      # The app is universal: run its Intel (x86_64) half too, under Rosetta, when the runner has it.
+      - name: Self-test the Intel half under Rosetta
+        timeout-minutes: 5
+        run: |
+          app="$RUNNER_TEMP/Applications/SnipForge.app/Contents/MacOS/SnipForge"
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::notice::Rosetta isn't installed on this runner, so the Intel half wasn't run."
+            exit 0
+          fi
+          status=0
+          arch -x86_64 "$app" --self-test dist/selftest-x86_64.json || status=$?
+          cat dist/selftest-x86_64.json || true
+          if [ "$status" -ne 0 ]; then echo "::error::The Intel half failed its self-test (exit $status)"; exit 1; fi
+      # The self-test doesn't start the tray, the single-instance server or the update check: start
+      # the real app, make sure it keeps running without Python errors, and that a second launch
+      # hands its command to it and exits (what happens when someone opens SnipForge again).
+      - name: Start the packaged app
+        timeout-minutes: 3
+        run: |
+          app="$RUNNER_TEMP/Applications/SnipForge.app/Contents/MacOS/SnipForge"
+          "$app" --background > dist/startup.log 2>&1 &
+          pid=$!
+          fail() { echo "::error::$1"; kill "$pid" 2>/dev/null || true; cat dist/startup.log; exit 1; }
+          # Ready once it listens for other launches (Qt's local socket, in the temp folder).
+          tmp="${TMPDIR:-/tmp}"
+          socket="${tmp%/}/SnipForge-$(id -un)"
+          for _ in $(seq 1 60); do
+            [ -S "$socket" ] && break
+            kill -0 "$pid" 2>/dev/null || fail "SnipForge quit on its own while starting"
+            sleep 1
+          done
+          [ -S "$socket" ] || fail "SnipForge never started listening for other launches ($socket)"
+          sleep 10
+          kill -0 "$pid" 2>/dev/null || fail "SnipForge quit on its own after starting"
+          "$app" > dist/second-launch.log 2>&1 &
+          second=$!
+          for _ in $(seq 1 20); do kill -0 "$second" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$second" 2>/dev/null; then
+            kill "$second"
+            fail "A second launch kept running instead of handing over to the running SnipForge"
+          fi
+          wait "$second" || fail "The second launch failed (exit $?)"
+          sleep 3
+          kill -0 "$pid" 2>/dev/null || fail "SnipForge quit after a second launch opened the Library"
+          kill "$pid"
+          wait "$pid" 2>/dev/null || true
+          cat dist/startup.log
+          if grep -q "Traceback" dist/startup.log dist/second-launch.log; then
+            fail "SnipForge logged a Python error"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: snipforge-macos
+          path: |
+            dist/SnipForge-*.dmg
+            dist/SHA256SUMS.txt
+            dist/selftest.json
+            dist/selftest-x86_64.json
+            dist/startup.log
+            dist/second-launch.log
+          if-no-files-found: warn

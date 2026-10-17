@@ -85,6 +85,7 @@ def test_install_buttons_work_after_a_real_check(qapp, tmp_path):
     assert page._message.text().count("0.6.0") <= 1
 
 
+@pytest.mark.windows
 def test_turned_off_shortcuts_pass_through_the_real_hook_callback(monkeypatch):
     class FakeUser32:
         def __init__(self):
@@ -162,6 +163,7 @@ def test_a_failed_save_tries_the_save_folder_again(qapp, tmp_path, white_image, 
 _ = QColor  # imported for readers adding image checks
 
 
+@pytest.mark.windows
 def test_holding_a_snip_key_is_one_snip(monkeypatch):
     class FakeUser32:
         def GetAsyncKeyState(self, vk):  # noqa: N802 - mirrors user32

@@ -3,10 +3,14 @@
 Exercises the pieces that break when packaging goes wrong (Qt plugins, theme, SVG icons, the editor,
 Windows OCR, the keyboard hook, Explorer share commands) and writes a JSON report. Exit code 0
 means every required check passed. CI runs this against the built exe before publishing.
+
+On a Mac (docs/MAC-PLAN.md) the Windows-only checks are reported as skipped rather than required,
+until each feature has its macOS version.
 """
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import traceback
 from pathlib import Path
@@ -47,6 +51,30 @@ def _editor() -> str:
     if rendered.size() != image.size() or final.isNull():
         raise RuntimeError(f"render size {rendered.size()} != {image.size()}")
     return f"{len(canvas.annotations())} annotation(s) rendered"
+
+
+def _library() -> str:
+    """The Library window, where SnipForge opens, builds and lists a snip."""
+    from .home import HomeWindow
+    from .library import Library
+
+    image = QImage(320, 200, QImage.Format_ARGB32)
+    image.fill(QColor("white"))
+    library = Library(Path(tempfile.mkdtemp(prefix="snipforge-selftest-")))
+    library.create(image)
+    window = HomeWindow(library, lambda: None, lambda _entry_id: None)
+    try:
+        window.refresh()
+        shown = window.grid.model().card_count()
+    finally:
+        window.close()
+    if shown != 1:
+        raise RuntimeError(f"the Library lists {shown} snip(s), expected 1")
+    return "Library window lists snips"
+
+
+def _not_on_this_platform() -> str:
+    return f"skipped: Windows only for now ({sys.platform}, see docs/MAC-PLAN.md)"
 
 
 def _theme() -> str:
@@ -171,17 +199,19 @@ def _share() -> str:
 
 
 def run(report_path: str) -> int:
+    windows = sys.platform == "win32"
     results: dict = {}
     _check(results, "theme", _theme)
     _check(results, "editor", _editor)
+    _check(results, "library", _library)
     _check(results, "icons", _icons)
-    _check(results, "ocr", _ocr)
-    _check(results, "search_index", _search_index)
+    _check(results, "ocr", _ocr if windows else _not_on_this_platform, required=windows)
+    _check(results, "search_index", _search_index if windows else _not_on_this_platform, required=windows)
     _check(results, "windows", _windows, required=False)
-    _check(results, "hotkey", _hotkey)
+    _check(results, "hotkey", _hotkey if windows else _not_on_this_platform, required=windows)
     _check(results, "share", _share, required=False)
     passed = all(r["ok"] for r in results.values() if r["required"])
-    report = {"version": __version__, "passed": passed, "checks": results}
+    report = {"version": __version__, "platform": sys.platform, "passed": passed, "checks": results}
     try:
         Path(report_path).write_text(json.dumps(report, indent=2), encoding="utf-8")
     except OSError:

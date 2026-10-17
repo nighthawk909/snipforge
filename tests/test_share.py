@@ -28,6 +28,7 @@ def test_windows_share_verb_is_offered_for_pngs(tmp_path, white_image):
     assert share.has_shell_verb(path, "definitely-not-a-verb") is False
 
 
+@pytest.mark.windows
 def test_shell_menu_lookups_do_not_leak_handles(tmp_path, white_image):
     import ctypes
     path = share.export(white_image, tmp_path)
@@ -86,6 +87,7 @@ def test_print_screen_only_without_modifiers(monkeypatch):
     assert not hotkey.HotkeyListener._matches(hotkey.VK_SNAPSHOT)  # Win+PrtSc belongs to Windows
 
 
+@pytest.mark.windows
 def test_all_users_startup_counts_as_enabled(monkeypatch):
     import winreg
 

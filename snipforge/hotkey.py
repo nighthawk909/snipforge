@@ -3,14 +3,19 @@
 Win+Shift+S is reserved by the shell, so RegisterHotKey cannot claim it. A
 WH_KEYBOARD_LL hook sees the keystroke first and can swallow it, which stops
 the built-in Snipping Tool from ever launching.
+
+Windows only: elsewhere `HotkeyListener.start()` returns False and the app offers its tray (menu
+bar) icon instead. The macOS shortcut is planned in docs/MAC-PLAN.md.
 """
 from __future__ import annotations
 
 import ctypes
+import sys
 import threading
-from ctypes import wintypes
 
 from PySide6.QtCore import QObject, Signal
+
+SUPPORTED = sys.platform == "win32"
 
 WH_KEYBOARD_LL = 13
 WM_KEYDOWN = 0x0100
@@ -32,36 +37,40 @@ VK_S = 0x53
 VK_SNAPSHOT = 0x2C  # Print Screen
 VK_UNASSIGNED = 0xE8  # injected to stop the Start menu opening on Win release
 
-ULONG_PTR = ctypes.c_size_t
-LRESULT = ctypes.c_ssize_t
+if SUPPORTED:
+    from ctypes import wintypes
 
+    ULONG_PTR = ctypes.c_size_t
+    LRESULT = ctypes.c_ssize_t
 
-class KBDLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("vkCode", wintypes.DWORD),
-        ("scanCode", wintypes.DWORD),
-        ("flags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ULONG_PTR),
-    ]
+    class KBDLLHOOKSTRUCT(ctypes.Structure):
+        _fields_ = [
+            ("vkCode", wintypes.DWORD),
+            ("scanCode", wintypes.DWORD),
+            ("flags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ULONG_PTR),
+        ]
 
+    HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 
-HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-_user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
-_user32.SetWindowsHookExW.restype = wintypes.HHOOK
-_user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
-_user32.CallNextHookEx.restype = LRESULT
-_user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
-_user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
-_user32.GetAsyncKeyState.restype = ctypes.c_short
-_user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-_user32.keybd_event.argtypes = [ctypes.c_ubyte, ctypes.c_ubyte, wintypes.DWORD, ULONG_PTR]
-_kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
-_kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+    _user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
+    _user32.SetWindowsHookExW.restype = wintypes.HHOOK
+    _user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+    _user32.CallNextHookEx.restype = LRESULT
+    _user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+    _user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    _user32.GetAsyncKeyState.restype = ctypes.c_short
+    _user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    _user32.keybd_event.argtypes = [ctypes.c_ubyte, ctypes.c_ubyte, wintypes.DWORD, ULONG_PTR]
+    _kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+    _kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+else:  # importable everywhere; none of this is used unless the hook is installed
+    HOOKPROC = None
+    _user32 = _kernel32 = None
 
 
 def _is_down(vk: int) -> bool:
@@ -80,7 +89,7 @@ class HotkeyListener(QObject):
         self._thread_id = 0
         self._ready = threading.Event()
         self._hook = None
-        self._proc = HOOKPROC(self._callback)  # keep a reference or it is GC'd
+        self._proc = HOOKPROC(self._callback) if SUPPORTED else None  # keep a reference or it is GC'd
         self._win_shift_s = True
         self._print_screen = True
         self._held = 0  # the shortcut key being held: Windows repeats it, but it's one snip
@@ -95,6 +104,8 @@ class HotkeyListener(QObject):
         self._win_shift_s, self._print_screen = bool(win_shift_s), bool(print_screen)
 
     def start(self) -> bool:
+        if not SUPPORTED:
+            return False
         self._thread = threading.Thread(target=self._run, name="snipforge-hotkey", daemon=True)
         self._thread.start()
         self._ready.wait(2.0)

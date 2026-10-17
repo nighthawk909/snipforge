@@ -1,9 +1,16 @@
-"""Start-with-Windows toggle via the per-user Run registry key."""
+"""Start-with-Windows toggle via the per-user Run registry key.
+
+Windows only for now: elsewhere startup reads as off and turning it on explains why it can't
+(a macOS login item is planned in docs/MAC-PLAN.md).
+"""
 from __future__ import annotations
 
 import sys
-import winreg
 from pathlib import Path
+
+SUPPORTED = sys.platform == "win32"
+if SUPPORTED:
+    import winreg
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "SnipForge"
@@ -18,6 +25,8 @@ def _command() -> str:
 
 
 def _has_value(hive) -> bool:
+    if not SUPPORTED:
+        return False
     try:
         with winreg.OpenKey(hive, RUN_KEY) as key:
             winreg.QueryValueEx(key, VALUE_NAME)
@@ -28,14 +37,16 @@ def _has_value(hive) -> bool:
 
 def enabled_for_all_users() -> bool:
     """IT (or an all-users install) can turn startup on machine-wide; only an admin can undo it."""
-    return _has_value(winreg.HKEY_LOCAL_MACHINE)
+    return SUPPORTED and _has_value(winreg.HKEY_LOCAL_MACHINE)
 
 
 def is_enabled() -> bool:
-    return _has_value(winreg.HKEY_CURRENT_USER) or enabled_for_all_users()
+    return SUPPORTED and (_has_value(winreg.HKEY_CURRENT_USER) or enabled_for_all_users())
 
 
 def set_enabled(enabled: bool) -> None:
+    if not SUPPORTED:
+        raise OSError("starting SnipForge when you sign in isn't available on this platform yet")
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
         if enabled:
             winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, _command())

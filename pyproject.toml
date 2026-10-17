@@ -12,14 +12,14 @@ authors = [{ name = "nighthawk909" }]
 requires-python = ">=3.11"
 dependencies = [
     "PySide6-Essentials>=6.6",
-    "pywin32>=306",
-    "winrt-runtime>=2.0",
-    "winrt-Windows.Media.Ocr>=2.0",
-    "winrt-Windows.Graphics.Imaging>=2.0",
-    "winrt-Windows.Storage.Streams>=2.0",
-    "winrt-Windows.Foundation>=2.0",
-    "winrt-Windows.Foundation.Collections>=2.0",
-    "winrt-Windows.Globalization>=2.0",
+    "pywin32>=306; sys_platform == 'win32'",
+    "winrt-runtime>=2.0; sys_platform == 'win32'",
+    "winrt-Windows.Media.Ocr>=2.0; sys_platform == 'win32'",
+    "winrt-Windows.Graphics.Imaging>=2.0; sys_platform == 'win32'",
+    "winrt-Windows.Storage.Streams>=2.0; sys_platform == 'win32'",
+    "winrt-Windows.Foundation>=2.0; sys_platform == 'win32'",
+    "winrt-Windows.Foundation.Collections>=2.0; sys_platform == 'win32'",
+    "winrt-Windows.Globalization>=2.0; sys_platform == 'win32'",
 ]
 
 [project.urls]
@@ -38,7 +38,10 @@ include = ["snipforge*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["desktop: drives real Windows features (windows, share sheet, hook); run with -m desktop"]
+markers = [
+    "desktop: drives real Windows features (windows, share sheet, hook); run with -m desktop",
+    "windows: needs Windows itself (registry, Explorer, Win32); skipped on other platforms",
+]
 addopts = "-m 'not desktop'"
 
 [tool.ruff]

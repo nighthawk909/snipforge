@@ -268,6 +268,7 @@ if (-not $signed.SignerCertificate) { exit 1 }
 """
 
 
+@pytest.mark.windows
 def test_inno_setup_runs_the_sign_command_for_the_uninstaller_and_setup(tmp_path, monkeypatch, request):
     """The real installer.iss and ISCC, with a stand-in signtool that logs what it's asked to sign and
     signs it with a throwaway certificate (Inno Setup checks the file really got signed)."""

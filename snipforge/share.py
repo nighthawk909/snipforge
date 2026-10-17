@@ -3,19 +3,26 @@
 OneDrive and the share sheet are driven through the same Explorer right-click
 commands you'd use by hand (IContextMenu), so they work with whatever OneDrive
 accounts are signed in, with no extra sign-in for SnipForge.
+
+The Explorer and Outlook parts are Windows only. Elsewhere no OneDrive accounts are found and the
+shell commands aren't offered; exporting a snip works everywhere (docs/MAC-PLAN.md has the
+macOS share sheet).
 """
 from __future__ import annotations
 
 import datetime as dt
 import logging
+import sys
 import tempfile
 import time
-import winreg
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtGui import QImage
+
+if sys.platform == "win32":
+    import winreg
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +94,8 @@ def _reg_value(key, name: str) -> str:
 def onedrive_accounts() -> list[OneDriveAccount]:
     """Signed-in OneDrive accounts with a local sync folder, work accounts first."""
     accounts: list[OneDriveAccount] = []
+    if sys.platform != "win32":
+        return accounts
     base = r"Software\Microsoft\OneDrive\Accounts"
     try:
         root = winreg.OpenKey(winreg.HKEY_CURRENT_USER, base)
@@ -215,6 +224,8 @@ def _set_owner_site(menu_obj, hwnd: int) -> None:
 
 def invoke_shell_verb(path: Path, verb: str, hwnd: int = 0) -> bool:
     """Runs a right-click command (by verb) on a file. Returns False if it isn't offered."""
+    if sys.platform != "win32":
+        return False
     import win32con
 
     with _context_menu(path) as (menu_obj, hmenu):
@@ -235,6 +246,9 @@ def invoke_shell_verb(path: Path, verb: str, hwnd: int = 0) -> bool:
 def email_with_outlook(image_path: Path, subject: str, width: int) -> bool:
     """Opens a new Outlook draft with the snip. Returns True if it's shown inline in the body,
     False if it's only attached. Raises ShareError if classic Outlook couldn't be used at all."""
+    if sys.platform != "win32":
+        raise ShareError("Emailing straight from SnipForge isn't available on this computer yet, so the image "
+                         "was copied instead. Paste it into your email.")
     try:
         import pywintypes
         import win32com.client

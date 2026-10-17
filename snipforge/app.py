@@ -13,6 +13,7 @@ from . import __version__, prefs, project, theme
 from .capture import CaptureSession
 from .editor.window import EditorWindow
 from .home import HomeWindow
+from .hotkey import SUPPORTED as HOTKEYS_SUPPORTED
 from .hotkey import HotkeyListener
 from .indexer import TextIndexer
 from .library import DocumentUnreadable, Library
@@ -87,17 +88,20 @@ class SnipForgeApp:
         menu.addAction("Quit", self._app.quit)
         self._menu = menu
         self._tray.setContextMenu(menu)
-        self._tray.activated.connect(
-            lambda reason: self.capture() if reason == QSystemTrayIcon.Trigger else None)
+        if sys.platform != "darwin":  # a Mac menu bar icon opens its menu on click, and New snip is in it
+            self._tray.activated.connect(
+                lambda reason: self.capture() if reason == QSystemTrayIcon.Trigger else None)
         self._tray.show()
-        if not self._hook_ok:
+        if not self._hook_ok and HOTKEYS_SUPPORTED:
             self._tray.showMessage("SnipForge", "Couldn't install the keyboard hook, so Win+Shift+S "
                                    "won't work. Use the tray icon to snip.", QSystemTrayIcon.Warning)
         self._updates.start()
 
     def _update_tray_tip(self) -> None:
-        keys = [name for name, on in zip(("Win+Shift+S", "Print Screen"), prefs.hotkeys(), strict=True) if on]
-        how = " or ".join(keys) if keys else "click this icon to snip"
+        keys = [name for name, on in zip(("Win+Shift+S", "Print Screen"), prefs.hotkeys(), strict=True)
+                if on and HOTKEYS_SUPPORTED]
+        click = "click this icon, then New snip" if sys.platform == "darwin" else "click this icon to snip"
+        how = " or ".join(keys) if keys else click
         self._tray.setToolTip(f"SnipForge {__version__} — {how}")
 
     def check_updates(self) -> None:
@@ -266,7 +270,8 @@ def _command_from_args(argv: list[str]) -> str:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    if sys.platform == "win32":  # taskbar grouping and toast notifications use it
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     app = QApplication(sys.argv)
     if "--self-test" in sys.argv:
         from .selftest import run

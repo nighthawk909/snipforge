@@ -105,6 +105,9 @@ python scripts/build.py --installer # SnipForge.exe, portable zip and installer 
 To run your organization's own copy (for example on GitHub Enterprise), see
 [docs/PORTING.md](docs/PORTING.md).
 
+A Mac version is on the way: [docs/MAC-PLAN.md](docs/MAC-PLAN.md) has what works on macOS today,
+how to build the test `.dmg`, and what's left.
+
 ## Contributing
 
 Bug reports and ideas are welcome in [Issues](https://github.com/nighthawk909/snipforge/issues).

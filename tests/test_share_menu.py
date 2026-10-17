@@ -152,9 +152,18 @@ def test_windows_share_and_fallback(window, fakes, monkeypatch):
     assert fakes["popen"] and fakes["dialogs"] == ["information"]
 
 
+@pytest.mark.windows
 def test_show_in_folder_saves_first(window, fakes, monkeypatch, tmp_path):
     from snipforge import prefs
     monkeypatch.setattr(prefs, "export_dir", lambda: tmp_path / "exports")
     controller(window).show_in_folder()
     assert window.export_path.exists() and fakes["popen"][0][0] == "explorer"
     assert window.export_path.parent == tmp_path / "exports"
+
+
+def test_show_in_folder_uses_finder_on_a_mac(window, fakes, monkeypatch, tmp_path, on_a_mac):
+    from snipforge import prefs
+    monkeypatch.setattr(prefs, "export_dir", lambda: tmp_path / "exports")
+    on_a_mac(share_menu)
+    controller(window).show_in_folder()
+    assert fakes["popen"] == [["open", "-R", str(window.export_path)]]
