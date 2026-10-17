@@ -132,7 +132,8 @@ class SnipForgeApp:
     def show_home(self) -> None:
         if self._home is None:
             self._home = HomeWindow(self.library, self.capture, self.open_entry, indexer=self.indexer)
-        self._home.refresh()
+        if self._home.isVisible():
+            self._home.refresh()  # already open: pick up anything new (opening it refreshes by itself)
         self._home.showNormal()
         self._bring_to_front(self._home)
 
@@ -156,8 +157,8 @@ class SnipForgeApp:
         if entry is not None:
             self.indexer.index(entry)
         self._open_editor(image, entry, None)
-        if self._home is not None and self._home.isVisible():
-            self._home.refresh()
+        if self._home is not None and self._home.isVisible() and entry is not None:
+            self._home.update_entry(entry.id)
 
     def open_entry(self, entry_id: str) -> None:
         for window in self._windows:
@@ -209,8 +210,12 @@ class SnipForgeApp:
     def _forget(self, window) -> None:
         if window in self._windows:
             self._windows.remove(window)
+        entry = getattr(window, "_entry", None)
+        if entry is None:
+            return  # a pin: nothing in the library changed
+        self.indexer.index(entry, again=True)  # its saved markup cleared the old words: read it again
         if self._home is not None and self._home.isVisible():
-            self._home.refresh()
+            self._home.update_entry(entry.id)
 
     @staticmethod
     def _bring_to_front(window) -> None:

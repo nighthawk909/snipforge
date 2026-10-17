@@ -5,37 +5,51 @@ import datetime as dt
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import cached_property
 
 from .library import Entry, EntryMeta
 
 
+def haystack(meta: EntryMeta) -> str:
+    tags = " ".join(meta.tags)
+    hashed = " ".join("#" + t for t in meta.tags)
+    return " ".join((meta.title, meta.app, meta.text, tags, hashed)).lower()
+
+
+def query_words(query: str) -> list[str]:
+    return query.lower().split()
+
+
 def matches(meta: EntryMeta, query: str) -> bool:
-    """Every word of the query appears in the title, app, recognized text or tags."""
-    words = query.lower().split()
-    if not words:
-        return True
-    haystack = " ".join((meta.title, meta.app, meta.text, " ".join(meta.tags))).lower()
-    return all(word in haystack for word in words)
+    """Every word of the query appears in the title, app, recognized text or tags (#tag works too)."""
+    words = query_words(query)
+    return not words or all(word in haystack(meta) for word in words)
 
 
-def date_label(when: dt.datetime, now: dt.datetime) -> str:
+def week_start(today: dt.date, first_weekday: int = 1) -> dt.date:
+    """The first day of today's week; first_weekday is ISO (1 = Monday ... 7 = Sunday)."""
+    return today - dt.timedelta(days=(today.isoweekday() - first_weekday) % 7)
+
+
+def date_label(when: dt.datetime, now: dt.datetime, first_weekday: int = 1) -> str:
     day, today = when.date(), now.date()
-    if day == today:
+    if day >= today:  # today, or a clock that was ahead when it was taken
         return "Today"
     if day == today - dt.timedelta(days=1):
         return "Yesterday"
-    if day.isocalendar()[:2] == today.isocalendar()[:2] and day < today:
+    if day >= week_start(today, first_weekday):
         return "Earlier this week"
     if (day.year, day.month) == (today.year, today.month):
         return "Earlier this month"
     return when.strftime("%B %Y")
 
 
-def group_by_date(created: Sequence[dt.datetime], now: dt.datetime) -> list[tuple[str, list[int]]]:
+def group_by_date(created: Sequence[dt.datetime], now: dt.datetime,
+                  first_weekday: int = 1) -> list[tuple[str, list[int]]]:
     """Indexes of `created` (newest first) grouped under labels like 'Today' or 'September 2026'."""
     groups: list[tuple[str, list[int]]] = []
     for index, when in enumerate(created):
-        label = date_label(when, now)
+        label = date_label(when, now, first_weekday)
         if groups and groups[-1][0] == label:
             groups[-1][1].append(index)
         else:
@@ -50,33 +64,38 @@ class Item:
     meta: EntryMeta
     edited_at: float | None = None  # when its markup was last saved (None: never edited)
 
+    @cached_property
+    def haystack(self) -> str:  # lowercased once per item, not on every keystroke
+        return haystack(self.meta)
+
 
 VIEWS = ("all", "favorites", "edited")
 PERIODS = ("any", "today", "week", "month")
 
 
-def in_period(created: dt.datetime, period: str, now: dt.datetime) -> bool:
+def in_period(created: dt.datetime, period: str, now: dt.datetime, first_weekday: int = 1) -> bool:
     day, today = created.date(), now.date()
     if period == "today":
-        return day == today
+        return day >= today
     if period == "week":
-        return day.isocalendar()[:2] == today.isocalendar()[:2]
+        return day >= week_start(today, first_weekday)
     if period == "month":
         return (day.year, day.month) == (today.year, today.month)
     return True
 
 
 def select(items: Sequence[Item], *, view: str = "all", tag: str | None = None, period: str = "any",
-           app: str | None = None, query: str = "", now: dt.datetime) -> list[Item]:
+           app: str | None = None, query: str = "", now: dt.datetime, first_weekday: int = 1) -> list[Item]:
     """The snips to show, newest first ('edited' sorts by when the markup was last saved)."""
+    words = query_words(query)
     chosen = [
         i for i in items
         if (view != "favorites" or i.meta.favorite)
         and (view != "edited" or i.edited_at is not None)
         and (tag is None or tag in i.meta.tags)
         and (app is None or i.meta.app == app)
-        and in_period(i.created, period, now)
-        and matches(i.meta, query)
+        and in_period(i.created, period, now, first_weekday)
+        and all(word in i.haystack for word in words)
     ]
     if view == "edited":
         chosen.sort(key=lambda i: i.edited_at or 0.0, reverse=True)

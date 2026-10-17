@@ -5,7 +5,7 @@ import datetime as dt
 import logging
 import os
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QLocale, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .icons import icon
-from .library import DOCUMENT, Library
+from .library import DOCUMENT, META, EntryMeta, Library
 from .library_search import PERIODS, Item, group_by_date, select, tag_counts, top_apps
 from .library_view import SnipGrid
 from .theme.tokens import to_qcolor
@@ -36,6 +36,16 @@ VIEWS = {"all": ("All captures", "grid"), "favorites": ("Favorites", "star"), "e
 PERIOD_LABELS = {"any": "Any time", "today": "Today", "week": "This week", "month": "This month"}
 TAG_COLORS = ("#2F7BF6", "#2FA85A", "#F28C28", "#8E5BE8", "#E5372D", "#0E7C86")
 SIDEBAR_WIDTH = 236
+SEARCH_DELAY_MS = 150
+CONFIRM_TRASH_OVER = 20
+
+
+def _stamp(path, ns: bool):
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return info.st_mtime_ns if ns else info.st_mtime
 
 
 class NavItem(QAbstractButton):
@@ -203,7 +213,11 @@ class HomeWindow(QMainWindow):
         self._search.setClearButtonEnabled(True)
         self._search.setMinimumWidth(320)
         self._search_icon = self._search.addAction(icon("search"), QLineEdit.LeadingPosition)
-        self._search.textChanged.connect(lambda _t: self.apply())
+        self._search_timer = QTimer(self, singleShot=True, interval=SEARCH_DELAY_MS)
+        self._search_timer.timeout.connect(self.apply)
+        self._search.textChanged.connect(lambda _t: self._search_timer.start())
+        self._indexed_timer = QTimer(self, singleShot=True, interval=1000)
+        self._indexed_timer.timeout.connect(self.apply)
         head.addWidget(self._search)
         col.addLayout(head)
 
@@ -250,8 +264,11 @@ class HomeWindow(QMainWindow):
     def _build_shortcuts(self) -> None:
         for keys, slot in ((QKeySequence.Find, self._focus_search),
                            (QKeySequence.Delete, lambda: self._trash(self.grid.selected_ids())),
-                           (QKeySequence.Copy, lambda: self.grid.current_id() and self._copy(self.grid.current_id()))):
+                           (QKeySequence.Copy, self._copy_current)):
             QShortcut(keys, self, slot)
+        # Only while the grid has focus, so typing in the search box never stars or tags anything.
+        for keys, slot in (("F", self._favorite_current), ("T", self._tags_current)):
+            QShortcut(QKeySequence(keys), self.grid, slot, Qt.WidgetShortcut)
 
     def _retheme(self, _theme=None) -> None:
         self._search_icon.setIcon(icon("search"))
@@ -261,32 +278,53 @@ class HomeWindow(QMainWindow):
 
     # ------------------------------------------------------------------ data
     def refresh(self) -> None:
-        entries = self._library.entries()
+        """Re-read the library folder; only snips whose details changed are read again."""
+        known = {i.entry.id: i for i in self._items}
         items = []
-        for entry in entries:
-            meta = self._meta(entry)
-            try:
-                edited_at = (entry.path / DOCUMENT).stat().st_mtime
-            except OSError:
-                edited_at = None
-            items.append(Item(entry, entry.created, meta, edited_at))
+        for snap in self._library.scan():
+            old = known.get(snap.entry.id)
+            meta = self._meta_for(snap.entry, snap.meta_stamp, old.meta if old else None)
+            created = old.created if old else snap.entry.created
+            items.append(Item(snap.entry, created, meta, snap.edited_at))
         self._items = items
-        self._refresh_sidebar()
-        self._refresh_app_chips()
-        self.apply()
+        self._after_change()
 
-    def _meta(self, entry):
-        """Library.meta, cached by meta.json's modification time so refresh stays fast."""
-        try:
-            stamp = (entry.path / "meta.json").stat().st_mtime_ns
-        except OSError:
-            stamp = 0
+    def update_entry(self, entry_id: str) -> None:
+        """One snip changed (taken, edited, starred, tagged or removed): read just that one again."""
+        old = next((i for i in self._items if i.entry.id == entry_id), None)
+        rest = [i for i in self._items if i.entry.id != entry_id]
+        entry = self._library.get(entry_id)
+        if entry is not None:
+            meta = self._meta_for(entry, _stamp(entry.path / META, ns=True), old.meta if old else None)
+            rest.append(Item(entry, old.created if old else entry.created, meta,
+                             _stamp(entry.path / DOCUMENT, ns=False)))
+            rest.sort(key=lambda i: i.entry.id, reverse=True)
+        self._items = rest
+        self._after_change()
+
+    def _meta_for(self, entry, stamp, previous):
+        """A snip's details, cached by meta.json's modification time. If the file is locked for a
+        moment, keep what we had and read it again next time."""
         cached = self._meta_cache.get(entry.id)
         if cached is not None and cached[0] == stamp:
             return cached[1]
-        meta = self._library.meta(entry)
+        if stamp is None:
+            meta = EntryMeta()
+        else:
+            try:
+                meta = self._library.read_meta(entry)
+            except OSError:
+                return previous or EntryMeta()
         self._meta_cache[entry.id] = (stamp, meta)
         return meta
+
+    def _meta(self, entry):
+        return self._meta_for(entry, _stamp(entry.path / META, ns=True), None)
+
+    def _after_change(self) -> None:
+        self._refresh_sidebar()
+        self._refresh_app_chips()
+        self.apply()
 
     def _refresh_sidebar(self) -> None:
         counts = {"all": len(self._items), "favorites": sum(i.meta.favorite for i in self._items),
@@ -329,17 +367,22 @@ class HomeWindow(QMainWindow):
             self._apps_box.addWidget(chip)
 
     def apply(self) -> None:
-        """Show the snips matching the current view, tag, period, app and search."""
+        """Show the snips matching the current view, tag, period, app and search. Keeps the selection,
+        the keyboard position and the scroll position."""
         now = dt.datetime.now()
         query = self._search.text().strip()
+        first_weekday = QLocale().firstDayOfWeek().value  # ISO: 1 = Monday ... 7 = Sunday
         chosen = select(self._items, view=self._view, tag=self._tag, period=self._period, app=self._app,
-                        query=query, now=now)
+                        query=query, now=now, first_weekday=first_weekday)
         if self._view == "edited":
             groups = [("Recently edited", chosen)] if chosen else []
         else:
             groups = [(label, [chosen[n] for n in rows])
-                      for label, rows in group_by_date([i.created for i in chosen], now)]
+                      for label, rows in group_by_date([i.created for i in chosen], now, first_weekday)]
+        current, selected = self.grid.current_id(), self.grid.selected_ids()
+        scroll = self.grid.verticalScrollBar().value()
         self.grid.model_.set_groups(groups)
+        self.grid.restore(current, selected, scroll)
         self._title.setText(f"#{self._tag}" if self._tag else VIEWS[self._view][0])
         self._count.setText(f"{len(chosen)} snip{'s' if len(chosen) != 1 else ''}")
         self._show_empty_state(chosen, query)
@@ -391,7 +434,11 @@ class HomeWindow(QMainWindow):
         self.refresh()
         super().showEvent(e)
         if self._indexer is not None:
-            self._indexer.backfill([i.entry for i in self._items])
+            self._indexer.backfill([i.entry for i in self._items if not i.meta.indexed])
+
+    def hideEvent(self, e) -> None:  # noqa: N802 - Qt API
+        self.grid.delegate.clear_cache()  # SnipForge keeps running in the tray: don't hold thumbnails
+        super().hideEvent(e)
 
     def _on_indexed(self, entry_id: str) -> None:
         entry = self._library.get(entry_id)
@@ -401,7 +448,7 @@ class HomeWindow(QMainWindow):
         self._items = [Item(i.entry, i.created, meta, i.edited_at) if i.entry.id == entry_id else i
                        for i in self._items]
         if self._search.text().strip():
-            self.apply()  # the new words may match the search
+            self._indexed_timer.start()  # new words may match the search; regroup at most once a second
         else:
             self.grid.model_.update_meta(entry_id, meta)
 
@@ -411,10 +458,25 @@ class HomeWindow(QMainWindow):
             return
         try:
             self._library.update_meta(entry, favorite=not self._meta(entry).favorite)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "SnipForge", f"Couldn't update that snip: {exc}")
             return
-        self.refresh()
+        self.update_entry(entry_id)
+
+    def _copy_current(self) -> None:
+        entry_id = self.grid.current_id()
+        if entry_id:
+            self._copy(entry_id)
+
+    def _favorite_current(self) -> None:
+        entry_id = self.grid.current_id()
+        if entry_id:
+            self.toggle_favorite(entry_id)
+
+    def _tags_current(self) -> None:
+        entry_id = self.grid.current_id()
+        if entry_id:
+            self.edit_tags(entry_id)
 
     def edit_tags(self, entry_id: str) -> None:
         entry = self._library.get(entry_id)
@@ -426,14 +488,17 @@ class HomeWindow(QMainWindow):
             return
         try:
             self._library.update_meta(entry, tags=[t for t in text.split(",")])
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "SnipForge", f"Couldn't update that snip: {exc}")
             return
-        self.refresh()
+        self.update_entry(entry_id)
 
     def _context_menu(self, pos) -> None:
         index = self.grid.indexAt(pos)
-        if index.isValid() and not self.grid.selectionModel().isSelected(index):
+        if not index.isValid():  # empty space: never act on a selection you can't see under the pointer
+            self.grid.clearSelection()
+            return
+        if not self.grid.selectionModel().isSelected(index):
             self.grid.setCurrentIndex(index)
         ids = self.grid.selected_ids()
         if not ids:
@@ -447,9 +512,9 @@ class HomeWindow(QMainWindow):
             menu.addAction(icon("folder"), "Show in folder", lambda: self._reveal(self._library.root / entry_id))
             menu.addSeparator()
             favorite = self._meta(self._library.get(entry_id)).favorite if self._library.get(entry_id) else False
-            menu.addAction(icon("star"), "Remove from favorites" if favorite else "Add to favorites",
+            menu.addAction(icon("star"), "Remove from favorites\tF" if favorite else "Add to favorites\tF",
                            lambda: self.toggle_favorite(entry_id))
-            menu.addAction(icon("tag"), "Tags…", lambda: self.edit_tags(entry_id))
+            menu.addAction(icon("tag"), "Tags…\tT", lambda: self.edit_tags(entry_id))
         menu.addSeparator()
         menu.addAction(icon("trash"), "Move to Recycle Bin", lambda: self._trash(ids))
         menu.exec(self.grid.viewport().mapToGlobal(pos))
@@ -472,15 +537,22 @@ class HomeWindow(QMainWindow):
     def _trash(self, ids: list[str]) -> None:
         if not ids:
             return
-        failed = 0
+        if len(ids) > CONFIRM_TRASH_OVER:
+            answer = QMessageBox.question(self, "SnipForge", f"Move {len(ids)} snips to the Recycle Bin?")
+            if answer != QMessageBox.Yes:
+                return
+        failed, gone = 0, set()
         for entry_id in ids:
             entry = self._library.get(entry_id)
             if entry and not self._library.move_to_trash(entry):
                 failed += 1
+            else:
+                gone.add(entry_id)
         if failed:
             QMessageBox.warning(self, "SnipForge", f"Couldn't move {failed} snip(s) to the Recycle Bin. "
                                 "Close any editor showing them and try again.")
-        self.refresh()
+        self._items = [i for i in self._items if i.entry.id not in gone]
+        self._after_change()
 
     def _open_recycle_bin(self) -> None:
         try:

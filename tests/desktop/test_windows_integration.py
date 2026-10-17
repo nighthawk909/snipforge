@@ -141,3 +141,18 @@ def test_text_recognition_works_on_the_indexer_thread(qapp, tmp_path):
         time.sleep(0.05)
     indexer.close()
     assert "margin" in lib.meta(entry).text.lower()
+
+
+def test_app_names_come_from_real_processes():
+    """OpenProcess + QueryFullProcessImageNameW + version info work for a real process (this one)."""
+    import os
+    import sys
+
+    from snipforge import winrects
+
+    path = winrects._process_path(os.getpid())
+    assert os.path.normcase(path) == os.path.normcase(sys.executable)
+    assert winrects._app_name(path)  # 'Python' or its file description
+    assert winrects._app_name("C:/Program Files/Microsoft Office/root/Office16/EXCEL.EXE") == "Excel"
+    for info in winrects.window_infos():
+        assert info.rect is not None and isinstance(info.app, str)

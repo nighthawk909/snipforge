@@ -44,6 +44,12 @@ class EntryMeta:
     indexed: bool = False  # text recognition has run (even if it found nothing)
 
 
+def scrub(text: str) -> str:
+    """Replace lone surrogates (from truncated window titles or hand-edited files) so the text can
+    always be written as UTF-8."""
+    return text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+
+
 def clean_tags(tags) -> tuple[str, ...]:
     """Lowercase, trimmed, unique, at most MAX_TAGS of at most MAX_TAG characters."""
     if not isinstance(tags, (list, tuple)):
@@ -52,7 +58,7 @@ def clean_tags(tags) -> tuple[str, ...]:
     for tag in tags:
         if not isinstance(tag, str):
             continue
-        tag = " ".join(tag.split()).lower()[:MAX_TAG]
+        tag = scrub(" ".join(tag.split()).lower()[:MAX_TAG])
         if tag and tag not in found:
             found.append(tag)
     return tuple(found[:MAX_TAGS])
@@ -69,8 +75,17 @@ def _normalized(changes: dict) -> dict:
         if key == "tags":
             out[key] = clean_tags(value)
         elif key in _TYPES and isinstance(value, _TYPES[key]):
-            out[key] = value[:_LIMITS[key]] if key in _LIMITS else value
+            out[key] = scrub(value[:_LIMITS[key]]) if key in _LIMITS else value
     return out
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """One snip as found by Library.scan(): what's on disk, without opening any file."""
+    entry: Entry
+    meta_stamp: int | None      # meta.json modification time (ns), None if there's none
+    edited_at: float | None     # document.json modification time, None if never edited
+    has_preview: bool
 
 
 class DocumentUnreadable(OSError):
@@ -122,6 +137,23 @@ def _replace(tmp: Path, target: Path, attempts: int = 5) -> None:
             time.sleep(0.03 * (attempt + 1))
 
 
+def _mtime(item, ns: bool):
+    """A scandir entry's modification time (cached by Windows in the listing), or None."""
+    if item is None:
+        return None
+    try:
+        info = item.stat()
+    except OSError:
+        return None
+    return info.st_mtime_ns if ns else info.st_mtime
+
+
+def _preview(image: QImage) -> QImage:
+    if max(image.width(), image.height()) <= THUMB_MAX:
+        return image
+    return image.scaled(THUMB_MAX, THUMB_MAX, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
 def _write_text_atomic(text: str, target: Path) -> None:
     tmp = target.with_name(target.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
@@ -153,6 +185,10 @@ class Library:
         path.mkdir()
         _save_image_atomic(image, path / ORIGINAL)
         entry = Entry(path.name, path)
+        try:  # a small preview now keeps the Library from decoding full screenshots later
+            _save_image_atomic(_preview(image), path / PREVIEW)
+        except OSError as exc:
+            log.info("Couldn't write a preview for snip %s: %s", entry.id, exc)
         if source is not None and (source.title or source.app):
             try:
                 self.update_meta(entry, title=source.title, app=source.app)
@@ -161,10 +197,29 @@ class Library:
         return entry
 
     def meta(self, entry: Entry) -> EntryMeta:
-        """Never fails: a missing or damaged meta.json reads as defaults."""
+        """Never fails: a missing, damaged or momentarily locked meta.json reads as defaults."""
         try:
-            data = json.loads((entry.path / META).read_text(encoding="utf-8"))
-        except (OSError, ValueError, RecursionError):
+            return self.read_meta(entry)
+        except OSError:
+            return EntryMeta()
+
+    def read_meta(self, entry: Entry) -> EntryMeta:
+        """Like meta(), but a file that exists and can't be read right now (antivirus, the search
+        indexer) raises OSError instead of pretending to be empty, so nothing overwrites it with
+        defaults. A damaged file is moved aside to meta.json.bad."""
+        path = entry.path / META
+        try:
+            raw = path.read_bytes()
+        except FileNotFoundError:
+            return EntryMeta()
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (ValueError, RecursionError):
+            log.warning("Snip %s had an unreadable meta.json; it was kept as meta.json.bad", entry.id)
+            try:
+                os.replace(path, path.with_name(META + ".bad"))
+            except OSError:
+                pass
             return EntryMeta()
         return EntryMeta(**_normalized(data)) if isinstance(data, dict) else EntryMeta()
 
@@ -174,11 +229,31 @@ class Library:
         if unknown:
             raise ValueError(f"unknown snip details: {', '.join(sorted(unknown))}")
         with self._meta_lock:
-            meta = replace(self.meta(entry), **_normalized(changes))
+            meta = replace(self.read_meta(entry), **_normalized(changes))
             data = {f.name: getattr(meta, f.name) for f in fields(EntryMeta)}
             data["tags"] = list(meta.tags)
             _write_text_atomic(json.dumps(data, ensure_ascii=False), entry.path / META)
         return meta
+
+    def scan(self) -> list[Snapshot]:
+        """Every snip, newest first, from one directory listing per snip (no file is opened)."""
+        found: list[Snapshot] = []
+        try:
+            folders = [d for d in os.scandir(self.root) if d.is_dir()]
+        except OSError:
+            return []
+        for folder in folders:
+            try:
+                files = {f.name: f for f in os.scandir(folder.path)}
+            except OSError:
+                continue
+            if ORIGINAL not in files:
+                continue
+
+            found.append(Snapshot(Entry(folder.name, Path(folder.path)), _mtime(files.get(META), ns=True),
+                                  _mtime(files.get(DOCUMENT), ns=False), PREVIEW in files))
+        found.sort(key=lambda s: s.entry.id, reverse=True)
+        return found
 
     def entries(self, limit: int | None = None) -> list[Entry]:
         if not self.root.exists():
@@ -213,10 +288,11 @@ class Library:
     def save(self, entry: Entry, document: dict, rendered: QImage) -> None:
         _write_text_atomic(json.dumps(document), entry.path / DOCUMENT)
         _save_image_atomic(rendered, entry.path / RENDERED)
-        preview = rendered
-        if max(rendered.width(), rendered.height()) > THUMB_MAX:
-            preview = rendered.scaled(THUMB_MAX, THUMB_MAX, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        _save_image_atomic(preview, entry.path / PREVIEW)
+        _save_image_atomic(_preview(rendered), entry.path / PREVIEW)
+        try:  # words that were blurred or cropped away must stop matching: read the result again later
+            self.update_meta(entry, text="", indexed=False)
+        except (OSError, ValueError) as exc:
+            log.info("Couldn't reset the search text of snip %s: %s", entry.id, exc)
 
     def move_to_trash(self, entry: Entry) -> bool:
         """Sends the snip folder to the Recycle Bin (recoverable)."""

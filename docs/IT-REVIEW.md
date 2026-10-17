@@ -23,6 +23,7 @@ be checked in the source code; file references are given where useful.
 | The user's snips (original capture, editable markup, rendered image) | `%USERPROFILE%\Pictures\SnipForge` | No (it's the user's work) |
 | Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses | `HKCU\Software\SnipForge\SnipForge` | Yes |
 | Small theme images (check mark, arrows) regenerated at start | `%LOCALAPPDATA%\SnipForge\cache` | Yes |
+| Per snip in the library: `meta.json` with the app name and window title it came from, favorite, tags, and the words Windows OCR read in the finished snip (for Library search; read offline, cleared and re-read after each edit, so blurred or cropped text doesn't stay searchable) | `%USERPROFILE%\Pictures\SnipForge\Library\<snip>` | No (it's the user's work) |
 | Theme packs (optional, read-only JSON colors; see [THEMES.md](THEMES.md)) | `themes\` next to `SnipForge.exe`, and `%LOCALAPPDATA%\SnipForge\themes` | Install folder: yes. User folder: no |
 | Temporary copies for drag-out and sharing (auto-deleted after 24 hours) and downloaded updates | `%TEMP%\SnipForge` | Yes |
 | Startup entry (if enabled) | `HKCU` or, for all-users installs, `HKLM\...\CurrentVersion\Run` | Yes |

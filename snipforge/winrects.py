@@ -90,6 +90,18 @@ def _process_path(pid: int) -> str:
         _kernel32.CloseHandle(handle)
 
 
+_NAMES: dict[str, str] = {}  # program path -> friendly name, kept for the session
+
+
+def _app_name(path: str) -> str:
+    """Known apps by file name; others by their version info, read once per program."""
+    if path not in _NAMES:
+        known = friendly_app_name(path)
+        stem = re.split(r"[\\/]", path or "")[-1].lower().removesuffix(".exe")
+        _NAMES[path] = known if stem in APP_NAMES else friendly_app_name(path, _file_description(path))
+    return _NAMES[path]
+
+
 def _file_description(path: str) -> str:
     """The program's own name from its version info, e.g. 'Battle.net'."""
     if not path:
@@ -126,8 +138,7 @@ def window_infos() -> list[WindowInfo]:
         if frame is None:
             return True
         if pid.value not in apps:
-            path = _process_path(pid.value)
-            apps[pid.value] = friendly_app_name(path, _file_description(path))
+            apps[pid.value] = _app_name(_process_path(pid.value))
         _user32.GetWindowTextW(hwnd, title, len(title))
         found.append(WindowInfo(frame, title.value.strip(), apps[pid.value]))
         return True

@@ -2,16 +2,41 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from collections import OrderedDict
 from dataclasses import dataclass
 
-from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QEvent,
+    QItemSelectionModel,
+    QModelIndex,
+    QObject,
+    QPointF,
+    QRectF,
+    QRunnable,
+    QSize,
+    Qt,
+    QThreadPool,
+    Signal,
+)
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QImage,
+    QImageReader,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
 from PySide6.QtWidgets import QAbstractItemView, QFrame, QListView, QStyle, QStyledItemDelegate
 
 from . import theme
 from .icons import icon
-from .library import EntryMeta
+from .library import THUMB_MAX, EntryMeta
 from .library_search import Item
 
 CARD_W, CARD_H, THUMB_H = 232, 204, 136
@@ -19,7 +44,7 @@ GAP = 8
 HEADER_H = 40
 RADIUS = 10
 STAR_COLOR = "#F5B400"
-THUMB_CACHE = 300
+THUMB_CACHE = 120  # decoded thumbnails kept while the Library is open (cleared when it's hidden)
 ROW_ROLE = Qt.UserRole + 1
 
 
@@ -67,6 +92,8 @@ class LibraryModel(QAbstractListModel):
             parts = [meta.title or "Snip", meta.app, when_text(row.item.created)]
             if meta.favorite:
                 parts.append("favorite")
+            if meta.tags:
+                parts.append("tags " + ", ".join(meta.tags))
             return ", ".join(p for p in parts if p)
         return None
 
@@ -105,6 +132,45 @@ def _star(rect: QRectF) -> QPolygonF:
     return QPolygonF(points)
 
 
+class _Loaded(QObject):
+    done = Signal(object, object)  # key, QImage (or None)
+
+
+class _ThumbJob(QRunnable):
+    """Decodes one thumbnail off the UI thread, from preview.png when there is one. For older snips
+    without a preview it decodes the original once and saves a preview for next time."""
+
+    def __init__(self, key: tuple, path: str, target: QSize, make_preview: str | None, signals: _Loaded) -> None:
+        super().__init__()
+        self._key, self._path, self._target = key, path, target
+        self._make_preview, self._signals = make_preview, signals
+
+    def run(self) -> None:
+        reader = QImageReader(self._path)
+        size = reader.size()
+        if size.isValid() and size.width() > 0 and size.height() > 0:
+            scale = max(self._target.width() / size.width(), self._target.height() / size.height())
+            if scale < 1:
+                reader.setScaledSize(QSize(max(1, round(size.width() * scale)), max(1, round(size.height() * scale))))
+        image = reader.read()
+        if image.isNull():
+            self._signals.done.emit(self._key, None)
+            return
+        if self._make_preview:
+            try:
+                full = QImage(self._path)
+                small = full.scaled(THUMB_MAX, THUMB_MAX, Qt.KeepAspectRatio, Qt.SmoothTransformation) \
+                    if max(full.width(), full.height()) > THUMB_MAX else full
+                tmp = self._make_preview + ".tmp"
+                if small.save(tmp, "PNG"):
+                    os.replace(tmp, self._make_preview)
+            except OSError:
+                pass  # just slower next time
+        scaled = image.scaled(self._target, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        x = (scaled.width() - self._target.width()) // 2  # keep the top, where titles usually are
+        self._signals.done.emit(self._key, scaled.copy(x, 0, self._target.width(), self._target.height()))
+
+
 class CardDelegate(QStyledItemDelegate):
     favorite_clicked = Signal(str)
     copy_clicked = Signal(str)
@@ -113,6 +179,14 @@ class CardDelegate(QStyledItemDelegate):
         super().__init__(view)
         self._view = view
         self._thumbs: OrderedDict[tuple, QPixmap] = OrderedDict()
+        self._loading: set[tuple] = set()
+        self._pool = QThreadPool(self)
+        self._pool.setMaxThreadCount(2)
+        self._signals = _Loaded(self)
+        self._signals.done.connect(self._thumb_ready)
+
+    def clear_cache(self) -> None:
+        self._thumbs.clear()
 
     # ------------------------------------------------------------------ geometry
     def sizeHint(self, _option, index) -> QSize:  # noqa: N802 - Qt API
@@ -203,7 +277,7 @@ class CardDelegate(QStyledItemDelegate):
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(STAR_COLOR))
         else:
-            p.setPen(QPen(QColor(pal.text2 if hovered else pal.border), 1.4))
+            p.setPen(QPen(QColor(pal.text2 if hovered else pal.text3), 1.4))  # visible (3:1) even unhovered
             p.setBrush(Qt.NoBrush)
         p.drawPolygon(_star(star))
 
@@ -224,6 +298,8 @@ class CardDelegate(QStyledItemDelegate):
         p.drawPath(shape)
 
     def _thumb(self, item: Item, size: QSize, ratio: float) -> QPixmap | None:
+        """The card's picture if it's ready; otherwise starts loading it and returns None (the card
+        shows a plain placeholder for a moment)."""
         path = item.entry.preview_path
         try:
             stamp = path.stat().st_mtime_ns
@@ -234,18 +310,24 @@ class CardDelegate(QStyledItemDelegate):
         if cached is not None:
             self._thumbs.move_to_end(key)
             return cached
-        source = QPixmap(str(path))
-        if source.isNull():
-            return None
-        target = QSize(round(size.width() * ratio), round(size.height() * ratio))
-        scaled = source.scaled(target, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        x, y = (scaled.width() - target.width()) // 2, 0  # keep the top of the snip, where titles usually are
-        pix = scaled.copy(x, y, target.width(), target.height())
-        pix.setDevicePixelRatio(ratio)
+        if key not in self._loading:
+            self._loading.add(key)
+            target = QSize(round(size.width() * ratio), round(size.height() * ratio))
+            preview = item.entry.path / "preview.png"
+            make_preview = None if path == preview else str(preview)
+            self._pool.start(_ThumbJob(key, str(path), target, make_preview, self._signals))
+        return None
+
+    def _thumb_ready(self, key: tuple, image) -> None:
+        self._loading.discard(key)
+        if image is None:
+            return
+        pix = QPixmap.fromImage(image)
+        pix.setDevicePixelRatio(key[4])
         self._thumbs[key] = pix
         while len(self._thumbs) > THUMB_CACHE:
             self._thumbs.popitem(last=False)
-        return pix
+        self._view.viewport().update()
 
     # ------------------------------------------------------------------ clicks
     def editorEvent(self, event, model, option, index) -> bool:  # noqa: N802 - Qt API
@@ -291,6 +373,19 @@ class SnipGrid(QListView):
     def selected_ids(self) -> list[str]:
         rows = sorted(i.row() for i in self.selectionModel().selectedIndexes())
         return [self.model_.data(self.model_.index(r), ROW_ROLE).item.entry.id for r in rows]
+
+    def restore(self, current: str | None, selected: list[str], scroll: int) -> None:
+        """After the rows were rebuilt: put the selection, keyboard position and scroll back."""
+        model, selection = self.model_, self.selectionModel()
+        for entry_id in selected:
+            row = model.row_for(entry_id)
+            if row >= 0:
+                selection.select(model.index(row), QItemSelectionModel.Select)
+        row = model.row_for(current) if current else -1
+        if row >= 0:
+            selection.setCurrentIndex(model.index(row), QItemSelectionModel.NoUpdate)
+        self.doItemsLayout()
+        self.verticalScrollBar().setValue(scroll)
 
     def current_id(self) -> str | None:
         row = self.currentIndex().data(ROW_ROLE)

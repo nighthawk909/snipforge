@@ -7,6 +7,7 @@ region, Enter takes the whole monitor. A magnifier shows exact pixels.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
@@ -16,6 +17,13 @@ from . import theme
 
 DIM = QColor(0, 0, 0, 120)
 DRAG_THRESHOLD = 4
+SOURCE_OVERLAP = 0.9  # share of a snip that must lie inside one window to credit that window
+PRIVATE_MARKERS = ("inprivate", "incognito", "private browsing")
+
+
+def _private(title: str) -> bool:
+    lowered = title.lower()
+    return any(marker in lowered for marker in PRIVATE_MARKERS)
 MAG_SAMPLE = 15  # physical pixels sampled around the cursor
 MAG_SIZE = 120
 
@@ -64,8 +72,19 @@ class _ScreenOverlay(QWidget):
         return local
 
     def _source_for(self, sel: QRect):
-        center = sel.center()
-        return next((info for local, info in self._sources if local.contains(center)), None)
+        """The window a snip came from: the topmost window that holds nearly all of the selection
+        (so a whole-monitor snip isn't credited to whatever sits in the middle). Private browsing
+        windows keep their app name but never their title."""
+        area = sel.width() * sel.height()
+        if area <= 0:
+            return None
+        for local, info in self._sources:
+            overlap = local.intersected(sel)
+            if overlap.width() * overlap.height() >= SOURCE_OVERLAP * area:
+                return info if not _private(info.title) else replace(info, title="")
+            if local.contains(sel.center()):
+                return None  # the window on top doesn't hold the snip: don't guess
+        return None
 
     # ------------------------------------------------------------------ geometry
     def _selection(self) -> QRect | None:

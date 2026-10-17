@@ -4,7 +4,7 @@ import time
 import pytest
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QMouseEvent
-from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
+from PySide6.QtWidgets import QApplication, QMessageBox, QStyleOptionViewItem
 
 from snipforge.home import HomeWindow
 from snipforge.library import DOCUMENT, Library
@@ -36,6 +36,12 @@ def home(qapp, lib):
     window.close()
 
 
+def search(home, text):
+    home._search.setText(text)
+    home._search_timer.stop()
+    home.apply()  # skip the typing delay
+
+
 def titles(home):
     model = home.grid.model_
     rows = [model.data(model.index(n), ROW_ROLE) for n in range(model.rowCount())]
@@ -61,11 +67,11 @@ def test_lists_every_snip_newest_first_under_a_date_header(home):
 
 
 def test_search_matches_recognized_words_titles_and_apps(home):
-    home._search.setText("invoice")
+    search(home, "invoice")
     assert titles(home) == ["Inbox - Outlook"]
-    home._search.setText("excel margin")
+    search(home, "excel margin")
     assert titles(home) == ["Margin review.xlsx - Excel"]
-    home._search.setText("nothing like this")
+    search(home, "nothing like this")
     assert titles(home) == [] and home._stack.currentIndex() == 1
     assert "nothing like this" in home._empty_title.text()
 
@@ -136,16 +142,67 @@ def test_newly_recognized_words_become_searchable(home, lib):
         indexed = Signal(str)
 
         def backfill(self, entries):
-            self.backfilled = len(entries)
+            self.backfilled = len(entries)  # only snips not read yet
 
     indexer = FakeIndexer()
     window = HomeWindow(lib, lambda: None, lambda _i: None, indexer=indexer)
     window.show()
     assert indexer.backfilled == 3
-    window._search.setText("gross margin")
+    search(window, "gross margin")
     assert titles(window) == []
     entry = next(e for e in lib.entries() if lib.meta(e).app == "Excel")
     lib.update_meta(entry, text="Gross margin by month", indexed=True)
     indexer.indexed.emit(entry.id)
+    assert window._indexed_timer.isActive()  # regrouping waits a moment so results don't jump around
+    window._indexed_timer.stop()
+    window.apply()
     assert titles(window) == ["Margin review.xlsx - Excel"]
     window.close()
+
+
+def test_starring_keeps_the_selection_and_updates_just_that_snip(home, lib, monkeypatch):
+    index = card_index(home, "Inbox - Outlook")
+    home.grid.setCurrentIndex(index)
+    entry_id = home.grid.current_id()
+    scans = []
+    monkeypatch.setattr(lib, "scan", lambda: scans.append(1) or [])
+    home._favorite_current()
+    assert scans == []  # no full re-read of the library
+    assert home.grid.current_id() == entry_id and home.grid.selected_ids() == [entry_id]
+    assert home._nav["favorites"]._count == "1"
+
+
+def test_right_click_on_empty_space_does_nothing(home, monkeypatch):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QMenu
+    shown = []
+    monkeypatch.setattr(QMenu, "exec", lambda *a: shown.append(True))
+    home.grid.setCurrentIndex(card_index(home, "Sprint board"))
+    home._context_menu(QPoint(5000, 5000))
+    assert shown == [] and home.grid.selected_ids() == []
+
+
+def test_moving_many_snips_asks_first(home, lib, monkeypatch, no_dialogs):
+    from snipforge import home as home_module
+    monkeypatch.setattr(home_module, "CONFIRM_TRASH_OVER", 1)
+    moved = []
+    monkeypatch.setattr(lib, "move_to_trash", lambda entry: moved.append(entry.id) or True)
+    ids = [e.id for e in lib.entries()]
+    home._trash(ids)
+    assert no_dialogs[-1][0] == "question" and moved == []  # the answer was No
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    home._trash(ids)
+    assert sorted(moved) == sorted(ids) and titles(home) == []
+
+
+def test_a_briefly_locked_meta_file_keeps_what_was_shown(home, lib, monkeypatch):
+    entry = next(e for e in lib.entries() if lib.meta(e).app == "Outlook")
+    lib.update_meta(entry, favorite=True)
+
+    def locked(_entry):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(lib, "read_meta", locked)
+    home.update_entry(entry.id)
+    item = next(i for i in home._items if i.entry.id == entry.id)
+    assert item.meta.app == "Outlook" and item.meta.tags == ("finance",)  # not wiped to defaults

@@ -105,6 +105,50 @@ def _ocr() -> str:
     return f"read {text!r}"
 
 
+def _search_index() -> str:
+    """Library search reads snips with Windows OCR on its background thread (winrt off the UI thread)."""
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    from . import ocr
+    from .indexer import TextIndexer
+    from .library import Library
+
+    image = QImage(560, 90, QImage.Format_ARGB32)
+    image.fill(QColor("white"))
+    p = QPainter(image)
+    p.setFont(QFont("Segoe UI", 20))
+    p.setPen(QColor("black"))
+    p.drawText(16, 58, OCR_PHRASE)
+    p.end()
+    try:
+        ocr.recognize(QImage(40, 20, QImage.Format_ARGB32))
+    except ocr.OcrUnavailable as exc:
+        return f"skipped: {exc}"
+    library = Library(Path(tempfile.mkdtemp(prefix="snipforge-selftest-")))
+    entry = library.create(image)
+    indexer = TextIndexer(library)
+    indexer.index(entry)
+    deadline = time.monotonic() + 20
+    while not library.meta(entry).indexed and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.05)
+    indexer.close()
+    text = library.meta(entry).text
+    if "self" not in text.lower():
+        raise RuntimeError(f"the search index read {text!r}")
+    return f"background OCR read {text!r}"
+
+
+def _windows() -> str:
+    from .winrects import window_infos
+
+    found = window_infos()
+    apps = sorted({w.app for w in found if w.app})
+    return f"{len(found)} window(s); apps: {', '.join(apps[:6]) or 'none named'}"
+
+
 def _hotkey() -> str:
     from .hotkey import HotkeyListener
 
@@ -131,6 +175,8 @@ def run(report_path: str) -> int:
     _check(results, "editor", _editor)
     _check(results, "icons", _icons)
     _check(results, "ocr", _ocr)
+    _check(results, "search_index", _search_index)
+    _check(results, "windows", _windows, required=False)
     _check(results, "hotkey", _hotkey)
     _check(results, "share", _share, required=False)
     passed = all(r["ok"] for r in results.values() if r["required"])
