@@ -252,9 +252,13 @@ class Canvas(QGraphicsView):
         self._update_scene_rect()
 
     def set_beautify(self, style: BeautifyStyle | None) -> None:
-        """Preview Beautify around the snip (never exported: render_image hides the mask)."""
+        """Preview Beautify around the snip (never exported: render_image hides the mask). If you
+        could see the whole snip, you still can; a zoomed-in view stays as it is."""
+        whole = self.mapToScene(self.viewport().rect()).boundingRect().contains(self.frame_rect())
         self._mask.set_beautify(style)
         self._update_scene_rect()
+        if whole and not self._mask.editing:
+            self.fit_image()
 
     def reset_crop(self) -> None:
         if self._crop_rect != self._image_rect:

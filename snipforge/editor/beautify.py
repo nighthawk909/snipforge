@@ -6,6 +6,7 @@ saves the choice and tells every open editor and the Settings window.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QRectF, Qt, Signal
@@ -23,6 +24,9 @@ class BeautifyStyle:
     shadow: int = 28
     start: str = "#7f5af0"
     end: str = "#2cb1bc"
+
+
+DEFAULT_STYLE = BeautifyStyle()
 
 
 class _Switch(QObject):
@@ -46,8 +50,8 @@ def enabled() -> bool:
 
 
 def set_enabled(on: bool) -> None:
-    if on == enabled():
-        return
+    """Always tells everyone, even if the saved value already matches, so a switch can't get out
+    of step with what Copy does (e.g. when the setting couldn't be saved)."""
     app_settings().setValue(SETTING, on)
     switch().changed.emit(on)
 
@@ -72,7 +76,25 @@ def paint_backdrop(p: QPainter, card: QRectF, style: BeautifyStyle) -> None:
         p.drawRoundedRect(card.adjusted(-i, -i + 10, i, i + 10), style.radius + i, style.radius + i)
 
 
-def apply_beautify(image: QImage, style: BeautifyStyle = BeautifyStyle()) -> QImage:
+def backdrop_image(width: int, height: int, style: BeautifyStyle, scale: float = 1.0) -> QImage:
+    """The backdrop and shadow around a `width` x `height` snip, with the snip's rounded card left
+    clear. The editor draws this over the snip as its preview."""
+    pad = style.padding
+    out = QImage(math.ceil((width + pad * 2) * scale), math.ceil((height + pad * 2) * scale),
+                 QImage.Format_ARGB32_Premultiplied)
+    out.fill(Qt.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.scale(scale, scale)
+    card = QRectF(pad, pad, width, height)
+    paint_backdrop(p, card, style)
+    p.setCompositionMode(QPainter.CompositionMode_Clear)
+    p.fillPath(card_path(card, style), Qt.black)
+    p.end()
+    return out
+
+
+def apply_beautify(image: QImage, style: BeautifyStyle = DEFAULT_STYLE) -> QImage:
     pad = style.padding
     out = QImage(image.width() + pad * 2, image.height() + pad * 2, QImage.Format_ARGB32_Premultiplied)
     p = QPainter(out)

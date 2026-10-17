@@ -30,7 +30,7 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from . import beautify
-from .beautify import BeautifyStyle, apply_beautify
+from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
 from .panel import PropertiesPanel
@@ -121,7 +121,7 @@ class EditorWindow(QMainWindow):
         self.tray.beautify_changed.connect(beautify.set_enabled)
         beautify.switch().changed.connect(self._show_beautify)  # from any editor or Settings
         self.tray.set_beautify(self._beautify)
-        self.canvas.set_beautify(BeautifyStyle() if self._beautify else None)
+        self.canvas.set_beautify(DEFAULT_STYLE if self._beautify else None)
         self.tray.open_entry.connect(self._open_entry)
         self.tray.open_library.connect(self._open_library)
         self.tray.library_button.setVisible(self._on_open_library is not None)
@@ -263,11 +263,10 @@ class EditorWindow(QMainWindow):
             manager.set_mode_preference("light" if manager.theme.dark else "dark")
 
     def _show_beautify(self, on: bool) -> None:
-        self._beautify = on
         self.tray.set_beautify(on)
-        self.canvas.set_beautify(BeautifyStyle() if on else None)
-        if not self.canvas.crop_editing():
-            self.canvas.fit_image()  # show the whole backdrop, or the snip without it
+        if on != self._beautify:
+            self._beautify = on
+            self.canvas.set_beautify(DEFAULT_STYLE if on else None)
 
     def _open_entry(self, entry_id: str) -> None:
         if self._on_open_entry:
@@ -326,7 +325,7 @@ class EditorWindow(QMainWindow):
 
     def final_image(self) -> QImage:
         image = self.canvas.render_image()
-        return apply_beautify(image) if self._beautify else image
+        return apply_beautify(image, DEFAULT_STYLE) if self._beautify else image
 
     def copy_to_clipboard(self) -> None:
         editing = self.canvas.editing_text_item()
@@ -449,4 +448,8 @@ class EditorWindow(QMainWindow):
         self._save_to_library()
         styles = {k: v.to_dict() for k, v in self.canvas.tool_styles.items()}
         self._settings.setValue("tool_styles", json.dumps(styles))
+        try:
+            beautify.switch().changed.disconnect(self._show_beautify)  # a closed editor stops following it
+        except (RuntimeError, TypeError):
+            pass  # already disconnected (closed twice)
         super().closeEvent(e)

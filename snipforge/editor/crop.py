@@ -12,15 +12,16 @@ corners and shadow around the kept area, exactly as exports will.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QGraphicsItem
 
 from .. import theme
-from .beautify import BeautifyStyle, card_path, paint_backdrop
+from .beautify import BeautifyStyle, backdrop_image
 
 HANDLE_PX = 10
 MIN_CROP = 8.0
 HIDE_MARGIN = 5000.0  # how far past the image the "cut" fill extends (covers stray annotations)
+BACKDROP_CACHE_PX = 2400  # the Beautify preview is drawn from an image at most this big
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +90,7 @@ class CropMask(QGraphicsItem):
         self.crop = QRectF(image_rect)
         self.editing = False
         self.beautify: BeautifyStyle | None = None
+        self._backdrop: tuple[tuple, QPixmap] | None = None  # (key, pixmap): drawn once, not every frame
         self.setZValue(1000)
         self.setAcceptedMouseButtons(Qt.NoButton)
 
@@ -110,6 +112,8 @@ class CropMask(QGraphicsItem):
 
     def set_beautify(self, style: BeautifyStyle | None) -> None:
         self.beautify = style
+        if style is None:
+            self._backdrop = None
         self.update()
 
     def boundingRect(self) -> QRectF:
@@ -134,12 +138,17 @@ class CropMask(QGraphicsItem):
         pad = style.padding
         backdrop = self.crop.adjusted(-pad, -pad, pad, pad)
         self._fill_cut(p, self._outside(self.boundingRect(), backdrop))  # past the backdrop isn't exported
-        area = QPainterPath()
-        area.addRect(backdrop)
-        p.save()
-        p.setClipPath(area.subtracted(card_path(self.crop, style)))  # the snip shows through, corners rounded
-        paint_backdrop(p, self.crop, style)
-        p.restore()
+        pixmap = self._backdrop_pixmap(style, backdrop)
+        p.drawPixmap(backdrop, pixmap, QRectF(pixmap.rect()))  # clear over the snip, so it shows through
+
+    def _backdrop_pixmap(self, style: BeautifyStyle, backdrop: QRectF) -> QPixmap:
+        """Painting the gradient and shadow every frame made drawing lag on big snips."""
+        scale = min(1.0, BACKDROP_CACHE_PX / max(backdrop.width(), backdrop.height()))
+        width, height = round(self.crop.width()), round(self.crop.height())
+        key = (width, height, style, scale)
+        if self._backdrop is None or self._backdrop[0] != key:
+            self._backdrop = (key, QPixmap.fromImage(backdrop_image(width, height, style, scale)))
+        return self._backdrop[1]
 
     def _fill_cut(self, p: QPainter, outside: QPainterPath) -> None:
         """The canvas's dots on screen, so a cut area blends in; plain background otherwise."""

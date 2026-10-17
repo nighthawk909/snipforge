@@ -41,9 +41,10 @@ def _editor() -> str:
     canvas._update_create(canvas._drag, QPointF(200, 120), False)
     canvas._finish_create(canvas._drag)
     canvas._drag = None
-    rendered = window.final_image()
+    rendered = canvas.render_image()  # not final_image(): that's bigger when Beautify is on
+    final = window.final_image()
     window.close()
-    if rendered.size() != image.size():
+    if rendered.size() != image.size() or final.isNull():
         raise RuntimeError(f"render size {rendered.size()} != {image.size()}")
     return f"{len(canvas.annotations())} annotation(s) rendered"
 
