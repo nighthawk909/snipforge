@@ -13,6 +13,7 @@ records are read (MP4, Matroska, AVI), so a strange file never reaches FFmpeg's 
 from __future__ import annotations
 
 import ctypes
+import errno
 import os
 import sys
 from ctypes import POINTER, Structure, byref, c_char_p, c_int, c_int64, c_uint, c_uint32, c_void_p
@@ -26,6 +27,11 @@ WINDOWS_NAMES = {"avutil": "avutil-61.dll", "avcodec": "avcodec-63.dll", "avform
 AV_NOPTS_VALUE = -0x8000000000000000
 AV_TIME_BASE = 1_000_000
 AVMEDIA_TYPE_VIDEO, AVMEDIA_TYPE_AUDIO = 0, 1
+AVERROR_EOF = -0x20464F45  # FFERRTAG('E', 'O', 'F', ' ')
+AVERROR_INVALIDDATA = -0x41444E49  # FFERRTAG('I', 'N', 'D', 'A')
+AVERROR_EAGAIN = -errno.EAGAIN  # AVERROR(EAGAIN): 11 on Windows, 35 on macOS
+AVSEEK_FLAG_BACKWARD = 1
+AV_DISPOSITION_ATTACHED_PIC = 0x400  # a cover picture, not video
 FORMATS = b"mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi"  # the containers SnipForge reads
 
 
@@ -61,7 +67,7 @@ class AVCodecParameters(Structure):
 class AVStream(Structure):
     _fields_ = [("av_class", c_void_p), ("index", c_int), ("id", c_int), ("codecpar", POINTER(AVCodecParameters)),
                 ("priv_data", c_void_p), ("time_base", AVRational), ("start_time", c_int64),
-                ("duration", c_int64), ("nb_frames", c_int64)]
+                ("duration", c_int64), ("nb_frames", c_int64), ("disposition", c_int)]
 
 
 class AVPacket(Structure):  # allocated by av_packet_alloc, never by us
@@ -243,20 +249,13 @@ def libs() -> dict[str, ctypes.CDLL]:
 
 def message(code: int) -> str:
     """FFmpeg's description of an error code."""
-    return _message(code)
-
-
-def _message(code: int) -> str:
     buf = ctypes.create_string_buffer(256)
     _libs()["avutil"].av_strerror(code, buf, len(buf))
     return buf.value.decode(errors="replace") or f"error {code}"
 
 
 def seconds(value: int, base: AVRational) -> float | None:
-    return _seconds(value, base)
-
-
-def _seconds(value: int, base: AVRational) -> float | None:
+    """A timestamp in seconds, or None when the file doesn't say."""
     if value == AV_NOPTS_VALUE or not base.den:
         return None
     return value * base.num / base.den
@@ -286,16 +285,31 @@ def open_input(path: str | os.PathLike) -> ctypes._Pointer:
     finally:
         libs["avutil"].av_dict_free(byref(options))
     if code < 0:
-        raise FFmpegError(f"Couldn't open {Path(name).name}: {_message(code)}")
+        raise FFmpegError(f"Couldn't open {Path(name).name}: {message(code)}")
     code = libs["avformat"].avformat_find_stream_info(ctx, None)
     if code < 0:
         close_input(ctx)
-        raise FFmpegError(f"Couldn't read {Path(name).name}: {_message(code)}")
+        raise FFmpegError(f"Couldn't read {Path(name).name}: {message(code)}")
     return ctx
 
 
 def close_input(ctx) -> None:
     _libs()["avformat"].avformat_close_input(byref(ctx))
+
+
+def streams(ctx) -> list[AVStream]:
+    fc = ctx.contents
+    return [fc.streams[i].contents for i in range(fc.nb_streams)]
+
+
+def kind(stream: AVStream) -> int:
+    return stream.codecpar.contents.codec_type
+
+
+def video_stream(ctx) -> AVStream | None:
+    """The file's video (not a cover picture), if it has any."""
+    return next((st for st in streams(ctx) if kind(st) == AVMEDIA_TYPE_VIDEO
+                 and not st.disposition & AV_DISPOSITION_ATTACHED_PIC), None)
 
 
 def probe(path: str | os.PathLike) -> MediaInfo:
@@ -314,9 +328,9 @@ def probe(path: str | os.PathLike) -> MediaInfo:
                 width=par.width if kind == "video" else 0, height=par.height if kind == "video" else 0,
                 sample_rate=par.sample_rate if kind == "audio" else 0,
                 channels=par.ch_layout.nb_channels if kind == "audio" else 0,
-                start=_seconds(st.start_time, st.time_base), duration=_seconds(st.duration, st.time_base),
+                start=seconds(st.start_time, st.time_base), duration=seconds(st.duration, st.time_base),
                 frames=max(0, st.nb_frames)))
         fmt = fc.iformat.contents.name.decode() if fc.iformat else ""
-        return MediaInfo(fmt, _seconds(fc.duration, AVRational(1, AV_TIME_BASE)), tuple(streams))
+        return MediaInfo(fmt, seconds(fc.duration, AVRational(1, AV_TIME_BASE)), tuple(streams))
     finally:
         close_input(ctx)
