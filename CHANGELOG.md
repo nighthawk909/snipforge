@@ -3,6 +3,22 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.7.0](https://github.com/nighthawk909/snipforge/compare/v0.6.0...v0.7.0) (2026-10-17)
+
+
+### Features
+
+* a new look with light and dark themes, a properties panel and quick styles ([#15](https://github.com/nighthawk909/snipforge/issues/15)) ([3a40fd0](https://github.com/nighthawk909/snipforge/commit/3a40fd03b10c75071416b558703fc9fcdba3bff9))
+* **library:** a new Library with search inside your snips, favorites, tags and filters ([#19](https://github.com/nighthawk909/snipforge/issues/19)) ([f02e15f](https://github.com/nighthawk909/snipforge/commit/f02e15f017882c80027b2477d71f2a61f048872c))
+* run SnipForge from your organization's own GitHub repository ([#18](https://github.com/nighthawk909/snipforge/issues/18)) ([aceab74](https://github.com/nighthawk909/snipforge/commit/aceab74a25c05d4061c84334ef2226745d5ebf08))
+* **updates:** choose how SnipForge updates, try previews, roll back, and use your company's update location ([#13](https://github.com/nighthawk909/snipforge/issues/13)) ([c660f15](https://github.com/nighthawk909/snipforge/commit/c660f1536bfcbff1d379938dac3a2b6741fdddd8))
+
+
+### Bug fixes
+
+* opening SnipForge while it's already running can no longer crash it ([#12](https://github.com/nighthawk909/snipforge/issues/12)) ([4b02385](https://github.com/nighthawk909/snipforge/commit/4b023850fffc29a0cff50d1222a9138fdd875101))
+* **updates:** update prompts show the version you actually have ([#17](https://github.com/nighthawk909/snipforge/issues/17)) ([b5c8639](https://github.com/nighthawk909/snipforge/commit/b5c8639e8e6bb14789dba6aecce07c97df81c8e7))
+
 ## [0.6.0](https://github.com/nighthawk909/snipforge/compare/v0.5.0...v0.6.0) (2026-10-17)
 
 
