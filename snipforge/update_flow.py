@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox, QProgressDialog, QSystemTrayIcon
 
-from . import __version__, update_policy, updates
+from . import update_policy, updates
 from .update_controller import UpdateController, UpdateState, check_is_due  # noqa: F401  (check_is_due: older API)
 from .update_policy import MANAGED_MESSAGE
 from .update_prefs import load_prefs, save_prefs
@@ -171,8 +171,8 @@ class UpdateFlow(QObject):
             informative = blocker + (" Open the download page?" if release.page else "")
         else:
             informative = "Update now? SnipForge will close for a moment and reopen by itself."
-        box = self._box(f"SnipForge {release.version} is available (you have {__version__}).", informative,
-                        release)
+        have = self.controller.current_version
+        box = self._box(f"SnipForge {release.version} is available (you have {have}).", informative, release)
         primary = None
         if not blocker:
             primary = box.addButton("Update now", QMessageBox.AcceptRole)
@@ -193,7 +193,8 @@ class UpdateFlow(QObject):
                 self.controller.install_version(release.version)
 
     def ask_to_install(self, release: Release) -> None:
-        box = self._box(f"SnipForge {release.version} is ready to install (you have {__version__}).",
+        have = self.controller.current_version
+        box = self._box(f"SnipForge {release.version} is ready to install (you have {have}).",
                         "SnipForge will close for a moment and reopen by itself.", release)
         install = box.addButton("Install now", QMessageBox.AcceptRole)
         skip = box.addButton("Skip this version", QMessageBox.RejectRole)
