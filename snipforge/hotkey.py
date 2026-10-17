@@ -15,6 +15,9 @@ from PySide6.QtCore import QObject, Signal
 WH_KEYBOARD_LL = 13
 WM_KEYDOWN = 0x0100
 WM_SYSKEYDOWN = 0x0104
+WM_KEYUP = 0x0101
+WM_SYSKEYUP = 0x0105
+REPEAT_GAP_MS = 1500  # longer than Windows' slowest key-repeat delay (1 s)
 WM_QUIT = 0x0012
 WM_APP_REHOOK = 0x8001  # private thread message: reinstall the hook
 LLKHF_INJECTED = 0x10
@@ -80,6 +83,8 @@ class HotkeyListener(QObject):
         self._proc = HOOKPROC(self._callback)  # keep a reference or it is GC'd
         self._win_shift_s = True
         self._print_screen = True
+        self._held = 0  # the shortcut key being held: Windows repeats it, but it's one snip
+        self._held_at = 0  # when it was last seen (ms, the event's own clock)
 
     @property
     def keys(self) -> tuple[bool, bool]:
@@ -130,15 +135,25 @@ class HotkeyListener(QObject):
         self._hook = None
 
     def _callback(self, n_code, w_param, l_param):
-        if n_code >= 0 and w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
+        if n_code >= 0:
             info = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-            if not info.flags & LLKHF_INJECTED and self._matches(info.vkCode, self._win_shift_s,
-                                                                 self._print_screen):
-                if info.vkCode == VK_S:
-                    self._cancel_start_menu()
-                self.triggered.emit()
-                return 1  # swallow: the shell never sees it
+            if w_param in (WM_KEYUP, WM_SYSKEYUP) and info.vkCode == self._held:
+                self._held = 0  # released: the next press is a new snip (the key-up passes on)
+            elif w_param in (WM_KEYDOWN, WM_SYSKEYDOWN) and not info.flags & LLKHF_INJECTED and \
+                    self._matches(info.vkCode, self._win_shift_s, self._print_screen):
+                if not self._repeat(info.vkCode, info.time):
+                    if info.vkCode == VK_S:
+                        self._cancel_start_menu()
+                    self.triggered.emit()
+                return 1  # swallow: the shell never sees it (repeats included)
         return _user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+    def _repeat(self, vk: int, when: int) -> bool:
+        """Whether this key-down is Windows repeating a held key. A key-down long after the last
+        one counts as a new press even if its key-up went missing (e.g. while the hook was reinstalled)."""
+        repeat = vk == self._held and 0 <= (when - self._held_at) & 0xFFFFFFFF < REPEAT_GAP_MS
+        self._held, self._held_at = vk, when
+        return repeat
 
     @staticmethod
     def _matches(vk: int, win_shift_s: bool = True, print_screen: bool = True) -> bool:

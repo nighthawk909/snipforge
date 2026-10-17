@@ -121,7 +121,8 @@ def test_p_and_the_button_toggle_the_pointer(qapp):
 def test_pointer_toggle_is_off_when_there_is_no_pointer_to_add(qapp):
     o = make_overlay(pointer_shot=None, include_pointer=True)
     assert not o.toolbar.pointer_button.isEnabled()
-    assert "isn't available" in o.toolbar.pointer_button.toolTip()
+    tip = o.toolbar.pointer_button.toolTip()
+    assert "hidden" in tip or "isn't available" in tip
     key(o, Qt.Key_P, "p")
     key(o, Qt.Key_Return)
     assert o.got[0].pixelColor(152, 122).name() == "#e8eaee"
@@ -234,3 +235,126 @@ def test_finishing_during_a_countdown_closes_it(qapp, monkeypatch):
     timer = session.countdown
     session._finish(None)
     assert results == [None] and not timer.isVisible() and session.countdown is None
+
+
+# --- from the code review ---------------------------------------------------------------------
+
+def test_why_the_pointer_toggle_is_off(qapp, monkeypatch):
+    from snipforge import capture
+    monkeypatch.setattr(capture.pointer, "available", lambda: True)
+    assert "hidden" in make_overlay(pointer_shot=None).toolbar.pointer_button.toolTip()
+    monkeypatch.setattr(capture.pointer, "available", lambda: False)
+    assert "isn't available on this computer" in make_overlay(pointer_shot=None).toolbar.pointer_button.toolTip()
+
+
+def test_the_hint_mentions_every_key(qapp):
+    hint = make_overlay().hint()
+    assert all(k in hint for k in ("A W F", "D delay", "P pointer", "Esc"))
+
+
+def test_opening_and_closing_the_delay_menu_leaves_its_highlight_alone(qapp):
+    o = make_overlay(delay=5)
+    o.show()
+    button = o.toolbar.delay_button
+    for delay in (5, 0):
+        o.toolbar.set_delay(delay)
+        button.click()  # what Enter or Space on the focused button does
+        QApplication.processEvents()
+        o.toolbar.delay_menu.close()
+        assert button.isChecked() is (delay > 0)
+    o.close()
+
+
+def test_d_during_a_drag_does_nothing(qapp):
+    o = make_overlay()
+    o.show()
+    mouse(o, QEvent.MouseButtonPress, (10, 300))
+    mouse(o, QEvent.MouseMove, (200, 400), Qt.NoButton)
+    key(o, Qt.Key_D, "d")
+    QApplication.processEvents()
+    assert not o.toolbar.delay_menu.isVisible()
+    mouse(o, QEvent.MouseButtonRelease, (200, 400), buttons=Qt.NoButton)
+    assert o.got[0].size().toTuple() == (190, 100)  # the drag carried on normally
+    o.close()
+
+
+def test_a_countdown_that_cannot_start_ends_the_snip(qapp, monkeypatch):
+    prefs.set_capture_delay(3)
+    session, results = session_with(monkeypatch, [])
+
+    def broken(self):
+        raise RuntimeError("no screen")
+    monkeypatch.setattr(countdown.Countdown, "start", broken)
+    session.start()
+    assert results == [None] and session.countdown is None  # not stuck: the next snip can start
+
+
+def test_picking_a_delay_when_the_countdown_cannot_start_ends_the_snip(qapp, monkeypatch):
+    session, results = session_with(monkeypatch, [])
+    session.start()
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("no screen")
+    from snipforge import capture
+    monkeypatch.setattr(capture, "Countdown", broken)
+    session._overlays[0].toolbar.delay_menu.actions()[1].trigger()
+    assert results == [None] and not session._overlays
+
+
+def test_finishing_during_the_settle_wait_never_fires_late(qapp, monkeypatch):
+    monkeypatch.setattr(countdown, "SETTLE_MS", 40)
+    prefs.set_capture_delay(3)
+    session, results = session_with(monkeypatch, [])
+    session.start()
+    session.snip_now()  # hides, then waits 40 ms before reporting
+    session.cancel()
+    QTest.qWait(80)
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    QTest.qWait(20)
+    assert results == [None] and not session._overlays  # no late freeze after the cancel
+
+
+def test_session_cancel_works_at_any_stage(qapp, monkeypatch):
+    session, results = session_with(monkeypatch, [])
+    session.start()
+    session.cancel()
+    session.cancel()
+    assert results == [None] and not session._overlays
+
+
+def test_composite_with_an_offset_monitor_and_scaling(qapp):
+    screen = QImage(40, 40, QImage.Format_RGB32)
+    screen.fill(QColor("#ffffff"))
+    screen.setDevicePixelRatio(1.5)
+    shot = red_arrow(QPoint(110, 60))  # this monitor starts at (100, 50)
+    result = pointer.composite(screen, shot, origin=QPoint(100, 50))
+    assert result.pixelColor(10, 10).name() == "#ff0000" and result.pixelColor(9, 10).name() == "#ffffff"
+
+
+def test_the_pointer_image_is_worked_out_only_when_needed(qapp, monkeypatch):
+    calls = []
+    real = pointer.with_alpha
+
+    def counting(*args):
+        calls.append(1)
+        return real(*args)
+    monkeypatch.setattr(pointer, "with_alpha", counting)
+    black, white = QImage(4, 4, QImage.Format_RGB32), QImage(4, 4, QImage.Format_RGB32)
+    black.fill(QColor("#000000"))
+    white.fill(QColor("#ffffff"))
+    shot = pointer.PointerShot(position=QPoint(0, 0), drawings=(black, white))
+    o = make_overlay(pointer_shot=shot, include_pointer=False)
+    key(o, Qt.Key_Return)  # a snip without the pointer never pays for it
+    assert calls == []
+    assert shot.image.width() == 4 and shot.inverted == () and len(calls) == 1
+    assert shot.image.width() == 4 and len(calls) == 1  # worked out once
+
+
+def test_pointer_trouble_never_stops_a_snip(monkeypatch):
+    import sys
+
+    def broken():
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(pointer, "_grab_windows", broken)
+    assert pointer.grab() is None

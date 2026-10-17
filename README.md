@@ -26,7 +26,8 @@ for a team, a SharePoint or network-share mirror, or Software Center? See
 **Snip.** Win+Shift+S or Print Screen freezes the screen, with a capture toolbar at the top:
 **Area** (drag an area, or hover a window and click to take it), **Window** or **Full screen**, or
 press Enter for the whole monitor. A magnifier shows exact pixels, and the next snip starts in the
-mode you used last.
+mode you used last. **Delay** counts down 3, 5 or 10 seconds first, so you can open the menu or
+tooltip you want to snip, and **Include the mouse pointer** draws the pointer into the snip.
 The snip is also copied to the clipboard, just like the built-in Snipping Tool. (Either shortcut can
 be handed back to Windows in Settings.)
 

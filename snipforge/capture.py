@@ -46,6 +46,12 @@ def _grab_screen(screen) -> QPixmap:
     return screen.grabWindow(0)
 
 
+def _pointer_unavailable_reason() -> str:
+    if pointer.available():
+        return "The pointer was hidden when the screen froze"
+    return "Including the pointer isn't available on this computer yet"
+
+
 class _ScreenOverlay(QWidget):
     selected = Signal(QImage)
     cancelled = Signal()
@@ -83,7 +89,8 @@ class _ScreenOverlay(QWidget):
         self.toolbar: CaptureToolbar | None = None
         if toolbar:
             self.toolbar = CaptureToolbar(self._mode, self, delay=delay, pointer=self._pointer_shown(),
-                                          pointer_available=pointer_shot is not None)
+                                          pointer_available=pointer_shot is not None,
+                                          pointer_why=_pointer_unavailable_reason())
             self.toolbar.mode_picked.connect(self._pick_mode)
             self.toolbar.delay_picked.connect(self.delay_changed)
             self.toolbar.pointer_toggled.connect(self._pick_pointer)
@@ -167,7 +174,7 @@ class _ScreenOverlay(QWidget):
             self.mode_changed.emit(mode)
 
     def hint(self) -> str:
-        return f"{MODES[self._mode].hint}  •  A W F to switch"
+        return f"{MODES[self._mode].hint}  •  A W F modes  •  D delay  •  P pointer"
 
     def _place_toolbar(self) -> None:
         if self.toolbar is None:
@@ -365,7 +372,8 @@ class _ScreenOverlay(QWidget):
         elif mode := next((k for k, spec in MODES.items() if e.key() == ord(spec.key)), None):
             self._pick_mode(mode)
         elif e.key() == Qt.Key_D and self.toolbar is not None:
-            self.toolbar.open_delay_menu()
+            if self._press is None:  # not in the middle of a drag (the toolbar is hidden then)
+                self.toolbar.open_delay_menu()
         elif e.key() == Qt.Key_P:
             self._pick_pointer(not self._include_pointer)
         else:
@@ -401,12 +409,21 @@ class CaptureSession:
         if self.countdown is not None:
             self.countdown.snip_now()
 
+    def cancel(self) -> None:
+        """Stop this snip, whatever stage it's at (the tray's Cancel snip)."""
+        self._finish(None)
+
     def _count_down(self, seconds: int) -> None:
-        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-        self.countdown = Countdown(seconds, screen)
-        self.countdown.finished.connect(self._countdown_done)
-        self.countdown.cancelled.connect(lambda: self._finish(None))
-        self.countdown.start()
+        self._drop_countdown()
+        try:
+            screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+            self.countdown = Countdown(seconds, screen)
+            self.countdown.finished.connect(self._countdown_done)
+            self.countdown.cancelled.connect(lambda: self._finish(None))
+            self.countdown.start()
+        except Exception:  # never leave a session that blocks every later snip
+            logging.getLogger(__name__).exception("The snip countdown failed to start")
+            self._finish(None)
 
     def _countdown_done(self) -> None:
         self._drop_countdown()
@@ -415,6 +432,7 @@ class CaptureSession:
 
     def _drop_countdown(self) -> None:
         if self.countdown is not None:
+            self.countdown.blockSignals(True)  # nothing from it arrives after this
             self.countdown.close()
             self.countdown.deleteLater()
             self.countdown = None

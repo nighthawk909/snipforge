@@ -70,3 +70,44 @@ def test_rejects_silly_delays(qapp):
         Countdown(0, QGuiApplication.primaryScreen())
     with pytest.raises(ValueError):
         Countdown(61, QGuiApplication.primaryScreen())
+
+
+def test_screen_readers_hear_each_second(countdown):
+    countdown.start()
+    countdown.tick()
+    assert countdown._label.accessibleName() == "Snipping in 2 seconds"
+
+
+@pytest.mark.desktop
+def test_real_countdown_never_takes_focus_and_stays_out_of_screenshots(qapp):
+    import sys
+    if sys.platform != "win32":
+        pytest.skip("Windows")
+    import ctypes
+
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QWidget
+    backdrop = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+    backdrop.setStyleSheet("background: #12ab34;")
+    screen = QGuiApplication.primaryScreen()
+    area = screen.availableGeometry()
+    backdrop.setGeometry(area.x(), area.y(), area.width(), 160)
+    backdrop.show()
+    QApplication.processEvents()
+    QTest.qWait(200)
+    foreground = ctypes.windll.user32.GetForegroundWindow()
+    c = Countdown(5, screen, settle_ms=0)
+    c.start()
+    QTest.qWait(300)
+    try:
+        assert ctypes.windll.user32.GetForegroundWindow() == foreground  # it didn't take focus
+        g = c.frameGeometry()
+        origin = screen.geometry().topLeft()
+        shot = screen.grabWindow(0, g.x() - origin.x(), g.y() - origin.y(), g.width(), g.height()).toImage()
+        colors = {shot.pixelColor(x, y).name() for x in range(0, shot.width(), 6)
+                  for y in range(0, shot.height(), 6)}
+        assert colors == {QColor("#12ab34").name()}  # a screenshot sees what's behind it, not the countdown
+    finally:
+        c.cancel()
+        c.close()
+        backdrop.close()

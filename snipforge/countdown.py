@@ -6,12 +6,17 @@ take it off the screen, and only then reports finished, so it never appears in t
 """
 from __future__ import annotations
 
+import logging
+import sys
+
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QWidget
 
 from .icons import icon
 
+log = logging.getLogger(__name__)
 MAX_SECONDS = 60
+WDA_EXCLUDEFROMCAPTURE = 0x11  # Windows 10 2004+: left out of screenshots and recordings
 SETTLE_MS = 150  # long enough for the desktop to redraw without the countdown
 TOP_MARGIN = 18
 
@@ -50,6 +55,7 @@ class Countdown(QWidget):
         self._label.setObjectName("CountdownText")
         row.addWidget(self._label)
         self.now_button = self._button(card, "Snip now")
+        self.now_button.setToolTip("Snip now (or press the snip key again)")
         self.now_button.clicked.connect(self.snip_now)
         row.addWidget(self.now_button)
         self.cancel_button = self._button(card, "Cancel")
@@ -70,13 +76,16 @@ class Countdown(QWidget):
 
     def _update_label(self) -> None:
         unit = "second" if self._left == 1 else "seconds"
-        self._label.setText(f"Snipping in {self._left} {unit}")
+        text = f"Snipping in {self._left} {unit}"
+        self._label.setText(text)
+        self._label.setAccessibleName(text)  # screen readers hear each change
 
     def start(self) -> None:
         self.adjustSize()
         area = self._screen.availableGeometry()
         self.move(area.x() + (area.width() - self.width()) // 2, area.y() + TOP_MARGIN)
         self.show()
+        _exclude_from_capture(self)
         self._timer.start()
 
     def tick(self) -> None:
@@ -104,4 +113,17 @@ class Countdown(QWidget):
         self._done = True
         self._timer.stop()
         self.hide()
-        QTimer.singleShot(self._settle_ms, self.finished.emit)
+        QTimer.singleShot(self._settle_ms, self, self.finished.emit)  # never after it's deleted
+
+
+def _exclude_from_capture(widget: QWidget) -> None:
+    """Keep the countdown out of screenshots even while it's showing (belt and braces: it also
+    hides before the screen freezes). Best effort: older Windows just ignore it."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        if not ctypes.windll.user32.SetWindowDisplayAffinity(int(widget.winId()), WDA_EXCLUDEFROMCAPTURE):
+            log.info("Windows wouldn't keep the countdown out of screenshots")
+    except (AttributeError, OSError, ValueError) as exc:
+        log.info("Couldn't keep the countdown out of screenshots: %s", exc)
