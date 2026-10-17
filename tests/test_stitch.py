@@ -171,3 +171,25 @@ def test_large_frames_stitch_quickly():
         stitcher.add(frame)
     assert time.perf_counter() - started < 1.5  # per scroll it has to keep up with the page
     assert same(stitcher.result(), full.copy(QRect(0, 0, WIDTH, 2200)))
+
+
+def with_sidebar(frame: QImage, width: int = 40) -> QImage:
+    """A window whose left panel stays put (a folder list) beside the part that scrolls."""
+    out = QImage(frame.width() + width, frame.height(), QImage.Format_RGB32)
+    p = QPainter(out)
+    for y in range(0, frame.height(), 14):  # panel items: the same in every frame
+        p.fillRect(0, y, width, 14, QColor("#3a3f4a" if (y // 14) % 2 else "#4a505c"))
+    p.drawImage(width, 0, frame)
+    p.end()
+    return out
+
+
+def test_a_panel_that_stays_put_beside_the_scrolling_part():
+    full = page(900)
+    stitcher = Stitcher()
+    for top in range(0, 601, 110):
+        stitcher.add(with_sidebar(view(full, top, 300)))
+    stitcher.add(with_sidebar(view(full, 600, 300)))
+    result = stitcher.result()
+    # Only the part that scrolls comes out, stitched end to end; the panel isn't repeated down it.
+    assert same(result, full)
