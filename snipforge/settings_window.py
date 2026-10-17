@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__, autostart, prefs, project, theme
+from .capture_toolbar import MODES
 from .editor import beautify
 from .icons import icon
 from .theme.tokens import DARK, LIGHT
@@ -38,7 +39,8 @@ log = logging.getLogger(__name__)
 SECTIONS = {
     "general": ("General", "settings", "Startup and the clipboard.", "startup sign in clipboard copy library"),
     "capture": ("Capture", "monitor", "Which keys start a snip and what you see while choosing.",
-                "shortcut keyboard win shift print screen hotkey magnifier"),
+                "shortcut keyboard win shift print screen hotkey magnifier mode area window full screen "
+                "delay timer countdown pointer cursor mouse"),
     "saving": ("Saving", "save", "Where Save puts files, and in which format.",
                "save folder format png jpg beautify export"),
     "appearance": ("Appearance", "palette", "Light or dark, and the accent color used across SnipForge.",
@@ -230,7 +232,7 @@ class SettingsWindow(QMainWindow):
         win_shift_s, print_screen = prefs.hotkeys()
         for switch, value in ((self.startup, autostart.is_enabled()), (self.copy_on_capture, prefs.copy_on_capture()),
                               (self.key_win_shift_s, win_shift_s), (self.key_print_screen, print_screen),
-                              (self.magnifier, prefs.magnifier()),
+                              (self.magnifier, prefs.magnifier()), (self.include_pointer, prefs.capture_pointer()),
                               (self.beautify, beautify.enabled())):
             switch.blockSignals(True)
             switch.setChecked(value)
@@ -238,6 +240,8 @@ class SettingsWindow(QMainWindow):
         self.folder_row.set_description(str(prefs.export_dir()))
         self._reset_folder.setVisible(prefs.export_dir() != prefs.DEFAULT_EXPORT_DIR)
         self.format.set_value(prefs.export_format())
+        self.start_mode.set_value(self._start_mode())
+        self.delay.set_value(str(prefs.capture_delay()))
         self._retheme()
 
     def _retheme(self, _theme=None) -> None:
@@ -291,6 +295,17 @@ class SettingsWindow(QMainWindow):
         self.magnifier = ToggleSwitch("Show the magnifier")
         self.magnifier.setChecked(prefs.magnifier())
         self.magnifier.toggled.connect(prefs.set_magnifier)
+        start_modes = [(key, MODES[key].label) for key in prefs.CAPTURE_MODES if key != "scroll"]
+        self.start_mode = Segmented(start_modes, value=self._start_mode())
+        self.start_mode.setAccessibleName("Start in")
+        self.start_mode.changed.connect(prefs.set_capture_mode)
+        self.delay = Segmented([(str(s), "None" if s == 0 else f"{s} s") for s in prefs.DELAYS],
+                               value=str(prefs.capture_delay()))
+        self.delay.setAccessibleName("Delay")
+        self.delay.changed.connect(lambda value: prefs.set_capture_delay(int(value)))
+        self.include_pointer = ToggleSwitch("Include the mouse pointer")
+        self.include_pointer.setChecked(prefs.capture_pointer())
+        self.include_pointer.toggled.connect(prefs.set_capture_pointer)
         note = QLabel("A shortcut you turn off goes back to Windows (Win+Shift+S opens Snipping Tool). "
                       "You can always snip from the tray icon or the Library.")
         note.setProperty("sfRole", "muted")
@@ -301,9 +316,18 @@ class SettingsWindow(QMainWindow):
                        self.key_win_shift_s),
             SettingRow("Print Screen opens SnipForge", "Alt+Print Screen and Win+Print Screen stay with Windows",
                        self.key_print_screen),
+            SettingRow("Start in", "The capture toolbar's mode when a snip starts (it remembers the last one "
+                       "you used; Scrolling is chosen afresh each time)", self.start_mode),
+            SettingRow("Delay", "Count down before the screen freezes, to snip menus and tooltips", self.delay),
+            SettingRow("Include the mouse pointer", "Draw the pointer into snips", self.include_pointer),
             SettingRow("Show the magnifier", "Pixel-exact zoom next to the pointer while you choose an area",
                        self.magnifier),
             note)
+
+    @staticmethod
+    def _start_mode() -> str:
+        mode = prefs.capture_mode()
+        return "area" if mode == "scroll" else mode
 
     def _set_key(self, which: str, on: bool) -> None:
         prefs.set_hotkey(which, on)
