@@ -11,7 +11,7 @@ from .settings import app_settings
 
 DEFAULT_EXPORT_DIR = Path.home() / "Pictures" / "SnipForge"
 FORMATS = ("png", "jpg")
-CAPTURE_MODES = ("area", "window", "screen")  # the capture toolbar's modes, in its order
+CAPTURE_MODES = ("area", "window", "screen", "scroll")  # the capture toolbar's modes, in its order
 DELAYS = (0, 3, 5, 10)  # seconds the capture toolbar's Delay menu offers
 KEYS = {
     "copy_on_capture": "capture/copy_to_clipboard",

@@ -34,6 +34,9 @@ MODES = {
                           "Click a window  •  Enter for the whole screen  •  Esc to cancel"),
     "screen": CaptureMode("Full screen", "monitor", "F", "Click a monitor to take all of it",
                           "Click a monitor, or press Enter  •  Esc to cancel"),
+    "scroll": CaptureMode("Scrolling", "scroll", "S", "A long page or list, captured as one image",
+                          "Drag over the part that scrolls, or click a window  •  SnipForge scrolls to the end"
+                          "  •  move the mouse to stop  •  Esc to cancel"),
 }
 
 
@@ -74,7 +77,7 @@ class CaptureToolbar(QFrame):
     cancel_clicked = Signal()
 
     def __init__(self, mode: str, parent=None, *, delay: int = 0, pointer: bool = False,
-                 pointer_available: bool = True, pointer_why: str = "") -> None:
+                 pointer_available: bool = True, pointer_why: str = "", scrolling: bool = True) -> None:
         super().__init__(parent)
         self.setObjectName("CaptureToolbar")
         self.setAccessibleName("Capture")
@@ -87,6 +90,8 @@ class CaptureToolbar(QFrame):
         self._group.setExclusive(True)
         self.buttons: dict[str, QToolButton] = {}
         for key, spec in MODES.items():
+            if key == "scroll" and not scrolling:
+                continue  # can't scroll other windows here (yet): don't offer it
             button = self._button(spec.icon, f" {spec.label}", f"{spec.tip} ({spec.key})")  # space: icon gap
             button.setAccessibleName(spec.label)
             button.setAccessibleDescription(f"{spec.tip}. Shortcut: {spec.key}")
@@ -174,6 +179,14 @@ class CaptureToolbar(QFrame):
         line.setObjectName("CaptureToolbarSeparator")
         line.setFixedSize(1, 22)
         return line
+
+    def set_compact(self, compact: bool) -> None:
+        """Icons only (names stay in tooltips and for screen readers), for monitors too narrow for
+        the labels."""
+        style = Qt.ToolButtonIconOnly if compact else Qt.ToolButtonTextBesideIcon
+        for button in (*self.buttons.values(), self.delay_button):
+            button.setToolButtonStyle(style)
+        self.adjustSize()
 
     def set_mode(self, mode: str) -> None:
         """Show `mode` as the chosen one, without announcing it (for changes made elsewhere)."""
