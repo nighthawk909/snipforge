@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -25,6 +26,7 @@ import build  # noqa: E402 - sibling script: version stamping, license files, ch
 
 ROOT, DIST, BUILD = build.ROOT, build.DIST, build.BUILD
 APP_NAME = "SnipForge.app"
+DMG_ATTEMPTS = 3
 FIRST_RUN_NOTE = "If macOS won't open SnipForge.txt"
 FIRST_RUN_TEXT = """\
 SnipForge is free and open source. It isn't signed with a paid Apple Developer ID, so the first
@@ -36,8 +38,8 @@ time you open it macOS says it can't check it for malicious software. To open it
    next to the message about SnipForge. Enter your Mac password if asked.
 3. Click "Open Anyway" once more. From then on SnipForge opens like any other app.
 
-To take snips, allow SnipForge in System Settings > Privacy & Security > Screen & System Audio
-Recording when macOS asks, then quit and reopen SnipForge.
+To take snips, turn SnipForge on in System Settings > Privacy & Security > Screen & System Audio
+Recording (Screen Recording on macOS 14) when macOS asks, then quit and reopen SnipForge.
 
 Work Mac? Your IT team may block apps that aren't from the App Store or an identified developer.
 Ask them to allow SnipForge (source code and checksums: {repo_url}).
@@ -85,8 +87,17 @@ def build_dmg(app: Path, version: str) -> Path:
         (staging / "Applications").symlink_to("/Applications")
         note = FIRST_RUN_TEXT.format(repo_url=build.project.REPO_URL)
         (staging / FIRST_RUN_NOTE).write_text(note, encoding="utf-8")
-        run(["hdiutil", "create", "-volname", f"SnipForge {version}", "-srcfolder", str(staging),
-             "-fs", "HFS+", "-format", "UDZO", "-ov", str(dmg)])
+        create = ["hdiutil", "create", "-volname", f"SnipForge {version}", "-srcfolder", str(staging),
+                  "-fs", "HFS+", "-format", "UDZO", "-ov", str(dmg)]
+        for attempt in range(1, DMG_ATTEMPTS + 1):
+            try:
+                run(create)
+                break
+            except subprocess.CalledProcessError:
+                if attempt == DMG_ATTEMPTS:
+                    raise
+                print(f"hdiutil failed (often 'Resource busy' on CI); trying again ({attempt}/{DMG_ATTEMPTS})")
+                time.sleep(5 * attempt)
     return dmg
 
 

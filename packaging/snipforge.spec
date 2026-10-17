@@ -60,6 +60,8 @@ if MAC:
             "CFBundleDisplayName": "SnipForge",
             "CFBundleVersion": VERSION,
             "NSHighResolutionCapable": True,
+            # PySide6 6.12's wheels need macOS 14; older Macs get a clear "needs a newer macOS".
+            "LSMinimumSystemVersion": "14.0",
             "LSApplicationCategoryType": "public.app-category.graphics-design",
         },
     )

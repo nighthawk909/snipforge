@@ -8,9 +8,10 @@ signature and no notarization. Macs only (not iPhone or iPad).
 [macOS build](../.github/workflows/mac.yml) workflow (run by hand: Actions > macOS build > Run
 workflow) runs the tests on macOS, builds `SnipForge.app` into `SnipForge-<version>.dmg`, installs
 it from the .dmg, runs the packaged app's `--self-test`, starts the real app and launches it a second
-time, then uploads the .dmg as the `snipforge-macos` artifact. Snipping works once macOS's Screen
-Recording permission is given; the Windows integrations (shortcut, OCR, window picking, share, start
-at sign-in, updates) each need a Mac version, listed below with the macOS API for each.
+time, then uploads the .dmg as the `snipforge-macos` artifact. Snipping should work once macOS's
+Screen Recording permission is given (CI can't grant it, so a tester confirms it). The Windows
+integrations (shortcut, OCR, window picking, share, start at sign-in, updates) each need a Mac
+version, listed below with the macOS API for each.
 
 **What it costs:** nothing. macOS runners are free for public repositories, and every macOS API
 below comes with macOS. The price of skipping the paid Apple account is the first-launch step in
@@ -18,20 +19,27 @@ below comes with macOS. The price of skipping the paid Apple account is the firs
 
 ## What works today
 
-Checked by the macOS build workflow (`--self-test` and a real start of the packaged app) and by
-the unit tests running on macOS:
+**Checked by CI** (the macOS build workflow): the unit tests on macOS (with Qt's offscreen
+platform), and on the packaged app, with the real macOS platform: `--self-test` builds the theme,
+the editor (drawing an arrow and rendering it), the Library window listing a snip and the SVG icons,
+on both the Apple silicon and the Intel half; then SnipForge starts, keeps running, and a second
+launch hands over to it.
 
-| Works on a Mac | Notes |
+**Expected from the same code, to confirm with the [test plan](#test-plan-for-a-coworker-with-a-mac)**
+(CI can't click menus, grant Screen Recording or drag between apps):
+
+| On a Mac | Notes |
 |---|---|
 | Starting, the menu bar icon, one SnipForge at a time | A second start hands its command to the running SnipForge and exits, as on Windows (Qt's local socket works the same on macOS; CI checks it). Opened again from Finder or the Dock, macOS just activates the running SnipForge, which doesn't bring up its Library yet (phase 1). |
 | Library: browse, open, favorites, tags, delete, Open library folder | Deleted snips go to the Trash. Open folder opens Finder. Text search finds titles and tags, but not words inside snips until OCR has its Mac version. |
 | Editor: every markup tool, crop, Beautify, undo, copy, save, Drag out, Pin | Same code as Windows. Keyboard shortcuts written Ctrl+... become ⌘ on a Mac (Qt does this). |
 | Settings, themes (light, dark, follow the system), accents | Start at sign-in reads as off and explains it isn't available yet. |
-| Snipping an area or a full screen | Needs Screen Recording permission (below). Qt 6.12's screen grab on macOS uses ScreenCaptureKit, Apple's current capture API. |
+| Snipping an area or a full screen | Needs Screen Recording permission (below). Qt 6.12's screen grab on macOS uses ScreenCaptureKit, Apple's current capture API ([`qcocoascreen.mm`](https://code.qt.io/cgit/qt/qtbase.git/tree/src/plugins/platforms/cocoa/qcocoascreen.mm?h=6.12)). |
 | Share > Send in Teams, Save and show in folder | Teams opens through its `msteams:` link as on Windows; Show in folder uses Finder. Email copies the snip and opens the default mail app to paste it into, the fallback Windows uses without classic Outlook. |
 
 The app is one universal build (Apple silicon and Intel) and needs **macOS 14 Sonoma or later**,
-the oldest macOS that PySide6 6.12's wheels support.
+the oldest macOS that PySide6 6.12's wheels support (`LSMinimumSystemVersion` in the bundle, so an
+older Mac says so instead of crashing).
 
 ## What needs a Mac version
 
@@ -45,11 +53,11 @@ Windows-only.
 | Feature | Windows today | macOS version | Permission it needs |
 |---|---|---|---|
 | Global shortcut | Low-level keyboard hook on Win+Shift+S and Print Screen (`hotkey.py`) | Carbon `RegisterEventHotKey`: registers exactly the chosen combination, sees no other keys. macOS keeps ⌘⇧3/4/5 for its own screenshots, so the default would be a free combination such as ⌘⇧2, with the option of taking ⌘⇧4 once the person turns off macOS's own in System Settings > Keyboard > Keyboard Shortcuts > Screenshots. | None. (A `CGEventTap` would need Input Monitoring; `RegisterEventHotKey` doesn't.) |
-| Screen capture | Qt `grabWindow` | Already works: Qt 6.12 uses ScreenCaptureKit (`SCScreenshotManager`). Missing piece: check `CGPreflightScreenCaptureAccess()` before snipping and, if it's off, explain and offer to open the setting (`CGRequestScreenCaptureAccess()` adds SnipForge to the list). Without it the frozen screen leaves out other apps' windows. | Screen & System Audio Recording. macOS 15 and later can also ask the person, about monthly, to confirm an app may keep capturing the screen; that prompt is macOS's and can't be turned off by the app. |
+| Screen capture | Qt `grabWindow` | Should already work: Qt 6.12 uses ScreenCaptureKit (`SCScreenshotManager`). Missing piece: check `CGPreflightScreenCaptureAccess()` before snipping and, if it's off, explain and offer to open the setting (`CGRequestScreenCaptureAccess()` adds SnipForge to the list). What a snip shows without it (an error, a blank screen or just the desktop) is for the first tester to find out. | Screen Recording (called Screen & System Audio Recording from macOS 15). macOS 15 and later may also ask the person from time to time (reported as monthly) to confirm an app may keep capturing the screen; that prompt is macOS's and the app can't turn it off. |
 | Window list (click a window to snip it, and the app name and title the Library shows) | `EnumWindows` + DWM frame bounds (`winrects.py`) | Quartz `CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly \| kCGWindowListExcludeDesktopElements, kCGNullWindowID)`: front to back, with `kCGWindowBounds` (points, so multiply by the screen's scale for pixels), `kCGWindowOwnerName`, `kCGWindowOwnerPID`, `kCGWindowLayer` (0 for normal windows) and `kCGWindowName`. | Bounds and app names need none; window titles need Screen Recording. |
 | OCR (Grab Text, and Library search reading the words in snips) | Windows.Media.Ocr through WinRT (`ocr.py`) | Vision framework: `VNRecognizeTextRequest` (accurate level, automatic language) on a `VNImageRequestHandler`; each `VNRecognizedTextObservation` gives a line, and `boundingBoxForRange:` gives word boxes (normalized, origin bottom-left, so flip them). Offline and built in, like Windows OCR. | None. |
-| Share | Explorer right-click commands (OneDrive copy link and share, the Windows share sheet) and Outlook through COM (`share.py`) | `NSSharingServicePicker` shown under the Share button (the button's `NSView` comes from `QWidget.winId()`): Mail, Messages, AirDrop, Notes and any app's share extension. Email: `NSSharingService` named `NSSharingServiceNameComposeEmail` with the snip attached opens the default mail app (Outlook when it's the default). OneDrive: sync folders are under `~/Library/CloudStorage/OneDrive-*`; saving there and showing it in Finder gives OneDrive's own Share and Copy Link commands. Teams already works. | None. |
-| Start when I sign in | `HKCU\...\Run` registry value (`autostart.py`) | `SMAppService.mainApp` `register()`/`unregister()`/`status` (macOS 13+), which lists SnipForge in System Settings > General > Login Items & Extensions. If it turns out to need a Developer ID signature, fall back to a LaunchAgent plist in `~/Library/LaunchAgents` with `RunAtLoad`. | None; macOS tells the person it was added. IT can manage it (`com.apple.servicemanagement` payload, matched by bundle identifier). |
+| Share | Explorer right-click commands (OneDrive copy link and share, the Windows share sheet) and Outlook through COM (`share.py`) | `NSSharingServicePicker` shown under the Share button (the button's `NSView` comes from `QWidget.winId()`): Mail, Messages, AirDrop, Notes and any app's share extension. Email: `NSSharingService` named `NSSharingServiceNameComposeEmail` with the snip attached (check in this phase whether it opens Outlook when Outlook is the default mail app, or only Apple Mail; if only Mail, open the snip with Outlook directly). OneDrive: sync folders are under `~/Library/CloudStorage/OneDrive-*`; saving there and showing it in Finder gives OneDrive's own Share and Copy Link commands. Teams already works. | None. |
+| Start when I sign in | `HKCU\...\Run` registry value (`autostart.py`) | `SMAppService.mainApp` `register()`/`unregister()`/`status` (macOS 13+), which lists SnipForge in System Settings > General > Login Items (Login Items & Extensions from macOS 15). If it turns out to need a Developer ID signature, fall back to a LaunchAgent plist in `~/Library/LaunchAgents` with `RunAtLoad`. | None; macOS tells the person it was added. IT can manage it (`com.apple.servicemanagement` payload, matched by bundle identifier). |
 | Pointer in snips, and the delay countdown | Cursor drawn on black and on white (`_pointer_win32.py`); `SetWindowDisplayAffinity` keeps the countdown out of snips (`countdown.py`) | `NSCursor.currentSystemCursor` gives the image and hot spot; `NSEvent.mouseLocation` the position (points, origin bottom-left). For the countdown, `NSWindow.sharingType = .none` (check that ScreenCaptureKit honors it; the countdown also hides before the screen freezes, so it's belt and braces). | None. |
 | Scrolling capture (in progress for Windows) | `SendInput` wheel turns and `SetCursorPos` (`_scroll_win32.py`) | `CGEventCreateScrollWheelEvent` + `CGEventPost(kCGHIDEventTap)` to scroll, `CGWarpMouseCursorPosition` to place the pointer, `CGEventGetLocation(CGEventCreate(None))` to read it. | Accessibility (posting input to other apps). Check with `AXIsProcessTrustedWithOptions`. |
 | Updates | Downloads the verified `SnipForge-<version>-setup.exe` and runs it silently (`update_platform.py`) | The update engine already knows `SnipForge-<version>.dmg` assets. Install: verify the download's SHA-256 (as today), `hdiutil attach -nobrowse -readonly`, `ditto` the new `SnipForge.app` beside the running one, check it with `codesign --verify`, swap the two, `hdiutil detach`, reopen with `open -n`. Files SnipForge downloads itself aren't quarantined, so no Gatekeeper step after an update. If the app's folder isn't writable, or macOS is running it from a read-only copy because it was never moved out of Downloads ("App Translocation": its path contains `/AppTranslocation/`), say so and open the .dmg instead. | None. |
@@ -77,9 +85,9 @@ Control-click SnipForge > Open > Open still works). The steps, which the .dmg al
 
 Apple's guide: [Open a Mac app from an unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
-Then, the first time they snip, macOS asks for **Screen & System Audio Recording**. They turn
-SnipForge on in System Settings > Privacy & Security > Screen & System Audio Recording, then quit and
-reopen it.
+Then, the first time they snip, macOS asks for Screen Recording. They turn SnipForge on in
+System Settings > Privacy & Security > **Screen & System Audio Recording** (**Screen Recording** on
+macOS 14), then quit and reopen it.
 
 ### What an ad-hoc signature means after that
 

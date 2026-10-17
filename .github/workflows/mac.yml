@@ -107,9 +107,18 @@ jobs:
           app="$RUNNER_TEMP/Applications/SnipForge.app/Contents/MacOS/SnipForge"
           "$app" --background > dist/startup.log 2>&1 &
           pid=$!
-          sleep 15
           fail() { echo "::error::$1"; kill "$pid" 2>/dev/null || true; cat dist/startup.log; exit 1; }
-          kill -0 "$pid" 2>/dev/null || fail "SnipForge quit on its own while starting"
+          # Ready once it listens for other launches (Qt's local socket, in the temp folder).
+          tmp="${TMPDIR:-/tmp}"
+          socket="${tmp%/}/SnipForge-$(id -un)"
+          for _ in $(seq 1 60); do
+            [ -S "$socket" ] && break
+            kill -0 "$pid" 2>/dev/null || fail "SnipForge quit on its own while starting"
+            sleep 1
+          done
+          [ -S "$socket" ] || fail "SnipForge never started listening for other launches ($socket)"
+          sleep 10
+          kill -0 "$pid" 2>/dev/null || fail "SnipForge quit on its own after starting"
           "$app" > dist/second-launch.log 2>&1 &
           second=$!
           for _ in $(seq 1 20); do kill -0 "$second" 2>/dev/null || break; sleep 1; done

@@ -100,7 +100,8 @@ class SnipForgeApp:
     def _update_tray_tip(self) -> None:
         keys = [name for name, on in zip(("Win+Shift+S", "Print Screen"), prefs.hotkeys(), strict=True)
                 if on and HOTKEYS_SUPPORTED]
-        how = " or ".join(keys) if keys else "click this icon to snip"
+        click = "click this icon, then New snip" if sys.platform == "darwin" else "click this icon to snip"
+        how = " or ".join(keys) if keys else click
         self._tray.setToolTip(f"SnipForge {__version__} — {how}")
 
     def check_updates(self) -> None:

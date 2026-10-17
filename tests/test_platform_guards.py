@@ -8,13 +8,13 @@ import pytest
 from PySide6.QtGui import QDesktopServices, QImage
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from snipforge import app, autostart, home, hotkey, ocr, share, winrects
+from snipforge import app, autostart, home, hotkey, ocr, settings_window, share, winrects
 from snipforge.library import Library
 
 
 @pytest.fixture
 def mac(monkeypatch, on_a_mac):
-    on_a_mac(app, home, ocr, share)
+    on_a_mac(app, home, ocr, settings_window, share)
     for module in (autostart, hotkey, winrects):
         monkeypatch.setattr(module, "SUPPORTED", False)
 
@@ -67,6 +67,17 @@ def test_library_folder_and_trash_open_in_finder(mac, qapp, tmp_path, monkeypatc
     assert opened == [tmp_path / "lib", Path.home() / ".Trash"]
 
 
+def test_settings_open_folder_opens_finder(mac, qapp, tmp_path, monkeypatch):
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(Path(url.toLocalFile())) or True)
+    window = settings_window.SettingsWindow(library_root=tmp_path / "lib")
+    try:
+        window._open_folder(tmp_path / "lib")
+    finally:
+        window.close()
+    assert opened == [tmp_path / "lib"]
+
+
 def test_menu_bar_icon_opens_its_menu_without_snipping_or_mentioning_windows_keys(mac, qapp, tmp_path, monkeypatch,
                                                                                     no_dialogs):
     monkeypatch.setattr(app, "HOTKEYS_SUPPORTED", False)
@@ -78,7 +89,7 @@ def test_menu_bar_icon_opens_its_menu_without_snipping_or_mentioning_windows_key
     try:
         forge._tray.activated.emit(QSystemTrayIcon.Trigger)  # a click: macOS opens the menu
         assert snips == [] and messages == []  # no snip, and no "couldn't install the hook" warning
-        assert "Win+Shift+S" not in forge._tray.toolTip() and "click this icon to snip" in forge._tray.toolTip()
+        assert "Win+Shift+S" not in forge._tray.toolTip() and "click this icon, then New snip" in forge._tray.toolTip()
     finally:
         forge._tray.hide()
         forge.indexer.close()

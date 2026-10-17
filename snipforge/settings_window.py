@@ -462,7 +462,10 @@ class SettingsWindow(QMainWindow):
             return
         try:
             path.mkdir(parents=True, exist_ok=True)
-            os.startfile(str(path))  # noqa: S606 - opens our own library folder in Explorer
+            if sys.platform == "win32":
+                os.startfile(str(path))  # noqa: S606 - opens our own library folder in Explorer
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))  # Finder
         except OSError as exc:
             log.info("Couldn't open %s: %s", path, exc)
             QMessageBox.warning(self, "SnipForge", f"Couldn't open {path}: {exc}")
