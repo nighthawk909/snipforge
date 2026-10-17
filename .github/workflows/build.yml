@@ -1,8 +1,9 @@
 name: Build
 
-# Builds SnipForge.exe, the installer and the portable zip, proves the packaged app works
-# (--self-test), and writes checksums and an SBOM, uploaded as the "snipforge-windows" artifact.
-# Read-only: publishing to a release is a separate job in release.yml.
+# Builds SnipForge.exe, the installer (also copied to the version-less SnipForge-setup.exe for the
+# permanent download link) and the portable zip, proves the packaged app works (--self-test), and
+# writes checksums and an SBOM, uploaded as the "snipforge-windows" artifact.
+# Read-only: publishing is a separate job in release.yml (stable) and preview.yml (prereleases).
 on:
   workflow_call:
     inputs:
@@ -11,7 +12,18 @@ on:
         type: string
         required: false
         default: ""
+      version:
+        description: "Build as this version instead of the one in snipforge/__init__.py (previews, e.g. 0.6.0-preview.1)"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional: build as this version (e.g. 0.6.0-preview.1) to try a preview build without publishing it"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -39,16 +51,26 @@ jobs:
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
       - name: Build
-        run: python scripts/build.py --installer
+        env:
+          SET_VERSION: ${{ inputs.version }}
+        run: |
+          $preview = if ($env:SET_VERSION) { @('--set-version', $env:SET_VERSION) } else { @() }
+          python scripts/build.py --installer @preview
       - name: Self-test the packaged app
         shell: pwsh
         timeout-minutes: 5
+        env:
+          SET_VERSION: ${{ inputs.version }}
         run: |
           $report = "dist\selftest.json"
           $p = Start-Process -FilePath dist\SnipForge\SnipForge.exe -ArgumentList '--self-test', $report -PassThru
           if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "Packaged app self-test timed out" }
           if (Test-Path $report) { Get-Content $report }
           if ($p.ExitCode -ne 0) { throw "Packaged app failed its self-test (exit $($p.ExitCode))" }
+          if ($env:SET_VERSION) {
+            $reported = (Get-Content $report -Raw | ConvertFrom-Json).version
+            if ($reported -ne $env:SET_VERSION) { throw "Packaged app reports $reported, expected $env:SET_VERSION" }
+          }
       - name: SBOM (runtime dependencies only)
         shell: pwsh
         run: |
@@ -60,6 +82,7 @@ jobs:
           name: snipforge-windows
           path: |
             dist/SnipForge-*-setup.exe
+            dist/SnipForge-setup.exe
             dist/SnipForge-*-portable.zip
             dist/SHA256SUMS.txt
             dist/sbom.cdx.json

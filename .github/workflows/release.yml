@@ -93,6 +93,18 @@ jobs:
         with:
           name: snipforge-windows
           path: dist
+      # SnipForge-setup.exe is the same installer without the version in its name, so
+      # https://github.com/<repo>/releases/latest/download/SnipForge-setup.exe always serves the
+      # newest stable release. The in-app updater looks for the versioned name. scripts/build.py
+      # makes the copy; tags built before it existed (re-run by hand) get it here.
+      - name: Version-less installer for the permanent download link
+        run: |
+          if [ ! -f dist/SnipForge-setup.exe ]; then
+            cp dist/SnipForge-*-setup.exe dist/SnipForge-setup.exe
+            (cd dist && sha256sum SnipForge-setup.exe >> SHA256SUMS.txt)
+          fi
+          # [[:space:]]* also matches the CR of the CRLF lines build.py writes on Windows.
+          grep -qE '  SnipForge-setup\.exe[[:space:]]*$' dist/SHA256SUMS.txt
       - name: Build provenance
         # Artifact attestations are free for public repositories.
         if: ${{ !github.event.repository.private }}
@@ -100,13 +112,15 @@ jobs:
         with:
           subject-path: |
             dist/SnipForge-*-setup.exe
+            dist/SnipForge-setup.exe
             dist/SnipForge-*-portable.zip
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$TAG" dist/SnipForge-*-setup.exe dist/SnipForge-*-portable.zip \
-            dist/SHA256SUMS.txt dist/sbom.cdx.json --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" dist/SnipForge-*-setup.exe dist/SnipForge-setup.exe \
+            dist/SnipForge-*-portable.zip dist/SHA256SUMS.txt dist/sbom.cdx.json \
+            --clobber --repo "$GITHUB_REPOSITORY"
       # release-please creates the release as a draft (release-please-config.json), so people, the
       # download links and the in-app updater only see it now that every file is attached.
       - name: Publish the release
