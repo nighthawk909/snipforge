@@ -1,5 +1,7 @@
 """Tests for the Windows-facing pieces: capture overlay, tray app, library window, pin,
 single-instance handoff, window detection and the packaged self-test."""
+import sys
+
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QKeyEvent, QMouseEvent, QPixmap, QWheelEvent
@@ -296,7 +298,8 @@ def test_selftest_report(tmp_path, monkeypatch, qapp):
     data = json.loads(report.read_text(encoding="utf-8"))
     assert data["passed"] and data["checks"]["editor"]["ok"] and data["checks"]["icons"]["ok"]
     assert data["checks"]["theme"]["ok"] and "snipforge" in data["checks"]["theme"]["detail"]
-    assert data["checks"]["video"]["ok"] and data["checks"]["video"]["required"]  # the recorder's encoder
+    assert data["checks"]["video"]["ok"]  # the recorder's encoder (required on Windows, not yet on a Mac)
+    assert data["checks"]["video"]["required"] == (sys.platform == "win32")
     assert qapp.styleSheet() == ""  # the check leaves the test app as it found it
 
 

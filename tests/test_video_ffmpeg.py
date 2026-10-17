@@ -1,9 +1,14 @@
 """snipforge/video/ffmpeg.py: reading video files with the FFmpeg libraries Qt Multimedia ships."""
 import shutil
+import sys
 
 import pytest
 
 from snipforge.video import clip, ffmpeg
+
+# Required on Windows; elsewhere (the Mac port) the run says why they were skipped.
+pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
+                                reason=f"Qt's FFmpeg isn't usable here: {ffmpeg.unavailable_reason()}")
 
 
 @pytest.fixture(scope="module")

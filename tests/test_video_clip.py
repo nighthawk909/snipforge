@@ -7,7 +7,11 @@ import pytest
 
 from snipforge.video import clip, ffmpeg
 
+needs_ffmpeg = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
+                                  reason=f"Qt's FFmpeg isn't usable here: {ffmpeg.unavailable_reason()}")
 
+
+@needs_ffmpeg
 def test_a_test_clip_is_h264_video_with_aac_sound(tmp_path, qapp):
     """Checked, not assumed: Qt switches to another codec without saying so when a container has no
     H.264 (it did for Matroska, writing MPEG-4 Part 2, which browsers can't play)."""
@@ -34,6 +38,7 @@ def test_the_app_doesnt_load_qt_multimedia_until_it_records():
     assert subprocess.run([sys.executable, "-c", code], timeout=60).returncode == 0
 
 
+@needs_ffmpeg
 def test_a_clip_that_comes_out_wrong_is_recorded_again(tmp_path, monkeypatch, caplog, qapp):
     real = clip._record
     tries = []

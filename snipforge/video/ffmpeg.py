@@ -111,18 +111,32 @@ def check_versions(found: dict[str, int]) -> None:
                                 f"found {', '.join(wrong)}")
 
 
+def _library_files() -> dict[str, Path]:
+    """Where Qt keeps each library: next to Qt's DLLs on Windows, in Qt/lib (as libavformat.63.dylib
+    and so on) on macOS. Checked by version once loaded, whatever the name."""
+    folder = _folder()
+    if sys.platform == "win32":
+        return {name: folder / filename for name, filename in WINDOWS_NAMES.items()}
+    found = {}
+    for name, major in TESTED.items():
+        matches = sorted(folder.rglob(f"lib{name}.{major}*.dylib")) or sorted(folder.rglob(f"lib{name}*.so.{major}*"))
+        if not matches:
+            raise FFmpegUnavailable(f"Qt's lib{name} wasn't found under {folder}")
+        found[name] = matches[0]
+    return found
+
+
 @cache
 def _libs() -> dict[str, ctypes.CDLL]:
-    if sys.platform != "win32":
-        raise FFmpegUnavailable("Reading video files directly isn't available on this platform yet")
-    folder = _folder()
-    os.add_dll_directory(str(folder))
+    files = _library_files()
+    if sys.platform == "win32":
+        os.add_dll_directory(str(_folder()))
     libs = {}
-    for name, filename in WINDOWS_NAMES.items():
+    for name in [n for n in ("avutil", "swscale", "avcodec", "avformat") if n in files]:  # dependencies first
         try:
-            libs[name] = ctypes.CDLL(str(folder / filename))
+            libs[name] = ctypes.CDLL(str(files[name]))
         except OSError as exc:
-            raise FFmpegUnavailable(f"{filename} is missing or broken: {exc}") from exc
+            raise FFmpegUnavailable(f"{files[name].name} is missing or broken: {exc}") from exc
     for name, lib in libs.items():
         getattr(lib, f"{name}_version").restype = c_uint
     check_versions({name: getattr(lib, f"{name}_version")() >> 16 for name, lib in libs.items()})
@@ -147,11 +161,16 @@ def _declare(libs: dict[str, ctypes.CDLL]) -> None:
 
 
 def available() -> bool:
+    return unavailable_reason() is None
+
+
+def unavailable_reason() -> str | None:
+    """Why the libraries can't be used here, or None when they can."""
     try:
         _libs()
-    except FFmpegUnavailable:
-        return False
-    return True
+    except FFmpegUnavailable as exc:
+        return str(exc)
+    return None
 
 
 def versions() -> dict[str, int]:
