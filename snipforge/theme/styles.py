@@ -193,7 +193,7 @@ QFrame#CaptureToolbar {{ background: {p.surface}; border: 1px solid {p.border}; 
 #CaptureToolbar QToolButton {{ border-radius: 8px; padding: 6px 10px; color: {p.text2}; }}
 #CaptureToolbar QToolButton:checked {{ background: {a.soft}; color: {a.text}; font-weight: 600; }}
 #CaptureToolbar QToolButton:focus {{ border: 1px solid {a.fill}; }}
-QToolButton#DelayButton::menu-indicator {{ image: none; width: 0px; }}
+QToolButton#DelayButton::menu-indicator, QToolButton#SizeButton::menu-indicator {{ image: none; width: 0px; }}
 QFrame#Countdown {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 12px; }}
 QLabel#CountdownText {{ font-weight: 600; padding-right: 6px; }}
 #Countdown QToolButton {{ background: {p.surface2}; border: 1px solid {p.border}; border-radius: 8px;

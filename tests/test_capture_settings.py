@@ -55,3 +55,8 @@ def test_find_knows_the_new_settings(window):
     from snipforge.settings_window import SECTIONS
     keywords = " ".join(SECTIONS["capture"]).lower()
     assert all(word in keywords for word in ("delay", "pointer", "mode"))
+
+
+def test_fixed_size_is_a_start_mode(window):
+    window.start_mode.button("fixed").click()
+    assert prefs.capture_mode() == "fixed"
