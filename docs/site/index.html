@@ -114,6 +114,23 @@
   .features { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
   .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
   .feature p { color: var(--muted); margin: 0; font-size: 15px; }
+  .section-lede { color: var(--muted); margin: -8px 0 18px; max-width: 46em; }
+  @media (min-width: 560px) { .features.two-up { grid-template-columns: repeat(2, 1fr); } }
+
+  /* Filled in from the latest release when the page is published (scripts/build_site.py). */
+  .released { color: var(--muted); margin: -10px 0 14px; font-size: 15px; }
+  ul.notes { margin: 0 0 14px; padding-left: 22px; display: grid; gap: 6px; }
+  .preview {
+    margin-top: 18px; padding: 16px 18px; border-radius: 12px;
+    background: var(--accent-soft); border: 1px solid var(--border);
+  }
+  .preview p { margin: 0 0 10px; }
+  .preview p:last-child { margin-bottom: 0; }
+  .button-secondary {
+    display: inline-block; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--accent);
+    color: var(--accent); background: var(--surface); font-weight: 600; text-decoration: none;
+  }
+  .button-secondary:hover { background: var(--accent); color: var(--accent-text); }
 
   table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
   th, td { text-align: left; vertical-align: top; padding: 12px 16px; border-bottom: 1px solid var(--border); }
@@ -143,7 +160,7 @@
       <p class="lede">A free, open-source screenshot tool for Windows. Press <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, drag over anything, and the snip opens in an editor with arrows, callouts, blur and more.</p>
       <a class="download" id="download" href="https://github.com/nighthawk909/snipforge/releases/latest/download/SnipForge-setup.exe">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 4.6 10 3.6v7.6H3zm8-1.1 10-1.5v9.2H11zM3 12.3h7v7.6l-7-1zm8 0h10v9.2l-10-1.5z"/></svg>
-        <span>Download for Windows<small>Latest version · free · about 30 MB</small></span>
+        <span>Download for Windows<small><!-- generated:download-note -->Latest version · free · about 30 MB<!-- /generated:download-note --></small></span>
       </a>
       <p class="meta">Windows 10 and 11, 64-bit · No admin rights needed ·
         <a href="https://github.com/nighthawk909/snipforge/releases/latest">Release notes</a> ·
@@ -153,6 +170,8 @@
       <img src="editor-preview.png" width="1240" height="760" alt="The SnipForge editor with a screenshot marked up with an arrow, a callout and step numbers">
     </figure>
   </div>
+
+  <!-- generated:whats-new --><!-- /generated:whats-new -->
 
   <section id="install">
     <div class="wrap">
@@ -184,9 +203,23 @@
         </li>
         <li>
           <h3>Press <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> or <kbd>Print Screen</kbd> to snip</h3>
-          <p>To pin SnipForge to the taskbar, open Start, right-click <strong>SnipForge</strong> and choose <strong>Pin to taskbar</strong>. SnipForge keeps itself up to date and asks before installing a new version.</p>
+          <p>To pin SnipForge to the taskbar, open Start, right-click <strong>SnipForge</strong> and choose <strong>Pin to taskbar</strong>.</p>
         </li>
       </ol>
+    </div>
+  </section>
+
+  <section id="updates">
+    <div class="wrap">
+      <h2>Install once. It keeps itself up to date.</h2>
+      <p class="section-lede">You only need this page the first time. After that, new versions come to you inside SnipForge.</p>
+      <div class="features two-up">
+        <div class="feature"><h3>Checks once a day</h3><p>SnipForge looks for a new version once a day, and whenever you choose <strong>Check for updates</strong> in its tray menu. You can turn the daily check off there too.</p></div>
+        <div class="feature"><h3>Asks, then installs for you</h3><p>When a new version is out, SnipForge asks first, then downloads and installs it. No admin rights, no trip back to this page, and your snips and settings stay put.</p></div>
+        <div class="feature"><h3>Verified before it installs</h3><p>Every update is checked against the SHA-256 checksum published with its release. If it doesn't match, nothing is installed.</p></div>
+        <div class="feature"><h3>Works the way your company does</h3><p>IT can turn update checks off by policy, deploy SnipForge for everyone, or mirror releases to a company file share. See the <a href="https://github.com/nighthawk909/snipforge/blob/main/docs/DISTRIBUTION.md">deployment options</a>.</p></div>
+      </div>
+      <!-- generated:preview --><!-- /generated:preview -->
     </div>
   </section>
 

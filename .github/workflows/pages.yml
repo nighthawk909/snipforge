@@ -1,15 +1,21 @@
 name: Download page
 
-# Publishes docs/site (the "Download for Windows" page) to GitHub Pages:
-# https://nighthawk909.github.io/snipforge/
-# Pages must be turned on once in Settings > Pages with Source "GitHub Actions". Until then this
-# workflow skips the deploy (with a notice) instead of failing.
+# Publishes the "Download for Windows" page to GitHub Pages: https://nighthawk909.github.io/snipforge/
+# scripts/build_site.py stamps docs/site/index.html with the current release (version, date, size,
+# what's new) and a newer preview build if there is one. The page loads nothing when people view
+# it, so it's rebuilt here after every Release or Preview release run, and when docs/site changes.
+# Pages must be set to deploy from GitHub Actions (Settings > Pages); until then this skips.
 on:
   push:
     branches: [main]
     paths:
       - "docs/site/**"
+      - "scripts/build_site.py"
       - ".github/workflows/pages.yml"
+  workflow_run:
+    workflows: ["Release", "Preview release"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +27,9 @@ concurrency:
 
 jobs:
   build:
-    name: Package the page
+    name: Build the page
+    # After a Release run that failed, keep the page that's already live.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -45,11 +53,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: ${{ steps.pages.outputs.enabled == 'true' }}
         with:
+          ref: main
           persist-credentials: false
+      - name: Stamp the page with the current release
+        if: ${{ steps.pages.outputs.enabled == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" > "$RUNNER_TEMP/releases.json"
+          python3 scripts/build_site.py --releases "$RUNNER_TEMP/releases.json" --site docs/site \
+            --out "$RUNNER_TEMP/site" --repo "$GITHUB_REPOSITORY"
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         if: ${{ steps.pages.outputs.enabled == 'true' }}
         with:
-          path: docs/site
+          path: ${{ runner.temp }}/site
 
   deploy:
     name: Deploy to GitHub Pages

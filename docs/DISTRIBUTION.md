@@ -21,12 +21,17 @@ Every stable release attaches `SnipForge-setup.exe` (the same file as
 show "Not Found"; it works again once the Release workflow finishes.)
 
 The download page at <https://nighthawk909.github.io/snipforge/> wraps the link in a big
-**Download for Windows** button, with install steps, the SmartScreen prompt explained, a feature
-list and system requirements. Its source is [`docs/site/`](site/index.html): one HTML file plus the
-screenshot, with no scripts, fonts, trackers or analytics, so you can also upload both files to a
-SharePoint library or Teams channel and open the page from there. The
-[`Download page`](../.github/workflows/pages.yml) workflow republishes it whenever `docs/site/`
-changes on `main`.
+**Download for Windows** button, with install steps, the SmartScreen prompt explained, how updates
+work, a feature list and system requirements. It keeps itself current: the
+[`Download page`](../.github/workflows/pages.yml) workflow runs after every Release and Preview
+release run, and [`scripts/build_site.py`](../scripts/build_site.py) stamps the page with the
+current version, release date, download size and "What's new" from the release notes, plus a
+**Try what's next** download when a newer preview build exists. People viewing it load nothing
+from anywhere else; there are no scripts, fonts, trackers or analytics.
+
+Its source is [`docs/site/`](site/index.html): one HTML file plus the screenshot. It works on its
+own too (without the version details), so you can upload both files to a SharePoint library or
+Teams channel and open the page from there.
 
 Text you can paste into a post for coworkers:
 
@@ -116,6 +121,11 @@ which the updater doesn't do. To use a SharePoint library:
 - **Read** it from a location the app can open without signing in: a copy on a network share, a
   folder each PC syncs (for example `%USERPROFILE%\Contoso\SnipForge - Documents`), or an internal
   https web server.
+
+To have every PC sync the library without anyone clicking **Sync**, IT can use the OneDrive policy
+**Configure team site libraries to sync automatically** (Group Policy or Intune; the first sync can
+take a few hours), then set `UpdateFeed` to the synced folder with `%USERPROFILE%` in the path so
+it works for every user.
 
 People can also install from the mirror directly: the installer there is the same file as on GitHub.
 
