@@ -566,6 +566,18 @@ def test_github_source_reads_releases_from_an_enterprise_server(tmp_path):
     assert downloads[0][1] == "" and downloads[0][0].read_bytes() == payload
 
 
+def test_enterprise_downloads_refuse_github_com_storage(tmp_path):
+    """Only github.com hands downloads to its file storage; an enterprise copy's must stay on its server."""
+    release = updates.parse_release(ghe_release_json(), GHE["repo"], server_url=GHE["server_url"])
+    payload = b"x"
+    sums = f"{updates.sha256_bytes(payload)}  SnipForge-9.0.0-setup.exe\n".encode()
+    transport = FakeTransport({release.sums_url: (sums, "https://objects.githubusercontent.com/s"),
+                               release.installer_url: payload})
+    results, done = collect()
+    update_sources.GitHubSource(**GHE, transport=transport).download(release, tmp_path, done)
+    assert results[0][0] is None and "unexpected" in results[0][1] and not any(tmp_path.iterdir())
+
+
 def test_enterprise_releases_ignore_links_to_other_servers():
     release = updates.parse_release(release_json(), GHE["repo"], server_url=GHE["server_url"])
     assert release.page == f"{GHE_RELEASES}/latest" and release.installer_url is None and release.sums_url is None

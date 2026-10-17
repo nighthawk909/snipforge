@@ -69,7 +69,9 @@ GitHub allows 60 anonymous requests an hour per public IP address. If many PCs s
 
 SnipForge never signs in to GitHub. A copy of SnipForge built from a private or internal repository
 (see [PORTING.md](PORTING.md)) can't read its own releases; **Check for updates** then explains that
-and asks people to have IT set the `UpdateFeed` policy, and daily checks fail quietly.
+and asks people to have IT set the `UpdateFeed` policy. Automatic checks fail quietly; until the
+policy is set, each PC sends one refused anonymous request every six hours and each time SnipForge
+starts.
 
 ## Controlling updates
 

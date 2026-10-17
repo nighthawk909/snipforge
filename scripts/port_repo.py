@@ -1,16 +1,18 @@
 """Point a copy of SnipForge at its new home (for example a repository on GitHub Enterprise).
 
-    python scripts/port_repo.py --repo acme/snipforge
-    python scripts/port_repo.py --repo acme/snipforge --server-url https://ghe.example.com \\
-        --pages-url https://pages.ghe.example.com/acme/snipforge/
-    python scripts/port_repo.py --repo acme/snipforge --from https://github.com/<owner>/<repo>
+    python scripts/port_repo.py --repo <org>/<repo>
+    python scripts/port_repo.py --repo <org>/<repo> --server-url https://<server> \\
+        --pages-url https://<pages address>/
+    python scripts/port_repo.py --repo <org>/<repo> --from https://github.com/<owner>/<repo>
 
 Rewrites snipforge/project.py (SERVER_URL and REPO, which the app, scripts, installer and tests
 read) and every link to the old repository in the docs, the download page, workflows and
-pyproject.toml, in one pass. The old home is the one project.py names, or --from after merging in
-later changes from the original repository. CHANGELOG.md (history) and docs/PORTING.md (which
-describes the original) are left as they are. Review the result with `git diff`; see
-docs/PORTING.md for the rest of the move. Needs only the Python standard library.
+pyproject.toml, in one pass, keeping each file's line endings. Only whole names are replaced: a
+repository whose name merely starts with the old one is left alone. The old home is the one
+project.py names, or --from after merging in later changes from the original repository.
+CHANGELOG.md (history) and docs/PORTING.md (which describes the original) are left as they are.
+Review the result with `git diff`; see docs/PORTING.md for the rest of the move. Needs only the
+Python standard library.
 """
 from __future__ import annotations
 
@@ -30,12 +32,12 @@ LOCATION_FILE = Path("snipforge") / "project.py"
 KEEP = frozenset({"CHANGELOG.md", "docs/PORTING.md"})   # history, and the guide to the original
 SKIP_DIRS = frozenset({".git", "dist", "build", "__pycache__", "node_modules"})
 MAX_BYTES = 2_000_000
-SERVER_LINE = re.compile(r'^SERVER_URL = "[^"\n]*"$', re.MULTILINE)
-REPO_LINE = re.compile(r'^REPO = "[^"\n]*"$', re.MULTILINE)
+SERVER_LINE = re.compile(r'^SERVER_URL = "[^"\r\n]*"(?=\r?$)', re.MULTILINE)
+REPO_LINE = re.compile(r'^REPO = "[^"\r\n]*"(?=\r?$)', re.MULTILINE)
 
 
 class PortError(Exception):
-    """Bad input or an unreadable copy; nothing was changed."""
+    """Bad input or an unreadable copy, found before any file is written."""
 
 
 @dataclass(frozen=True)
@@ -53,7 +55,7 @@ class Home:
         if project.server_host(self.server_url) != "github.com":
             return None
         owner, name = self.repo.split("/")
-        return f"https://{owner.lower()}.github.io/{name}"
+        return f"https://{owner}.github.io/{name}".lower()
 
 
 def home(server_url: str, repo: str) -> Home:
@@ -68,7 +70,7 @@ def home(server_url: str, repo: str) -> Home:
 def home_from_url(url: str) -> Home:
     """'https://github.com/owner/name' -> Home('https://github.com', 'owner/name')."""
     parsed = urlparse(url or "")
-    parts = parsed.path.strip("/").split("/")
+    parts = parsed.path.strip("/").removesuffix(".git").split("/")
     if len(parts) != 2:
         raise PortError(f"--from must be a repository address like https://github.com/owner/name, not {url!r}")
     return home(f"{parsed.scheme}://{parsed.netloc}", "/".join(parts))
@@ -106,10 +108,13 @@ def replacements(old: Home, new: Home, pages_url: str | None) -> dict[str, str]:
 
 
 def rewrite(text: str, pairs: dict[str, str]) -> str:
-    """Replace in one pass, so a new name that contains the old one isn't replaced again."""
+    """Replace in one pass, so a new name that contains the old one isn't replaced again, and only
+    whole names: 'owner/name' matches in 'owner/name/issues' and 'owner/name.git', not in
+    'owner/name-extras' or 'other-owner/name'."""
     if not pairs:
         return text
-    pattern = re.compile("|".join(re.escape(k) for k in sorted(pairs, key=len, reverse=True)))
+    keys = "|".join(re.escape(k) for k in sorted(pairs, key=len, reverse=True))
+    pattern = re.compile(rf"(?<![\w.-])(?:{keys})(?![\w-])")
     return pattern.sub(lambda m: pairs[m.group(0)], text)
 
 
@@ -122,7 +127,7 @@ def candidate_files(root: Path) -> list[Path]:
                          and not (Path(folder) / d / "pyvenv.cfg").exists())
         for name in sorted(files):
             path = Path(folder) / name
-            if name == ".git":  # a worktree's pointer to its repository
+            if name == ".git" or path.is_symlink():  # a worktree's pointer to its repository; links
                 continue
             if path.stat().st_size <= MAX_BYTES and is_text(path):
                 found.append(path)
@@ -147,17 +152,18 @@ def port(root: Path, new: Home, pages_url: str | None, old: Home | None = None,
         rel = path.relative_to(root).as_posix()
         if rel in KEEP:
             continue
-        text = path.read_text(encoding="utf-8")
+        with path.open(encoding="utf-8", newline="") as f:  # newline="": keep \r\n as it is
+            text = f.read()
         updated = rewrite(text, pairs)
         if rel == LOCATION_FILE.as_posix():
-            updated = SERVER_LINE.sub(f'SERVER_URL = "{new.server_url}"', updated, count=1)
-            updated = REPO_LINE.sub(f'REPO = "{new.repo}"', updated, count=1)
+            updated = SERVER_LINE.sub(lambda _: f'SERVER_URL = "{new.server_url}"', updated, count=1)
+            updated = REPO_LINE.sub(lambda _: f'REPO = "{new.repo}"', updated, count=1)
         if old.pages_url and no_scheme(old.pages_url) in updated.lower():
             pages_left.append(rel)
         if updated != text:
             changed.append(rel)
             if not dry_run:
-                with path.open("w", encoding="utf-8", newline="") as f:  # keep each file's line endings
+                with path.open("w", encoding="utf-8", newline="") as f:
                     f.write(updated)
     return changed, pages_left
 

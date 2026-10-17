@@ -18,15 +18,20 @@ EXTRA_DOWNLOAD_HOSTS: tuple[str, ...] = ()
 
 GITHUB_COM_DOWNLOAD_HOSTS = ("objects.githubusercontent.com", "release-assets.githubusercontent.com")
 REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# A host name and an optional port other than https's own 443 (which GitHub's links leave out).
+_LABEL = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+NETLOC_RE = re.compile(rf"(?P<host>{_LABEL}(?:\.{_LABEL})*)(?::(?P<port>[0-9]{{1,5}}))?")
 
 
 def _origin(server_url) -> tuple[str, str]:
     """('https://ghe.example.com', 'ghe.example.com'). Raises ValueError unless it's a bare https address."""
     parsed = urlparse(server_url if isinstance(server_url, str) else "")
-    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+    netloc = NETLOC_RE.fullmatch(parsed.netloc.lower())
+    port = int(netloc["port"]) if netloc and netloc["port"] else None
+    if (parsed.scheme != "https" or not netloc or (port is not None and not 0 < port < 65536) or port == 443
             or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment):
         raise ValueError(f"The GitHub server must be an https:// address like https://github.com, not {server_url!r}")
-    return f"https://{parsed.netloc.lower()}", parsed.hostname
+    return f"https://{netloc.group(0)}", netloc["host"]
 
 
 def server_host(server_url: str) -> str:

@@ -109,6 +109,61 @@ def test_port_from_rewrites_references_merged_in_later(tmp_path):
     assert f'SERVER_URL = "{GHE}"\n' in (root / "snipforge" / "project.py").read_text(encoding="utf-8")
 
 
+def test_from_with_a_name_that_extends_the_old_one_does_not_double_it(tmp_path):
+    root = copy_repo(tmp_path)
+    longer = f"{project.REPO}-corp"
+    assert port.main(["--root", str(root), "--repo", longer]) == 0
+
+    assert port.main(["--root", str(root), "--repo", longer, "--from", project.REPO_URL]) == 0
+
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert f"{longer}/" in readme and f"{longer}-corp" not in readme
+
+
+def test_from_accepts_a_clone_address(tmp_path):
+    root = copy_repo(tmp_path)
+    assert port.main(["--root", str(root), "--repo", NEW_REPO, "--server-url", GHE]) == 0
+    (root / "docs" / "LATER.md").write_text(f"See {project.REPO_URL}/issues.\n", encoding="utf-8")
+
+    assert port.main(["--root", str(root), "--repo", NEW_REPO, "--from", f"{project.REPO_URL}.git"]) == 0
+
+    assert (root / "docs" / "LATER.md").read_text(encoding="utf-8") == f"See {GHE}/{NEW_REPO}/issues.\n"
+
+
+def test_port_leaves_other_repositories_with_a_longer_name_alone(tmp_path):
+    root = copy_repo(tmp_path)
+    sibling = f"{project.REPO_URL}-extras and {project.REPO}-extras and {project.REPO}_old\n"
+    (root / "docs" / "SIBLING.md").write_text(sibling, encoding="utf-8")
+
+    assert port.main(["--root", str(root), "--repo", NEW_REPO]) == 0
+
+    assert (root / "docs" / "SIBLING.md").read_text(encoding="utf-8") == sibling
+
+
+def test_port_keeps_each_files_line_endings(tmp_path):
+    root = copy_repo(tmp_path)
+    readme = root / "README.md"
+    crlf = readme.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    readme.write_bytes(crlf)
+    lf = (root / "SECURITY.md").read_bytes().replace(b"\r\n", b"\n")
+    (root / "SECURITY.md").write_bytes(lf)
+
+    assert port.main(["--root", str(root), "--repo", NEW_REPO]) == 0
+
+    ported = readme.read_bytes()
+    assert NEW_REPO.encode() in ported and ported.count(b"\n") == ported.count(b"\r\n") == crlf.count(b"\r\n")
+    assert b"\r\n" not in (root / "SECURITY.md").read_bytes()
+
+
+def test_port_leaves_the_changelog_and_this_guide_alone(tmp_path):
+    root = copy_repo(tmp_path)
+    kept = {rel: (root / rel).read_bytes() for rel in port.KEEP}
+
+    assert port.main(["--root", str(root), "--repo", NEW_REPO, "--server-url", GHE]) == 0
+
+    assert {rel: (root / rel).read_bytes() for rel in port.KEEP} == kept
+
+
 def test_dry_run_lists_files_without_changing_them(tmp_path, capsys):
     root = copy_repo(tmp_path)
     before = snapshot(root)
@@ -123,6 +178,9 @@ def test_dry_run_lists_files_without_changing_them(tmp_path, capsys):
     ["--repo", "acme/../x"],
     ["--repo", "acme"],
     ["--repo", NEW_REPO, "--server-url", "http://ghe.example.com"],
+    ["--repo", NEW_REPO, "--server-url", 'https://ghe"x.example.com'],
+    ["--repo", NEW_REPO, "--server-url", "https://ghe\\x.example.com"],
+    ["--repo", NEW_REPO, "--server-url", "https://github.com:443"],
     ["--repo", NEW_REPO, "--pages-url", "ftp://pages.example.com/x"],
     ["--repo", NEW_REPO, "--from", "https://github.com/only-an-owner"],
 ])
