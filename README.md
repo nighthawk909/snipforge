@@ -77,6 +77,8 @@ Pin a snip on top of other windows · Beautify (backdrop, rounded corners, shado
 
 | | |
 |---|---|
+| ![The capture toolbar over a window being snipped](docs/screenshots/capture-dark.png) | ![Settings, Capture page](docs/screenshots/settings-capture.png) |
+| **Capture.** Area, Window, Full screen or Scrolling, a delay, and the mouse pointer, with a magnifier for exact pixels. | **Settings > Capture.** Which keys start a snip, and how each snip starts: mode, delay and the pointer. |
 | ![Editor in dark mode](docs/screenshots/editor-dark.png) | ![Library with search, favorites and tags](docs/screenshots/library-light.png) |
 | **Editor, dark.** Tools on the left, quick styles and properties on the right, recent snips along the bottom. | **Library.** Every snip by day, searchable by the words inside it, with favorites, tags and app filters. |
 | ![Settings, Updates page](docs/screenshots/settings-updates.png) | ![Settings, Appearance page](docs/screenshots/settings-appearance.png) |
