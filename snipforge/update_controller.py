@@ -124,6 +124,11 @@ class UpdateController(QObject):
         return self._state
 
     @property
+    def current_version(self) -> str:
+        """The version this copy of SnipForge is (what prompts call "you have")."""
+        return self._current
+
+    @property
     def releases(self) -> list[Release]:
         """The last fetched releases in the current channel, newest first (the version list)."""
         return sort_newest_first(filter_channel(self._all, self.prefs.channel))
