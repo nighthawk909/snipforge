@@ -246,6 +246,9 @@ def invoke_shell_verb(path: Path, verb: str, hwnd: int = 0) -> bool:
 def email_with_outlook(image_path: Path, subject: str, width: int) -> bool:
     """Opens a new Outlook draft with the snip. Returns True if it's shown inline in the body,
     False if it's only attached. Raises ShareError if classic Outlook couldn't be used at all."""
+    if sys.platform != "win32":
+        raise ShareError("Emailing straight from SnipForge isn't available on this computer yet, so the image "
+                         "was copied instead. Paste it into your email.")
     try:
         import pywintypes
         import win32com.client

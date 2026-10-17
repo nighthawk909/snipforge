@@ -50,10 +50,9 @@ jobs:
         run: python -m ruff check .
       # Tests marked `windows` (registry, Explorer, Win32) are skipped here; see tests/conftest.py.
       - name: Test
-        continue-on-error: true  # TEMPORARY: see every failure and still build
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -v --tb=short -rfs  # TEMPORARY -v: name every test even if one crashes
+        run: python -m pytest -q -rfs
       - name: Build SnipForge.app and the .dmg
         env:
           SET_VERSION: ${{ inputs.version }}

@@ -50,6 +50,9 @@ def test_share_offers_no_windows_commands_but_still_exports(mac, tmp_path, white
     path = share.export(white_image, tmp_path)
     assert path.exists()
     assert share.invoke_shell_verb(path, share.WINDOWS_SHARE_VERB) is False
+    with pytest.raises(share.ShareError, match="copied instead") as error:  # the editor copies and opens mail
+        share.email_with_outlook(path, "Snip", 100)
+    assert "pywin32" not in str(error.value)
 
 
 def test_library_folder_and_trash_open_in_finder(mac, qapp, tmp_path, monkeypatch):
