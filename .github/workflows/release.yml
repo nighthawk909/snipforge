@@ -62,9 +62,19 @@ jobs:
             echo "No release PR on this run."
             exit 0
           fi
-          # release-please reuses one branch for every release PR, so only runs for the PR's current
-          # commit are its own; runs left waiting by earlier release PRs stay as they are.
-          SHA=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          BRANCH=$(printf '%s' "$PR_JSON" | jq -r '.headBranchName // empty' 2>/dev/null || true)
+          if [ -z "$BRANCH" ]; then
+            echo "::warning::release-please didn't name release PR #$NUMBER's branch; approve its CI from the Actions tab."
+            exit 0
+          fi
+          # release-please reuses one branch for every release PR, so only runs for the branch's current
+          # commit are its own; runs left waiting by earlier release PRs stay as they are. Read the
+          # commit from the branch: for a few seconds after release-please updates an existing PR,
+          # GitHub still reports the PR's previous commit.
+          if ! SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha); then
+            echo "::warning::Couldn't read branch $BRANCH; approve release PR #$NUMBER's CI from the Actions tab."
+            exit 0
+          fi
           approved=0
           for attempt in $(seq 1 12); do
             ids=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --event pull_request \
