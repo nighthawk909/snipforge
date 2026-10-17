@@ -51,6 +51,12 @@ RestartApplications=no
 VersionInfoVersion={#FileVersion}
 VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} installer
+; scripts/build.py --sign passes /DSign and the "snipforge" sign command (/Ssnipforge=...), which
+; signs Setup.exe and the uninstaller with Azure Artifact Signing.
+#ifdef Sign
+SignTool=snipforge
+SignedUninstaller=yes
+#endif
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"

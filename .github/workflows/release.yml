@@ -101,8 +101,12 @@ jobs:
     needs: release-please
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
     uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      id-token: write  # code signing (build.yml)
     with:
       ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
+      sign: true
 
   publish:
     needs: [release-please, build]

@@ -42,7 +42,9 @@ Releases as a per-user installer. These rules make agent-driven changes safe to 
 
 - No telemetry, analytics or background network calls. Network use must be user-initiated and
   documented in `docs/IT-REVIEW.md`.
-- No secrets in the repo; CI uses only the built-in `GITHUB_TOKEN`.
+- No secrets in the repo; CI uses only the built-in `GITHUB_TOKEN`. The one exception is code
+  signing, which signs in to Azure with GitHub's OIDC token (still no stored secret) and only from
+  `main` (`docs/CODE-SIGNING.md`). Never add a client secret or a certificate file for it.
 - Pin GitHub Actions to full commit SHAs; pin Python dependencies in `requirements.txt`.
 - The keyboard hook (`snipforge/hotkey.py`) must only ever act on Win+Shift+S and Print Screen.
 - Keep the installer per-user (no admin) and the `AppId` in `packaging/installer.iss` unchanged.
