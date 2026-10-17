@@ -243,8 +243,10 @@ def test_installer_signs_its_uninstaller_when_signing():
 
 
 def powershell(command):
-    return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
-                          capture_output=True, text=True, check=True, timeout=120).stdout.strip()
+    proc = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+                          capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, f"{command}\n{proc.stderr}"
+    return proc.stdout.strip()
 
 
 @pytest.fixture
@@ -272,6 +274,9 @@ def test_inno_setup_runs_the_sign_command_for_the_uninstaller_and_setup(tmp_path
     iscc = next((c for c in build.ISCC_CANDIDATES if c.exists()), None)
     if iscc is None:
         (pytest.fail if os.environ.get("CI") else pytest.skip)("needs Inno Setup 6 (the CI runners have it)")
+    # Started from PowerShell 7 (CI), Windows PowerShell inherits its module path and can't load the
+    # certificate cmdlets; without the variable it uses its own. ISCC and the stand-in inherit this too.
+    monkeypatch.delenv("PSModulePath", raising=False)
     thumbprint = request.getfixturevalue("test_certificate")
     tools = tmp_path / "signing tools"  # a space, like C:\Program Files
     tools.mkdir()
