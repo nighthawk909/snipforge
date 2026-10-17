@@ -140,6 +140,7 @@ def test_preview_build_versions_sort_below_the_release_and_by_number():
 
 
 # --- GitHub release data ------------------------------------------------------------------
+@pytest.mark.windows
 def test_parse_release_picks_matching_installer_and_sums():
     release = updates.parse_release(release_json())
     assert release.version == "9.0.0" and release.page.endswith("/tag/v9.0.0")
@@ -167,6 +168,7 @@ def test_parse_release_trims_long_notes():
     assert len(release.notes) <= updates.NOTES_MAX + 2
 
 
+@pytest.mark.windows
 def test_parse_release_handles_prerelease_installer_names():
     release = updates.parse_release(release_json("0.6.0-beta.1", prerelease=True))
     assert release.version == "0.6.0-beta.1" and release.prerelease and release.channel == "preview"
@@ -178,6 +180,7 @@ def test_parse_release_handles_prerelease_installer_names():
     assert preview.version == "0.6.0-preview.10" and preview.installer_name == "SnipForge-0.6.0-preview.10-setup.exe"
 
 
+@pytest.mark.windows
 def test_versionless_installer_copy_is_not_the_update():
     """Stable releases also carry SnipForge-setup.exe for the permanent download link; updates use the named one."""
     data = release_json("0.6.0")
@@ -340,6 +343,7 @@ def test_policy_forces_mode_and_channel_over_user_prefs():
     assert PolicyInfo().apply(prefs) == prefs
 
 
+@pytest.mark.windows
 def test_feed_locations_are_validated(monkeypatch):
     monkeypatch.setenv("SNIPFORGE_TEST_ROOT", r"C:\Feeds")
     assert feed_location("https://it.example.com/snipforge/") == "https://it.example.com/snipforge/"
@@ -351,6 +355,7 @@ def test_feed_locations_are_validated(monkeypatch):
         assert feed_location(bad) is None, bad
 
 
+@pytest.mark.windows
 def test_policy_feed_source():
     feed = parse_policy([{"UpdateFeed": r"\\fileserver\apps\SnipForge"}, {}])
     assert feed.source == "feed" and feed.feed == r"\\fileserver\apps\SnipForge" and feed.managed
@@ -363,6 +368,7 @@ def test_policy_feed_source():
     assert github.source == "github" and github.feed is None
 
 
+@pytest.mark.windows
 def test_user_policy_cant_undo_a_machine_feed():
     machine_feed = parse_policy([{"UpdateFeed": r"\\fileserver\apps\SnipForge"}, {"UpdateSource": "github"}])
     assert machine_feed.source == "feed" and machine_feed.feed == r"\\fileserver\apps\SnipForge"
@@ -372,6 +378,7 @@ def test_user_policy_cant_undo_a_machine_feed():
     assert split.source == "feed" and split.feed == r"\\fileserver\apps\SnipForge"
 
 
+@pytest.mark.windows
 def test_policy_is_read_from_both_registry_hives(monkeypatch):
     import winreg
 
@@ -418,6 +425,7 @@ def entry(version, channel="stable", assets=None, **extra):
     return data
 
 
+@pytest.mark.windows
 def test_parse_manifest_valid():
     data = manifest(
         entry("0.6.0"),
@@ -438,6 +446,7 @@ def test_parse_manifest_valid():
                                               "https://it.example.com/snipforge/SnipForge-0.6.5.dmg"]
 
 
+@pytest.mark.windows
 def test_parse_manifest_tolerates_bom_and_missing_optional_fields():
     data = manifest({"version": "0.6.0", "channel": "stable",
                      "assets": [{"platform": "windows", "name": "SnipForge-0.6.0-setup.exe", "sha256": SHA_A}]},
@@ -446,6 +455,7 @@ def test_parse_manifest_tolerates_bom_and_missing_optional_fields():
     assert [(r.version, r.published, r.notes) for r in found] == [("0.6.0", None, ""), ("0.5.0", None, "")]
 
 
+@pytest.mark.windows
 def test_parse_manifest_takes_the_channel_from_the_field():
     """publish_feed.py can put a stable-looking version on the preview channel before promoting it."""
     found = update_sources.parse_manifest(manifest(entry("0.6.0", "preview"), entry("0.6.0-preview.2", "preview")),
@@ -464,6 +474,7 @@ def test_parse_manifest_rejects_malformed_files(raw):
         update_sources.parse_manifest(raw, r"C:\feed")
 
 
+@pytest.mark.windows
 def test_parse_manifest_skips_bad_entries_but_keeps_good_ones():
     data = manifest(
         entry("0.6.0"),
@@ -518,6 +529,7 @@ def github_download(tmp_path, data, sums, sums_final=None, installer_final=None,
     return (path, error), progress
 
 
+@pytest.mark.windows
 def test_github_download_verifies_checksum_and_saves(tmp_path):
     data = b"installer bytes"
     sums = f"{updates.sha256_bytes(data)}  SnipForge-9.0.0-setup.exe\n".encode()
@@ -526,6 +538,7 @@ def test_github_download_verifies_checksum_and_saves(tmp_path):
     assert progress and not list(tmp_path.glob("*.part"))
 
 
+@pytest.mark.windows
 def test_github_com_downloads_may_redirect_to_its_file_storage(tmp_path):
     public = {"repo": "owner/snipforge", "server_url": "https://github.com"}
     data = release_json()
@@ -549,6 +562,7 @@ def ghe_release_json(version="9.0.0"):
     return data
 
 
+@pytest.mark.windows
 def test_github_source_reads_releases_from_an_enterprise_server(tmp_path):
     transport = FakeTransport({GHE_API: json.dumps([ghe_release_json("0.6.0")]).encode()})
     results, done = collect()
@@ -566,6 +580,7 @@ def test_github_source_reads_releases_from_an_enterprise_server(tmp_path):
     assert downloads[0][1] == "" and downloads[0][0].read_bytes() == payload
 
 
+@pytest.mark.windows
 def test_enterprise_downloads_refuse_github_com_storage(tmp_path):
     """Only github.com hands downloads to its file storage; an enterprise copy's must stay on its server."""
     release = updates.parse_release(ghe_release_json(), GHE["repo"], server_url=GHE["server_url"])
@@ -605,6 +620,7 @@ def test_github_source_keeps_other_errors_as_they_are():
     assert results[0] == (None, "offline")
 
 
+@pytest.mark.windows
 def test_github_download_rejects_checksum_mismatch_and_missing_checksum(tmp_path):
     sums = f"{'0' * 64}  SnipForge-9.0.0-setup.exe\n".encode()
     (path, error), _ = github_download(tmp_path, b"tampered", sums)
@@ -613,6 +629,7 @@ def test_github_download_rejects_checksum_mismatch_and_missing_checksum(tmp_path
     assert path is None and "no checksum" in error
 
 
+@pytest.mark.windows
 def test_github_download_refuses_unexpected_redirects(tmp_path):
     data = b"x"
     sums = f"{updates.sha256_bytes(data)}  SnipForge-9.0.0-setup.exe\n".encode()
@@ -640,6 +657,7 @@ def write_feed(folder, versions, payload=b"feed installer"):
     (folder / "releases.json").write_text(json.dumps(manifest(*entries)), encoding="utf-8")
 
 
+@pytest.mark.windows
 def test_folder_feed_on_a_real_folder(qapp, tmp_path):
     feed = tmp_path / "feed"
     write_feed(feed, ["0.6.0", "0.7.0-beta.1"])
@@ -658,6 +676,7 @@ def test_folder_feed_on_a_real_folder(qapp, tmp_path):
     assert digest == found[1].sha256
 
 
+@pytest.mark.windows
 def test_folder_feed_rejects_tampered_and_outside_installers(qapp, tmp_path):
     feed = tmp_path / "feed"
     write_feed(feed, ["0.6.0"])
@@ -682,6 +701,7 @@ def test_folder_feed_rejects_tampered_and_outside_installers(qapp, tmp_path):
     assert downloads[0][0] is None and "checksum" in downloads[0][1]
 
 
+@pytest.mark.windows
 def test_url_feed_reads_manifest_and_installers_over_https(tmp_path):
     base = "https://it.example.com/snipforge/"
     data = b"web installer"
@@ -720,6 +740,7 @@ def test_feed_sources_refuse_bad_locations():
             update_sources.FolderFeedSource(bad)
 
 
+@pytest.mark.windows
 def test_source_follows_policy():
     assert isinstance(update_sources.source_for(PolicyInfo()), update_sources.GitHubSource)
     feed = update_sources.source_for(PolicyInfo(source="feed", feed=r"\\srv\apps\SnipForge"))
@@ -847,12 +868,16 @@ def test_file_transport_times_out_when_a_share_stops_answering(qapp, tmp_path, m
 
     monkeypatch.setattr(update_transport, "_read", stuck)
     results, done = collect()
-    update_transport.FileTransport().get(str(feed), timeout_ms=150, max_bytes=10, done=done)
+    # Owned by the app, so the worker thread never holds the last reference: deleting the transport
+    # (and its main-thread timer) from the worker crashed the macOS test run.
+    transport = update_transport.FileTransport(qapp)
+    transport.get(str(feed), timeout_ms=150, max_bytes=10, done=done)
     assert spin(lambda: results and seen)
     assert results[0][0] is None and "timed out" in results[0][1] and len(results) == 1
 
 
 # --- platform -----------------------------------------------------------------------------
+@pytest.mark.windows
 def test_install_mode():
     from pathlib import Path
     assert update_platform.install_mode(frozen=False) == "source"
@@ -861,6 +886,7 @@ def test_install_mode():
     assert update_platform.install_mode(r"C:\Program Files\SnipForge\SnipForge.exe", frozen=True) == "all-users"
 
 
+@pytest.mark.windows
 def test_installer_names_by_platform():
     assert update_platform.installer_version("SnipForge-0.6.0-beta.1-setup.exe") == "0.6.0-beta.1"
     assert update_platform.installer_version("SnipForge-0.6.0-portable.zip") is None
@@ -869,6 +895,7 @@ def test_installer_names_by_platform():
     assert not update_platform.installer_suffix_ok("SnipForge-0.6.0.dmg")
 
 
+@pytest.mark.windows
 def test_launch_installer_runs_silently(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(update_platform.subprocess, "Popen", lambda args, **k: calls.append(args))

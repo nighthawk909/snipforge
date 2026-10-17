@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import subprocess
+import sys
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
@@ -23,8 +24,15 @@ LINK_WAIT_S = 45         # how long to watch the clipboard for the OneDrive link
 
 
 def _com_thread_init() -> None:
+    if sys.platform != "win32":
+        return
     import pythoncom
     pythoncom.CoInitialize()  # shell extensions need an STA on the worker thread
+
+
+def _show_in_folder(path) -> None:
+    """Opens the file's folder with the file selected: Explorer, or Finder on a Mac."""
+    subprocess.Popen(["open", "-R", str(path)] if sys.platform == "darwin" else ["explorer", f"/select,{path}"])
 
 
 class ShareController(QObject):
@@ -200,9 +208,9 @@ class ShareController(QObject):
         self._window.save()
         path = self._window.export_path
         if path is not None and path.exists():
-            subprocess.Popen(["explorer", f"/select,{path}"])
+            _show_in_folder(path)
 
     def _fallback_reveal(self, path, reason: str) -> None:
         QMessageBox.information(self._window, "SnipForge",
                                 f"{reason} The snip is saved at:\n{path}\n\nRight-click it in the folder to share.")
-        subprocess.Popen(["explorer", f"/select,{path}"])
+        _show_in_folder(path)

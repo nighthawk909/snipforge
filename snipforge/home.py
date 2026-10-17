@@ -4,9 +4,11 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
+import sys
+from pathlib import Path
 
-from PySide6.QtCore import QLocale, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QImage, QKeySequence, QShortcut
+from PySide6.QtCore import QLocale, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -483,14 +485,20 @@ class HomeWindow(QMainWindow):
 
     def _open_recycle_bin(self) -> None:
         try:
-            os.startfile("shell:RecycleBinFolder")  # noqa: S606 - opens the Windows Recycle Bin
+            if sys.platform == "win32":
+                os.startfile("shell:RecycleBinFolder")  # noqa: S606 - opens the Windows Recycle Bin
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path.home() / ".Trash")))  # Finder
         except OSError as exc:
             log.info("Couldn't open the Recycle Bin: %s", exc)
 
     @staticmethod
     def _reveal(path) -> None:
         path.mkdir(parents=True, exist_ok=True)
-        os.startfile(str(path))  # noqa: S606 - opens our own library folder in Explorer
+        if sys.platform == "win32":
+            os.startfile(str(path))  # noqa: S606 - opens our own library folder in Explorer
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))  # Finder
 
     # compatibility with callers that list selected snips
     def _selected_ids(self) -> list[str]:

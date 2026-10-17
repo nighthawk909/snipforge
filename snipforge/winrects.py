@@ -1,11 +1,15 @@
 """Visible top-level windows, for click-to-capture-a-window in the overlay and for remembering
-which app a snip came from (shown and searchable in the Library)."""
+which app a snip came from (shown and searchable in the Library).
+
+The window list comes from Win32, so `window_infos()` is empty on other platforms (the overlay
+then snips areas and full screens only). WindowInfo and the app names work everywhere.
+"""
 from __future__ import annotations
 
 import ctypes
 import os
 import re
-from ctypes import wintypes
+import sys
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect
@@ -46,22 +50,28 @@ def friendly_app_name(exe_path: str, description: str = "") -> str:
         return description.strip()[:40]
     return " ".join(part.capitalize() for part in re.split(r"[_\-\s]+", stem) if part)
 
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_dwm = ctypes.WinDLL("dwmapi")
-_ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-_user32.EnumWindows.argtypes = [_ENUMPROC, wintypes.LPARAM]
-_user32.IsWindowVisible.argtypes = [wintypes.HWND]
-_user32.IsIconic.argtypes = [wintypes.HWND]
-_user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-_user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-_dwm.DwmGetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
-_user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-_kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-_kernel32.OpenProcess.restype = wintypes.HANDLE
-_kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
-                                                 ctypes.POINTER(wintypes.DWORD)]
-_kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+SUPPORTED = sys.platform == "win32"
+
+if SUPPORTED:
+    from ctypes import wintypes
+
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _dwm = ctypes.WinDLL("dwmapi")
+    _ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    _user32.EnumWindows.argtypes = [_ENUMPROC, wintypes.LPARAM]
+    _user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    _user32.IsIconic.argtypes = [wintypes.HWND]
+    _user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    _user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _dwm.DwmGetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+    _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                     ctypes.POINTER(wintypes.DWORD)]
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
 
 def _cloaked(hwnd) -> bool:
@@ -118,6 +128,8 @@ def _file_description(path: str) -> str:
 
 def window_infos() -> list[WindowInfo]:
     """Visible windows topmost first, with their title and app. Excludes this process's own windows."""
+    if not SUPPORTED:
+        return []
     own_pid = os.getpid()
     found: list[WindowInfo] = []
     name = ctypes.create_unicode_buffer(64)

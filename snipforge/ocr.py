@@ -1,7 +1,12 @@
-"""Text recognition using the OCR engine built into Windows (offline, no model download)."""
+"""Text recognition using the OCR engine built into Windows (offline, no model download).
+
+Windows only for now: elsewhere `recognize()` raises OcrUnavailable, so Grab Text explains why and
+Library search leaves snips unread (macOS has the Vision framework, see docs/MAC-PLAN.md).
+"""
 from __future__ import annotations
 
 import asyncio
+import sys
 from dataclasses import dataclass
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF
@@ -84,6 +89,9 @@ def _upscale_small(image: QImage) -> tuple[QImage, float]:
 
 def recognize(image: QImage) -> OcrResult:
     """Blocking OCR; returns lines and word boxes in the image's pixel coordinates."""
+    if sys.platform != "win32":
+        raise OcrUnavailable("Text recognition isn't available on this computer yet: SnipForge uses the "
+                             "OCR engine built into Windows.")
     scaled, scale = _upscale_small(image)
     raw = asyncio.run(_recognize_async(_png_bytes(scaled)))
     lines = []

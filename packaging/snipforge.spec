@@ -1,10 +1,15 @@
 # PyInstaller spec for SnipForge (one-folder, windowed). Build with: python scripts/build.py
+# On macOS it also wraps the folder in SnipForge.app (python scripts/build_mac.py, docs/MAC-PLAN.md).
 # ruff: noqa
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH).parent
+MAC = sys.platform == "darwin"
 VERSION_FILE = os.environ.get("SNIPFORGE_VERSION_FILE", str(ROOT / "build" / "version_info.txt"))
+# Never change it once Macs have it: macOS keys the Screen Recording permission and settings to it.
+BUNDLE_ID = "io.github.nighthawk909.snipforge"
 
 # Big parts of Qt that SnipForge never uses; leaving them out keeps the download small.
 EXCLUDES = [
@@ -20,7 +25,7 @@ a = Analysis(
     [str(ROOT / "packaging" / "snipforge_main.py")],
     pathex=[str(ROOT)],
     datas=[(str(ROOT / "assets" / "snipforge.ico"), "assets")],  # license files are copied by scripts/build.py
-    hiddenimports=[
+    hiddenimports=[] if MAC else [
         "winrt.windows.media.ocr", "winrt.windows.graphics.imaging", "winrt.windows.storage.streams",
         "winrt.windows.foundation", "winrt.windows.foundation.collections", "winrt.windows.globalization",
         "win32com.shell", "win32com.client",
@@ -35,9 +40,26 @@ exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
     name="SnipForge",
-    icon=str(ROOT / "assets" / "snipforge.ico"),
-    version=VERSION_FILE,
+    icon=str(ROOT / "assets" / "snipforge.ico"),  # PyInstaller converts it to .icns on macOS (Pillow)
+    version=None if MAC else VERSION_FILE,
+    target_arch="universal2" if MAC else None,  # one app for Apple silicon and Intel Macs
     console=False,
     upx=False,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="SnipForge", upx=False)
+if MAC:
+    VERSION = os.environ.get("SNIPFORGE_VERSION", "0.0.0")
+    app = BUNDLE(
+        coll,
+        name="SnipForge.app",
+        icon=str(ROOT / "assets" / "snipforge.ico"),
+        bundle_identifier=BUNDLE_ID,
+        version=VERSION,
+        info_plist={
+            "CFBundleName": "SnipForge",
+            "CFBundleDisplayName": "SnipForge",
+            "CFBundleVersion": VERSION,
+            "NSHighResolutionCapable": True,
+            "LSApplicationCategoryType": "public.app-category.graphics-design",
+        },
+    )

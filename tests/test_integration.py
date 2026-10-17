@@ -305,7 +305,31 @@ def test_selftest_reports_failures(tmp_path, monkeypatch, qapp):
     def boom():
         raise RuntimeError("broken")
 
-    monkeypatch.setattr(selftest, "_ocr", boom)
+    monkeypatch.setattr(selftest, "_icons", boom)  # required on every platform
+    monkeypatch.setattr(selftest, "_ocr", lambda: "ok")
     monkeypatch.setattr(selftest, "_search_index", lambda: "skipped in unit tests")
     monkeypatch.setattr(selftest, "_hotkey", lambda: "ok")
     assert selftest.run(str(tmp_path / "r.json")) == 1
+
+
+def test_selftest_on_a_mac_skips_the_windows_only_checks(tmp_path, monkeypatch, qapp, on_a_mac):
+    import json
+
+    from snipforge import selftest
+
+    def windows_only():
+        raise AssertionError("a Windows-only check ran on a Mac")
+
+    on_a_mac(selftest)
+    for name in ("_theme", "_editor", "_library", "_icons", "_windows", "_share"):
+        monkeypatch.setattr(selftest, name, lambda: "ok")
+    for name in ("_ocr", "_search_index", "_hotkey"):
+        monkeypatch.setattr(selftest, name, windows_only)
+    report = tmp_path / "r.json"
+    assert selftest.run(str(report)) == 0
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert data["platform"] == "darwin" and data["passed"]
+    skipped = {name: check for name, check in data["checks"].items() if check["detail"].startswith("skipped")}
+    assert sorted(skipped) == ["hotkey", "ocr", "search_index"]
+    assert not any(check["required"] for check in skipped.values())
+    assert all(data["checks"][name]["required"] for name in ("theme", "editor", "library", "icons"))

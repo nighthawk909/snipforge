@@ -85,6 +85,7 @@ def test_install_buttons_work_after_a_real_check(qapp, tmp_path):
     assert page._message.text().count("0.6.0") <= 1
 
 
+@pytest.mark.windows
 def test_turned_off_shortcuts_pass_through_the_real_hook_callback(monkeypatch):
     class FakeUser32:
         def __init__(self):

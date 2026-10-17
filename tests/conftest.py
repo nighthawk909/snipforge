@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -9,6 +10,39 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from snipforge.settings import app_settings
+
+# tests/desktop drives real Windows features (and imports winreg), so it only runs on Windows.
+collect_ignore = [] if sys.platform == "win32" else ["desktop"]
+
+
+def pytest_collection_modifyitems(config, items):
+    """Tests marked `windows` need Windows itself (registry, Explorer, Win32): skipped elsewhere,
+    e.g. in the macOS build workflow."""
+    if sys.platform == "win32":
+        return
+    skip = pytest.mark.skip(reason="needs Windows (docs/MAC-PLAN.md)")
+    for item in items:
+        if item.get_closest_marker("windows"):
+            item.add_marker(skip)
+
+
+class _MacSys:
+    """`sys` as a module sees it on a Mac; everything but `platform` is the real one."""
+    platform = "darwin"
+
+    def __getattr__(self, name):
+        return getattr(sys, name)
+
+
+@pytest.fixture
+def on_a_mac(monkeypatch):
+    """Call it with the modules whose platform checks should see a Mac. Only theirs: pytest itself
+    has to keep seeing the real platform."""
+    def pretend(*modules):
+        for module in modules:
+            monkeypatch.setattr(module, "sys", _MacSys())
+    return pretend
+
 
 # Keep tests away from the real app's settings (registry): use a throwaway INI file instead.
 _SETTINGS_DIR = tempfile.mkdtemp(prefix="snipforge-test-settings-")
