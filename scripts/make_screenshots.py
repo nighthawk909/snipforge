@@ -171,6 +171,33 @@ def library_shot(theme_manager, mode: str) -> None:
     home.close()
 
 
+def capture_shot(theme_manager) -> None:
+    """The capture overlay over a sample app: the toolbar, a hovered window and the magnifier."""
+    from PySide6.QtCore import QEvent, QRect
+    from PySide6.QtGui import QGuiApplication, QMouseEvent, QPixmap
+
+    from snipforge.capture import _ScreenOverlay
+
+    theme_manager.set_mode_preference("dark")
+    desk = QPixmap(WIDTH, HEIGHT)
+    desk.fill(QColor("#1E3550"))
+    painter = QPainter(desk)
+    painter.drawImage(90, 70, sample_app(1180, 680))
+    painter.end()
+    overlay = _ScreenOverlay(QGuiApplication.primaryScreen(), desk, [QRect(90, 70, 1180, 680)], mode="area",
+                             toolbar=True, scrolling=True)
+    overlay.setAttribute(Qt.WA_DontShowOnScreen, True)
+    overlay.resize(WIDTH, HEIGHT)
+    overlay.show()
+    pump(0.3)
+    at = QPointF(708, 481)  # the top edge of the highlighted bar, so the magnifier shows both colors
+    QApplication.sendEvent(overlay, QMouseEvent(QEvent.MouseMove, at, overlay.mapToGlobal(at), Qt.NoButton,
+                                                Qt.NoButton, Qt.NoModifier))
+    pump(0.3)
+    overlay.grab().save(str(OUT / "capture-dark.png"))
+    overlay.close()
+
+
 def settings_shots(theme_manager) -> None:
     from snipforge.settings_window import SettingsWindow
     from snipforge.update_controller import UpdateState
@@ -189,13 +216,15 @@ def settings_shots(theme_manager) -> None:
                                    message="You have 0.7.0. It's downloaded and matches its published checksum.")
     controller.state_changed.emit(controller.state)
     off_screen(window)
-    for mode, section in (("light", "updates"), ("dark", "appearance")):
+    for mode, section in (("light", "updates"), ("dark", "appearance"), ("light", "capture")):
         theme_manager.set_mode_preference(mode)
         window.show_section(section)
         pump(0.6)
         shot = window.grab()
         if section == "appearance":  # a short page: leave out the empty space below it
             shot = shot.copy(0, 0, shot.width(), 400)
+        elif section == "capture":
+            shot = shot.copy(0, 0, shot.width(), 560)
         shot.save(str(OUT / f"settings-{section}.png"))
     window.close()
 
@@ -216,6 +245,7 @@ def main() -> int:
     editor_shot(themes, library, "dark", "editor-dark.png")
     library_shot(themes, "light")
     settings_shots(themes)
+    capture_shot(themes)
     hero = QImage(str(OUT / "editor-light.png"))
     hero.save(str(SITE / "editor-preview.png"))
     print("Wrote", ", ".join(sorted(p.name for p in OUT.glob("*.png"))), f"and {SITE / 'editor-preview.png'}")
