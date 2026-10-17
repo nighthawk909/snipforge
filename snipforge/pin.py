@@ -5,6 +5,8 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QMenu, QWidget
 
+from . import theme
+
 MIN_SCALE, MAX_SCALE = 0.1, 4.0
 
 
@@ -30,7 +32,7 @@ class PinWindow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.drawPixmap(self.rect().adjusted(1, 1, -1, -1), self._pixmap)
-        p.setPen(QPen(QColor("#3b82f6"), 1))
+        p.setPen(QPen(QColor(theme.current().accent.fill), 1))
         p.drawRect(self.rect().adjusted(0, 0, -1, -1))
 
     def mousePressEvent(self, e) -> None:

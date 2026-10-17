@@ -18,7 +18,9 @@ QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, _SETTINGS_DIR)
 
 @pytest.fixture(scope="session")
 def qapp():
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    app.setStyle("Fusion")  # what theme.install() uses in the real app
+    return app
 
 
 @pytest.fixture(autouse=True, scope="session")

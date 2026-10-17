@@ -248,6 +248,8 @@ def test_selftest_report(tmp_path, monkeypatch, qapp):
     assert selftest.run(str(report)) == 0
     data = json.loads(report.read_text(encoding="utf-8"))
     assert data["passed"] and data["checks"]["editor"]["ok"] and data["checks"]["icons"]["ok"]
+    assert data["checks"]["theme"]["ok"] and "snipforge" in data["checks"]["theme"]["detail"]
+    assert qapp.styleSheet() == ""  # the check leaves the test app as it found it
 
 
 def test_selftest_reports_failures(tmp_path, monkeypatch, qapp):

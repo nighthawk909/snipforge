@@ -11,6 +11,7 @@ below, each under its own license. License texts are in the `licenses` folder ne
 | [PySide6 / Shiboken6](https://pypi.org/project/PySide6-Essentials/6.12.0/) | 6.12.0 | Python bindings for Qt | LGPL-3.0 |
 | [pywin32](https://github.com/mhammond/pywin32) | 312 | Outlook draft, Explorer share commands | PSF License 2.0 |
 | [pywinrt](https://github.com/pywinrt/pywinrt) (`winrt-*` packages) | 3.2.1 | Windows built-in text recognition (OCR) | MIT |
+| [Lucide](https://lucide.dev/) icons (path data embedded in `snipforge/icons.py`) | 1.49.0 | toolbar and menu icons | ISC (`licenses/Lucide-ISC.txt`) |
 | [PyInstaller](https://pyinstaller.org/) bootloader | 6.22.3 | starts `SnipForge.exe` | GPL-2.0-or-later with the PyInstaller bootloader exception (allows distribution with any program) |
 
 ## LGPL-3.0 (Qt and PySide6)

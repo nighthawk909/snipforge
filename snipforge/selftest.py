@@ -1,6 +1,6 @@
 """`SnipForge.exe --self-test <report.json>`: proves a packaged build actually works.
 
-Exercises the pieces that break when packaging goes wrong (Qt plugins, SVG icons, the editor,
+Exercises the pieces that break when packaging goes wrong (Qt plugins, theme, SVG icons, the editor,
 Windows OCR, the keyboard hook, Explorer share commands) and writes a JSON report. Exit code 0
 means every required check passed. CI runs this against the built exe before publishing.
 """
@@ -46,6 +46,27 @@ def _editor() -> str:
     if rendered.size() != image.size():
         raise RuntimeError(f"render size {rendered.size()} != {image.size()}")
     return f"{len(canvas.annotations())} annotation(s) rendered"
+
+
+def _theme() -> str:
+    """Theme packs load and the app-wide stylesheet builds and applies (restored afterwards)."""
+    from PySide6.QtWidgets import QApplication
+
+    from .theme.manager import ThemeManager
+
+    app = QApplication.instance()
+    before = (app.styleSheet(), app.palette())
+    manager = ThemeManager(app)
+    try:
+        manager.apply()
+        if not app.styleSheet():
+            raise RuntimeError("the theme stylesheet is empty")
+        accents = ", ".join(a.id for a in manager.accents())
+        return f"{manager.theme.mode} theme applies; accents: {accents}"
+    finally:
+        manager.close()
+        app.setStyleSheet(before[0])
+        app.setPalette(before[1])
 
 
 def _icons() -> str:
@@ -106,6 +127,7 @@ def _share() -> str:
 
 def run(report_path: str) -> int:
     results: dict = {}
+    _check(results, "theme", _theme)
     _check(results, "editor", _editor)
     _check(results, "icons", _icons)
     _check(results, "ocr", _ocr)

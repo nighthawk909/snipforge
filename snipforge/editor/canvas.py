@@ -10,9 +10,10 @@ The Select tool adds rubber-band selection and never draws.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QUndoStack
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPixmap, QUndoStack
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
+from .. import theme
 from .commands import AddItemsCommand, CropCommand, RemoveItemsCommand, StateCommand
 from .crop import MIN_CROP, CropMask, crop_handle_at, move_crop, new_crop, resize_crop
 from .factory import create_item
@@ -37,7 +38,8 @@ from .text_items import CalloutItem, EditableText, TextItem
 DRAG_THRESHOLD = 4  # view pixels before a press counts as a drag
 DUPLICATE_OFFSET = 16.0
 SCENE_MARGIN = 60.0
-BACKGROUND = QColor("#181818")
+DOT_GAP = 18  # on-screen pixels between background dots
+MIN_ZOOM, MAX_ZOOM = 0.05, 16.0
 DEFAULT_CALLOUT = (190.0, 64.0)
 
 # Single-key tool shortcuts live here (not as QActions) so they never steal text input.
@@ -77,7 +79,7 @@ class Canvas(QGraphicsView):
         self._base_item.setAcceptedMouseButtons(Qt.NoButton)
         self._scene.addItem(self._base_item)
         self._crop_rect = QRectF(self._image_rect)
-        self._mask = CropMask(self._image_rect, BACKGROUND)
+        self._mask = CropMask(self._image_rect, QColor(theme.current().palette.well))
         self._scene.addItem(self._mask)
         self._overlay = HandleOverlay(self._scene.sceneRect())
         self._scene.addItem(self._overlay)
@@ -85,7 +87,9 @@ class Canvas(QGraphicsView):
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.setBackgroundBrush(BACKGROUND)
+        self.setBackgroundBrush(QColor(theme.current().palette.well))
+        self._dot_tiles: dict[float, QPixmap] = {}
+        self._mask.set_pattern(self._background_pattern)
         self.setFrameShape(QGraphicsView.NoFrame)
         self.setMouseTracking(True)
 
@@ -95,6 +99,7 @@ class Canvas(QGraphicsView):
         self._unparsed: list[dict] = []  # saved items this version couldn't load; written back untouched
 
         self._scene.selectionChanged.connect(self._on_selection_changed)
+        theme.on_change(self.retheme)
         self.undo_stack.indexChanged.connect(self._on_undo_index)
         self._apply_drag_mode()
 
@@ -354,14 +359,55 @@ class Canvas(QGraphicsView):
         if e.modifiers() & Qt.ControlModifier:
             factor = 1.15 if e.angleDelta().y() > 0 else 1 / 1.15
             new_zoom = self.zoom() * factor
-            if 0.05 <= new_zoom <= 16:
+            if MIN_ZOOM <= new_zoom <= MAX_ZOOM:
                 self.scale(factor, factor)
                 self.zoom_changed.emit(self.zoom())
         else:
             super().wheelEvent(e)
 
+    def retheme(self, _theme=None) -> None:
+        well = QColor(theme.current().palette.well)
+        self.setBackgroundBrush(well)
+        self._mask.set_background(well)
+        self._dot_tiles.clear()
+        self.viewport().update()
+
+    def _dot_tile(self) -> QPixmap:
+        """One grid cell with its dot, a whole number of physical pixels wide so it tiles without
+        drifting at 125% or 175% scaling. Tiled by the painter, so a repaint is a single fill."""
+        ratio = self.devicePixelRatioF() or 1.0
+        tile = self._dot_tiles.get(ratio)
+        if tile is not None:
+            return tile
+        t = theme.current().palette
+        size = max(4, round(DOT_GAP * ratio))
+        tile = QPixmap(size, size)
+        tile.setDevicePixelRatio(ratio)
+        tile.fill(QColor(t.well))
+        gap = size / ratio
+        p = QPainter(tile)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(t.dot))
+        p.drawEllipse(QPointF(gap / 2, gap / 2), 1.1, 1.1)
+        p.end()
+        self._dot_tiles[ratio] = tile
+        return tile
+
+    def _background_pattern(self) -> tuple[QBrush, QPointF]:
+        """The dotted background and where it starts, in viewport pixels (dots pan with the snip)."""
+        tile = self._dot_tile()
+        gap = tile.width() / tile.devicePixelRatio()
+        origin = self.mapFromScene(QPointF(0, 0))
+        return QBrush(tile), QPointF(origin.x() % gap - gap / 2, origin.y() % gap - gap / 2)
+
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:
-        super().drawBackground(p, rect)
+        brush, origin = self._background_pattern()
+        p.save()
+        p.resetTransform()
+        p.setBrushOrigin(origin)
+        p.fillRect(self.viewport().rect(), brush)
+        p.restore()
         p.setPen(Qt.NoPen)
         for i, alpha in ((6, 30), (3, 50), (1, 90)):
             p.setBrush(QColor(0, 0, 0, alpha))
