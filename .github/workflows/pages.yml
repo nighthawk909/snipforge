@@ -1,0 +1,85 @@
+name: Download page
+
+# Publishes the "Download for Windows" page to GitHub Pages: https://nighthawk909.github.io/snipforge/
+# scripts/build_site.py stamps docs/site/index.html with the current release (version, date, size,
+# what's new) and a newer preview build if there is one. The page loads nothing when people view
+# it, so it's rebuilt here after every Release or Preview release run, and when docs/site changes.
+# Pages must be set to deploy from GitHub Actions (Settings > Pages); until then this skips.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/site/**"
+      - "scripts/build_site.py"
+      - ".github/workflows/pages.yml"
+  workflow_run:
+    workflows: ["Release", "Preview release"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the page
+    # After a Release run that failed, keep the page that's already live.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - name: Check that Pages deploys from GitHub Actions
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          build_type=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type' 2>/dev/null || true)
+          if [ "$build_type" = "workflow" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GitHub Pages isn't set to deploy from Actions; skipping. Turn it on in Settings > Pages > Source: GitHub Actions."
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ steps.pages.outputs.enabled == 'true' }}
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Stamp the page with the current release
+        if: ${{ steps.pages.outputs.enabled == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" > "$RUNNER_TEMP/releases.json"
+          python3 scripts/build_site.py --releases "$RUNNER_TEMP/releases.json" --site docs/site \
+            --out "$RUNNER_TEMP/site" --repo "$GITHUB_REPOSITORY"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: ${{ steps.pages.outputs.enabled == 'true' }}
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: ${{ needs.build.outputs.enabled == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
