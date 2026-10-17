@@ -3,6 +3,13 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.6.0](https://github.com/nighthawk909/snipforge/compare/v0.5.0...v0.6.0) (2026-10-17)
+
+
+### Features
+
+* **install:** one-click download link, download page and company update feeds ([#9](https://github.com/nighthawk909/snipforge/issues/9)) ([7bd73cb](https://github.com/nighthawk909/snipforge/commit/7bd73cb66efefe2414670e51d80fd7a373748fd5))
+
 ## [0.5.0](https://github.com/nighthawk909/snipforge/compare/v0.4.0...v0.5.0) (2026-10-14)
 
 

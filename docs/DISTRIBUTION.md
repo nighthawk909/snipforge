@@ -17,8 +17,8 @@ This link always downloads the newest stable installer:
 Every stable release attaches `SnipForge-setup.exe` (the same file as
 `SnipForge-<version>-setup.exe`, listed in that release's `SHA256SUMS.txt`), and GitHub's
 `releases/latest` always points at the newest non-preview release, so the link never needs updating.
-(For the few minutes after a new release appears, while the build attaches its files, the link can
-show "Not Found"; it works again once the Release workflow finishes.)
+A new release stays a draft until the Release workflow has attached its files, so the link keeps
+serving the previous version until then instead of showing "Not Found".
 
 The download page at <https://nighthawk909.github.io/snipforge/> wraps the link in a big
 **Download for Windows** button, with install steps, the SmartScreen prompt explained, how updates

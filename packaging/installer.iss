@@ -74,6 +74,7 @@ Root: HKCU; Subkey: "Software\SnipForge"; ValueType: none; Flags: uninsdeletekey
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 ; A silent per-user upgrade closes the running app; start it again so Win+Shift+S keeps working.
+; SnipForge passes /RELAUNCH=0 when it installs an update as you quit it.
 Filename: "{app}\{#AppExe}"; Parameters: "--background"; Flags: nowait; Check: RelaunchAfterSilentInstall
 
 [UninstallRun]
@@ -88,7 +89,7 @@ Type: filesandordirs; Name: "{localappdata}\SnipForge\cache"
 [Code]
 function RelaunchAfterSilentInstall: Boolean;
 begin
-  Result := WizardSilent and not IsAdminInstallMode;
+  Result := WizardSilent and not IsAdminInstallMode and (ExpandConstant('{param:RELAUNCH|1}') <> '0');
 end;
 
 [Messages]
