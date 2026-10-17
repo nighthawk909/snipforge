@@ -3,6 +3,18 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.8.0](https://github.com/nighthawk909/snipforge/compare/v0.7.0...v0.8.0) (2026-10-17)
+
+
+### Features
+
+* **settings:** a Settings window, with full control over how SnipForge updates ([#22](https://github.com/nighthawk909/snipforge/issues/22)) ([54df708](https://github.com/nighthawk909/snipforge/commit/54df7084793c1e3c18e0d705bfb05195ce4d07fe))
+
+
+### Bug fixes
+
+* moving SnipForge to another repository keeps line endings and never doubles names ([#20](https://github.com/nighthawk909/snipforge/issues/20)) ([bce61cd](https://github.com/nighthawk909/snipforge/commit/bce61cd6b2f5a593b302177e07c0bd4507b056c9))
+
 ## [0.7.0](https://github.com/nighthawk909/snipforge/compare/v0.6.0...v0.7.0) (2026-10-17)
 
 
