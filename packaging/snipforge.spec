@@ -54,7 +54,10 @@ UNUSED_QT = ("qpdf", "virtualkeyboard", "qt6pdf", "qtpdf", "qt6quick", "qtquick"
 
 def _used(name):
     name = name.replace("\\", "/").lower()
-    return _media_backend_we_use(name) and not any(part in name for part in UNUSED_QT)
+    # Windows only for now: on macOS these are framework folders, and dropping their libraries
+    # leaves links codesign rejects; the Mac build keeps them until that's handled.
+    unused = not MAC and any(part in name for part in UNUSED_QT)
+    return _media_backend_we_use(name) and not unused
 
 
 a.binaries = [b for b in a.binaries if _used(b[0])]
