@@ -45,7 +45,19 @@ def _media_backend_we_use(name):
     return "/plugins/multimedia/" not in name or "ffmpegmediaplugin" in name
 
 
-a.binaries = [b for b in a.binaries if _media_backend_we_use(b[0])]
+# Installing PySide6-Addons (for Qt Multimedia) also brings Qt plugins that PyInstaller collects on
+# its own: PDF images (qpdf, which needs Qt Pdf) and the virtual keyboard (which needs Qt Quick, QML
+# and Qt OpenGL). About 20 MB SnipForge never uses; Qt Multimedia itself needs none of them.
+UNUSED_QT = ("qpdf", "virtualkeyboard", "qt6pdf", "qtpdf", "qt6quick", "qtquick", "qt6qml", "qtqml",
+             "qt6opengl", "qtopengl")
+
+
+def _used(name):
+    name = name.replace("\\", "/").lower()
+    return _media_backend_we_use(name) and not any(part in name for part in UNUSED_QT)
+
+
+a.binaries = [b for b in a.binaries if _used(b[0])]
 a.datas = [d for d in a.datas if not os.path.basename(d[0]).lower().startswith("qtmultimedia_")]  # translations
 pyz = PYZ(a.pure)
 exe = EXE(
