@@ -17,7 +17,7 @@ from .hotkey import HotkeyListener
 from .indexer import TextIndexer
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
-from .settings_window import SettingsWindow
+from .settings_window import SECTIONS, SettingsWindow
 from .single_instance import InstanceServer, send_to_running
 from .theme.tokens import BRAND
 from .update_flow import UpdateFlow
@@ -72,7 +72,7 @@ class SnipForgeApp:
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
         self._tray = QSystemTrayIcon(self._icon)
-        self._tray.setToolTip(f"SnipForge {__version__} — Win+Shift+S or Print Screen")
+        self._update_tray_tip()
         self._updates = UpdateFlow(self._tray)
         self._updates.ui_shows_updates = self._settings_shows_updates
         menu = QMenu()
@@ -93,6 +93,11 @@ class SnipForgeApp:
                                    "won't work. Use the tray icon to snip.", QSystemTrayIcon.Warning)
         self._updates.start()
 
+    def _update_tray_tip(self) -> None:
+        keys = [name for name, on in zip(("Win+Shift+S", "Print Screen"), prefs.hotkeys(), strict=True) if on]
+        how = " or ".join(keys) if keys else "click this icon to snip"
+        self._tray.setToolTip(f"SnipForge {__version__} — {how}")
+
     def check_updates(self) -> None:
         """Open Settings > Updates and check there (the tray flow explains when IT turned updates off)."""
         if self._updates.controller.policy.disabled:
@@ -103,15 +108,19 @@ class SnipForgeApp:
             self._updates.controller.check_now()
 
     def _settings_shows_updates(self) -> bool:
-        return (self._settings is not None and self._settings.isVisible()
-                and not self._settings.isMinimized() and self._settings.current_section() == "updates")
+        """Settings > Updates is in front of the user right now, so it already shows what's happening."""
+        s = self._settings
+        return (s is not None and s.isVisible() and not s.isMinimized() and s.isActiveWindow()
+                and QGuiApplication.applicationState() == Qt.ApplicationActive
+                and s.current_section() == "updates")
 
     def show_settings(self, section: str = "general") -> None:
         if self._settings is None:
             self._settings = SettingsWindow(theme_manager=theme.get_manager(),
                                             update_controller=self._updates.controller,
-                                            hotkey=self._hotkey, library_root=self.library.root)
-        self._settings.show_section(section)
+                                            hotkey=self._hotkey, library_root=self.library.root,
+                                            on_shortcuts_changed=self._update_tray_tip)
+        self._settings.show_section(section if section in SECTIONS else "general")
         self._settings.showNormal()
         self._bring_to_front(self._settings)
 
@@ -240,6 +249,8 @@ def _command_from_args(argv: list[str]) -> str:
         return "background"
     if "--snip" in argv:
         return "snip"
+    if "--settings" in argv:
+        return "settings"
     return "home"
 
 

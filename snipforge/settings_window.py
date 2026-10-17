@@ -94,16 +94,21 @@ class ThemeTile(QAbstractButton):
         p.setPen(QColor(t.palette.text))
         p.drawText(QRectF(r.left() + 12, r.bottom() - 30, r.width() - 24, 24), Qt.AlignLeft | Qt.AlignVCenter,
                    self.text())
+        if self.hasFocus():
+            p.setPen(QPen(QColor(t.accent.fill), 2, Qt.DotLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(r.adjusted(4, 4, -4, -4), 8, 8)
         p.end()
 
 
 class SettingsWindow(QMainWindow):
     def __init__(self, *, theme_manager=None, update_controller=None, hotkey=None, library_root: Path | None = None,
-                 parent=None) -> None:
+                 on_shortcuts_changed=None, parent=None) -> None:
         super().__init__(parent)
         self._themes = theme_manager
         self._hotkey = hotkey
         self._library_root = library_root
+        self._on_shortcuts_changed = on_shortcuts_changed
         self.setWindowTitle("SnipForge settings")
         self.resize(1040, 760)
         root = QWidget()
@@ -173,6 +178,11 @@ class SettingsWindow(QMainWindow):
             item.clicked.connect(lambda _=False, k=key: self.show_section(k))
             self._nav[key] = item
             col.addWidget(item)
+        self._no_results = QLabel("No settings match")
+        self._no_results.setProperty("sfRole", "muted")
+        self._no_results.setContentsMargins(12, 4, 0, 0)
+        self._no_results.hide()
+        col.addWidget(self._no_results)
         col.addStretch(1)
         return nav
 
@@ -190,10 +200,33 @@ class SettingsWindow(QMainWindow):
 
     def _filter_nav(self, text: str) -> None:
         words = text.lower().split()
+        shown = 0
         for key, item in self._nav.items():
             label, _icon, blurb, extra = SECTIONS[key]
             haystack = f"{label} {blurb} {extra}".lower()
             item.setVisible(all(w in haystack for w in words))
+            shown += not item.isHidden()
+        self._no_results.setVisible(shown == 0)
+
+    def showEvent(self, e) -> None:  # noqa: N802 - Qt API
+        self.refresh()
+        super().showEvent(e)
+
+    def refresh(self) -> None:
+        """Re-read every control: things can change elsewhere (the editor's Beautify switch, startup set
+        in Windows, the theme toggle) while this window is closed."""
+        win_shift_s, print_screen = prefs.hotkeys()
+        for switch, value in ((self.startup, autostart.is_enabled()), (self.copy_on_capture, prefs.copy_on_capture()),
+                              (self.key_win_shift_s, win_shift_s), (self.key_print_screen, print_screen),
+                              (self.magnifier, prefs.magnifier()),
+                              (self.beautify, app_settings().value("beautify", False, bool))):
+            switch.blockSignals(True)
+            switch.setChecked(value)
+            switch.blockSignals(False)
+        self.folder_row.set_description(str(prefs.export_dir()))
+        self._reset_folder.setVisible(prefs.export_dir() != prefs.DEFAULT_EXPORT_DIR)
+        self.format.set_value(prefs.export_format())
+        self._retheme()
 
     def _retheme(self, _theme=None) -> None:
         self._find_icon.setIcon(icon("search"))
@@ -214,6 +247,7 @@ class SettingsWindow(QMainWindow):
         self.copy_on_capture.toggled.connect(prefs.set_copy_on_capture)
         open_library = QPushButton("Open folder")
         open_library.clicked.connect(lambda: self._open_folder(self._library_root))
+        open_library.setAccessibleName("Open the library folder")
         library_row = SettingRow("Library", str(self._library_root or ""), open_library)
         library_row.setVisible(self._library_root is not None)
         return stack(
@@ -230,6 +264,9 @@ class SettingsWindow(QMainWindow):
         if not on and autostart.enabled_for_all_users():
             QMessageBox.information(self, "SnipForge", "SnipForge is set to start for everyone on this PC "
                                     "(set by your administrator), so it will still start when you sign in.")
+        self.startup.blockSignals(True)  # show what really happened
+        self.startup.setChecked(autostart.is_enabled())
+        self.startup.blockSignals(False)
 
     def _capture(self) -> QWidget:
         win_shift_s, print_screen = prefs.hotkeys()
@@ -260,6 +297,8 @@ class SettingsWindow(QMainWindow):
         prefs.set_hotkey(which, on)
         if self._hotkey is not None:
             self._hotkey.set_keys(*prefs.hotkeys())
+        if self._on_shortcuts_changed is not None:
+            self._on_shortcuts_changed()
 
     def _saving(self) -> QWidget:
         buttons = QWidget()
@@ -287,8 +326,16 @@ class SettingsWindow(QMainWindow):
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Save folder", str(prefs.export_dir()))
-        if folder:
-            self._set_folder(Path(folder))
+        if not folder:
+            return
+        probe = Path(folder) / ".snipforge-write-test"
+        try:
+            probe.write_bytes(b"")
+            probe.unlink()
+        except OSError as exc:
+            QMessageBox.warning(self, "SnipForge", f"SnipForge can't save files in {folder}: {exc}")
+            return
+        self._set_folder(Path(folder))
 
     def _set_folder(self, folder: Path | None) -> None:
         prefs.set_export_dir(folder)
@@ -399,8 +446,7 @@ class SettingsWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)) if path.exists()
                                  else QUrl(f"https://github.com/{REPO}/blob/main/THIRD_PARTY_NOTICES.md"))
 
-    @staticmethod
-    def _open_folder(path: Path | None) -> None:
+    def _open_folder(self, path: Path | None) -> None:
         if path is None:
             return
         try:
@@ -408,3 +454,4 @@ class SettingsWindow(QMainWindow):
             os.startfile(str(path))  # noqa: S606 - opens our own library folder in Explorer
         except OSError as exc:
             log.info("Couldn't open %s: %s", path, exc)
+            QMessageBox.warning(self, "SnipForge", f"Couldn't open {path}: {exc}")

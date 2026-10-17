@@ -116,6 +116,12 @@ def test_general_and_capture_switches_take_effect(make, monkeypatch):
 def test_saving_folder_format_and_beautify(make, monkeypatch, tmp_path):
     from PySide6.QtWidgets import QFileDialog
     w = make()
+    (tmp_path / "Shots").mkdir()
+    blocked = tmp_path / "not-a-folder.txt"
+    blocked.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a: str(blocked))
+    w._choose_folder()  # can't write there: refused with a message, nothing changes
+    assert prefs.export_dir() == prefs.DEFAULT_EXPORT_DIR
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a: str(tmp_path / "Shots"))
     w._choose_folder()
     assert prefs.export_dir() == tmp_path / "Shots" and str(tmp_path / "Shots") in w.folder_row.description.text()
@@ -213,13 +219,30 @@ def test_version_list_installs_and_rolls_back(make, monkeypatch):
     assert controller.calls[-1] == ("install_version", "0.6.0")
     back = rows[3].control
     assert back.text() == "Go back to this version"
-    monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.No)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.No)
     back.click()
     assert controller.calls[-1] == ("install_version", "0.6.0")  # cancelled
-    monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.Yes)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.Yes)
     back.click()
     assert controller.calls[-1] == ("install_version", "0.4.0")
     controller.policy = replace(controller.policy, allow_rollback=False)
     controller.releases_changed.emit(controller.releases)
     rows = [page._versions.itemAt(n).widget() for n in range(page._versions.count())]
-    assert rows[3].control is None  # IT turned rollback off
+    back = rows[3].control  # IT turned rollback off: still shown, with the reason
+    assert not back.isEnabled() and "IT team" in back.toolTip()
+
+
+def test_version_buttons_follow_the_engine_state(make):
+    controller = FakeController()
+    page = make(update_controller=controller).updates_page
+    page._current = "0.5.0"
+    controller.releases = [release("0.6.0", days=2), release("0.5.0")]
+    controller.busy = True  # the list arrives while the check is still running
+    controller.releases_changed.emit(controller.releases)
+    install = page._versions.itemAt(0).widget().control
+    assert not install.isEnabled() and "Wait" in install.toolTip()
+    controller.busy = False
+    controller.emit(kind="available", release=controller.releases[0])
+    assert install.isEnabled() and install.toolTip() == ""
+    controller.emit(kind="installing", release=controller.releases[0])
+    assert not install.isEnabled()

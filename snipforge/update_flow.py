@@ -76,8 +76,10 @@ class UpdateFlow(QObject):
         previous, self._previous = self._previous, state.kind
         if state.kind != "downloading":
             self._close_progress()
-        if self.ui_shows_updates() and state.kind != "installing":
-            self._manual = self._installing = False
+        if self.ui_shows_updates() and state.kind != "installing" and not self._installing:
+            if state.kind == "error":
+                log.info("Update problem: %s", state.message)
+            self._manual = False
             return
         handler = getattr(self, f"_on_{state.kind}", None)
         if handler is not None:

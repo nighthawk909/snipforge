@@ -199,22 +199,37 @@ class SettingRow(QFrame):
         self.title = QLabel(title)
         self.title.setObjectName("SettingTitle")
         self.title.setWordWrap(True)
+        self.title.setTextFormat(Qt.PlainText)  # titles and descriptions can carry release-note text
         text.addWidget(self.title)
         self.description = QLabel(description)
         self.description.setProperty("sfRole", "muted")
         self.description.setWordWrap(True)
+        self.description.setTextFormat(Qt.PlainText)
         self.description.setVisible(bool(description))
         text.addWidget(self.description)
         row.addLayout(text, 1)
         self.control = control
         if control is not None:
             row.addWidget(control, 0, Qt.AlignVCenter)
-            if not control.accessibleName():
+            # A button keeps its own label as its name ("Install", not "0.6.0"); unlabeled controls
+            # (switches, radios) are named after the row.
+            if not control.accessibleName() and not getattr(control, "text", lambda: "")():
                 control.setAccessibleName(title)
+            if description and not control.accessibleDescription():
+                control.setAccessibleDescription(description)
+
+    def mouseReleaseEvent(self, e) -> None:  # noqa: N802 - Qt API
+        """Clicking anywhere on a choice card picks it, not just the small radio button."""
+        from PySide6.QtWidgets import QRadioButton
+        if e.button() == Qt.LeftButton and isinstance(self.control, QRadioButton) and self.control.isEnabled():
+            self.control.click()
+        super().mouseReleaseEvent(e)
 
     def set_description(self, text: str) -> None:
         self.description.setText(text)
         self.description.setVisible(bool(text))
+        if self.control is not None:
+            self.control.setAccessibleDescription(text)
 
 
 def stack(*widgets: QWidget, spacing: int = 4) -> QWidget:

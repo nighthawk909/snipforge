@@ -56,3 +56,40 @@ def no_dialogs(monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: shown.append(("question", a)) or QMessageBox.No)
     monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(("question", self.text())) or QMessageBox.No)
     return shown
+
+
+@pytest.fixture(autouse=True)
+def _never_block_on_dialogs(monkeypatch):
+    """A message box a test didn't expect answers No/Cancel instead of hanging the whole run.
+    Tests that care about a dialog patch it themselves (see no_dialogs)."""
+    opened = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: opened.append(self.text()) or QMessageBox.Cancel)
+    for name in ("information", "warning", "critical", "about"):
+        monkeypatch.setattr(QMessageBox, name, lambda *a, n=name, **k: opened.append(n) or QMessageBox.Ok)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: opened.append("question") or QMessageBox.No)
+    return opened
+
+
+@pytest.fixture(autouse=True)
+def _no_update_network(monkeypatch):
+    """Tests never reach GitHub or an update feed over the network: a request is answered with an
+    error, and the test that made it fails (usually a leaked, still-running update controller)."""
+    from urllib.parse import urlparse
+
+    from PySide6.QtCore import QTimer
+
+    from snipforge import update_transport
+
+    calls = []
+    real = update_transport.NetworkTransport.get
+
+    def guarded(self, url, **kwargs):
+        if urlparse(url or "").scheme != "https":
+            return real(self, url, **kwargs)
+        calls.append(url)
+        QTimer.singleShot(0, lambda: kwargs["done"](None, "The network is off in tests.", url))
+        return update_transport._NoTransfer()
+
+    monkeypatch.setattr(update_transport.NetworkTransport, "get", guarded)
+    yield
+    assert not calls, f"a test tried to reach the network: {calls}"

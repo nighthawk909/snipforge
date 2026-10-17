@@ -52,6 +52,7 @@ TOOLS = [
     ("crop", "Crop (C)"),
 ]
 AUTOSAVE_MS = 700
+JPG_QUALITY = 92  # text in screenshots blurs at Qt's default of 75
 
 
 def load_tool_styles(settings: QSettings) -> dict[str, Style]:
@@ -359,11 +360,19 @@ class EditorWindow(QMainWindow):
             self._write(self._export_path)
 
     def _write(self, path: Path) -> None:
-        if self.final_image().save(str(path)):
+        jpg = path.suffix.lower() in (".jpg", ".jpeg")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            ok = self.final_image().save(str(path), "JPG" if jpg else None, JPG_QUALITY if jpg else -1)
+        except OSError:
+            ok = False
+        if ok:
             self.statusBar().showMessage(f"Saved {path}", 4000)
-        else:
-            QMessageBox.warning(self, "SnipForge", f"Couldn't save to {path}. Check the folder exists "
-                                "and you have permission to write there.")
+            return
+        if path == self._export_path:
+            self._export_path = None  # try the Save folder from Settings again next time
+        QMessageBox.warning(self, "SnipForge", f"Couldn't save to {path}. Check the folder exists "
+                            "and you have permission to write there, or choose another in Settings > Saving.")
 
     def pin(self) -> None:
         if self._on_pin:

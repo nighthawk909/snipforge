@@ -142,6 +142,7 @@ def forge(qapp, tmp_path, monkeypatch, no_dialogs):
     from snipforge import app as app_module
     monkeypatch.setattr(app_module.HotkeyListener, "start", lambda self: True)
     monkeypatch.setattr(app_module.HotkeyListener, "stop", lambda self: None)
+    monkeypatch.setattr(app_module.UpdateFlow, "start", lambda self: None)  # no update checks in unit tests
     f = app_module.SnipForgeApp(qapp, Library(tmp_path))
     f.indexer._recognize = lambda image: "fake words"  # never run real OCR in unit tests
     yield f

@@ -115,7 +115,7 @@ class HomeWindow(QMainWindow):
         self._settings.setCheckable(False)
         self._settings.setVisible(self._on_settings is not None)
         if self._on_settings is not None:
-            self._settings.clicked.connect(self._on_settings)
+            self._settings.clicked.connect(lambda _=False: self._on_settings())  # don't pass `checked` along
         col.addWidget(self._settings)
         return side
 

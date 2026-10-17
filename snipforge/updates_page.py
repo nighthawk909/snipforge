@@ -44,10 +44,11 @@ def _heading(text: str) -> QLabel:
 
 
 class UpdatesPage(QWidget):
-    def __init__(self, controller, current_version: str = __version__, parent=None) -> None:
+    def __init__(self, controller, current_version: str | None = None, parent=None) -> None:
         super().__init__(parent)
         self._controller = controller
-        self._current = current_version
+        self._current = current_version or getattr(controller, "current_version", __version__)
+        self._row_buttons: list[tuple[QPushButton, object, bool]] = []  # button, release, newer
         self._notes_open = False
         col = QVBoxLayout(self)
         col.setContentsMargins(0, 0, 0, 0)
@@ -102,10 +103,13 @@ class UpdatesPage(QWidget):
         self._title = QLabel()
         self._title.setProperty("sfRole", "heading")
         self._title.setWordWrap(True)
+        self._title.setTextFormat(Qt.PlainText)
         self._message = QLabel()
         self._message.setProperty("sfRole", "secondary")
         self._message.setWordWrap(True)
+        self._message.setTextFormat(Qt.PlainText)  # can quote server text: never rich text
         self._progress = QProgressBar()
+        self._progress.setAccessibleName("Update progress")
         self._progress.setTextVisible(False)
         self._progress.setFixedHeight(6)
         self._notes = QLabel()
@@ -159,7 +163,7 @@ class UpdatesPage(QWidget):
         message = state.message or (f"You have SnipForge {self._current}." if kind in ("idle", "current") else "")
         if kind == "disabled":
             message = "Your IT team turned off update checks on this PC."
-        if blocker and kind in ("available", "ready"):
+        if blocker and kind in ("available", "ready") and blocker not in message:
             message = f"{message} {blocker}".strip()
         self._message.setText(message)
         self._message.setVisible(bool(message))
@@ -175,7 +179,7 @@ class UpdatesPage(QWidget):
         self._primary.setEnabled(not (blocker and kind in ("available", "ready")))
         offer = kind in ("available", "ready") and release is not None
         self._whats_new.setVisible(offer and bool(release.notes))
-        self._skip.setVisible(offer)
+        self._skip.setVisible(offer and not self._controller.is_skipped(release))
         self._notes.setText(release.notes if release is not None else "")
         self._notes.setVisible(offer and self._notes_open and bool(release.notes))
         self._check.setEnabled(not policy.disabled and not self._controller.busy)
@@ -184,6 +188,7 @@ class UpdatesPage(QWidget):
                                    if when else "Not checked yet")
         self._kind = kind
         self._state = state
+        self._refresh_row_buttons()
 
     def _primary_clicked(self) -> None:
         kind, release = self._kind, self._state.release
@@ -199,6 +204,7 @@ class UpdatesPage(QWidget):
     def _skip_clicked(self) -> None:
         if self._state.release is not None:
             self._controller.skip(self._state.release.version)
+            self._on_state(self._controller.state)
 
     def _toggle_notes(self) -> None:
         self._notes_open = not self._notes_open
@@ -237,6 +243,7 @@ class UpdatesPage(QWidget):
         self._channel.set_value(prefs.channel)
         self._channel.setEnabled(policy.channel is None and not policy.disabled)
         self._channel_row.title.setText("Preview" if prefs.channel == "preview" else "Stable")
+        self._channel.setAccessibleName(f"Release channel: {self._channel_row.title.text()}")
         self._channel_row.set_description(CHANNELS[prefs.channel] + (f" {MANAGED}." if policy.channel else ""))
         pinned = prefs.pinned_version
         self._pin.setChecked(pinned is not None)
@@ -269,6 +276,7 @@ class UpdatesPage(QWidget):
 
     # ------------------------------------------------------------------ versions
     def _on_releases(self, releases) -> None:
+        self._row_buttons = []
         while self._versions.count():
             widget = self._versions.takeAt(0).widget()
             if widget:
@@ -297,20 +305,42 @@ class UpdatesPage(QWidget):
         button = None
         if release.version != self._current:
             newer = updates.is_newer(release.version, self._current)
-            if newer or self._controller.policy.allow_rollback:
-                button = QPushButton("Install" if newer else "Go back to this version")
-                blocker = self._controller.install_blocker(release)
-                button.setEnabled(not blocker and not self._controller.busy)
-                button.setToolTip(blocker)
-                button.clicked.connect(lambda _=False, r=release, n=newer: self._install(r, n))
-        return SettingRow(release.version, detail, button)
+            button = QPushButton("Install" if newer else "Go back to this version")
+            button.clicked.connect(lambda _=False, r=release, n=newer: self._install(r, n))
+            self._row_buttons.append((button, release, newer))
+        row = SettingRow(release.version, detail, button)
+        self._refresh_row_buttons()
+        return row
+
+    def _refresh_row_buttons(self) -> None:
+        """Install and Go back follow the engine's state: off (with the reason) while it's busy."""
+        busy = self._controller.busy or self._kind in ("installing", "disabled")
+        for button, release, newer in self._row_buttons:
+            reason = self._controller.install_blocker(release)
+            if not reason and not newer and not self._controller.policy.allow_rollback:
+                reason = "Your IT team turned off going back to older versions."
+            if not reason and busy:
+                reason = "Wait for the current check, download or install to finish."
+            button.setEnabled(not reason)
+            button.setToolTip(reason)
+            button.setAccessibleDescription(reason)
 
     def _install(self, release, newer: bool) -> None:
+        prefs = self._controller.prefs
         if not newer:
-            answer = QMessageBox.question(
-                self, "Go back to an older version",
-                f"Install SnipForge {release.version}? SnipForge will stay on that version until you turn off "
-                "\"Stay on the version I choose\". Your snips and settings are kept.")
-            if answer != QMessageBox.Yes:
+            box = QMessageBox(QMessageBox.Question, "Go back to an older version",
+                              f"Install SnipForge {release.version}? SnipForge will stay on that version until you "
+                              "turn off \"Stay on the version I choose\". Your snips and settings are kept.",
+                              QMessageBox.Yes | QMessageBox.No, self)
+            box.setDefaultButton(QMessageBox.No)
+            if box.exec() != QMessageBox.Yes:
                 return
+        elif prefs.pinned_version:
+            box = QMessageBox(QMessageBox.Question, "Stay on this version?",
+                              f"You chose to stay on {prefs.pinned_version}. After installing {release.version}, "
+                              "keep getting newer versions?", QMessageBox.Yes | QMessageBox.No, self)
+            box.setDefaultButton(QMessageBox.Yes)
+            if box.exec() == QMessageBox.Yes:
+                self._controller.set_prefs(replace(prefs, pinned_version=None))
         self._controller.install_version(release.version)
+        self._load_prefs()
