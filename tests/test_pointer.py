@@ -68,6 +68,16 @@ def test_pointer_is_drawn_onto_a_copy_of_the_screen():
     assert screen.pixelColor(5, 7).name() == "#ffffff"  # the frozen screen itself is untouched
 
 
+def test_pointer_lands_on_physical_pixels_on_a_scaled_monitor():
+    screen = solid("#ffffff", 40, 40)
+    screen.setDevicePixelRatio(2.0)  # a 200% monitor: the frozen screen is in physical pixels
+    arrow = QImage(4, 4, QImage.Format_ARGB32)
+    arrow.fill(QColor("#ff0000"))
+    result = pointer.composite(screen, pointer.PointerShot(arrow, QPoint(10, 10)), origin=QPoint(0, 0))
+    assert result.pixelColor(11, 11).name() == "#ff0000" and result.pixelColor(21, 21).name() == "#ffffff"
+    assert result.devicePixelRatio() == 2.0
+
+
 def test_pointer_on_another_monitor_leaves_this_one_alone():
     screen = solid("#ffffff", 20, 20)
     arrow = QImage(4, 4, QImage.Format_ARGB32)
@@ -99,4 +109,5 @@ def test_grab_returns_the_real_pointer():
     assert shot.image.hasAlphaChannel()
     alphas = {shot.image.pixelColor(x, y).alpha() for x in range(shot.image.width())
               for y in range(shot.image.height())}
-    assert 0 in alphas and 255 in alphas  # a shape, not a box
+    # A shape, not a box: some pixels clear, and some solid or (text pointers) inverting.
+    assert 0 in alphas and (255 in alphas or shot.inverted)

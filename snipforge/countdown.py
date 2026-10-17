@@ -20,7 +20,7 @@ class Countdown(QWidget):
     finished = Signal()  # time is up and the countdown is off the screen
     cancelled = Signal()
 
-    def __init__(self, seconds: int, screen, settle_ms: int = SETTLE_MS) -> None:
+    def __init__(self, seconds: int, screen, settle_ms: int | None = None) -> None:
         if not 1 <= seconds <= MAX_SECONDS:
             raise ValueError(f"the delay must be 1 to {MAX_SECONDS} seconds")
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -30,7 +30,7 @@ class Countdown(QWidget):
         self.setAccessibleName("Snip countdown")
         self._left = seconds
         self._screen = screen
-        self._settle_ms = settle_ms
+        self._settle_ms = SETTLE_MS if settle_ms is None else settle_ms
         self._done = False
         self._timer = QTimer(self, interval=1000)
         self._timer.timeout.connect(self.tick)

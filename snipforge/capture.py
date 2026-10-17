@@ -4,6 +4,9 @@ One borderless overlay per monitor shows a frozen screenshot, with the capture t
 monitor the pointer is on. The toolbar's mode decides what a click or drag takes: Area (drag an
 area, or click a window), Window (click a window) or Full screen (click a monitor). Enter always
 takes the whole monitor. A magnifier shows exact pixels.
+
+A delay counts down before the screen freezes (so menus and tooltips can be opened first), and
+the mouse pointer, grabbed the moment the screen froze, can be drawn into the snip.
 """
 from __future__ import annotations
 
@@ -14,8 +17,9 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
-from . import prefs, theme
+from . import pointer, prefs, theme
 from .capture_toolbar import MODES, CaptureToolbar
+from .countdown import Countdown
 
 DIM = QColor(0, 0, 0, 120)
 DRAG_THRESHOLD = 4
@@ -38,21 +42,33 @@ def _span(a: QPoint, b: QPoint) -> QRect:
     return QRect(min(a.x(), b.x()), min(a.y(), b.y()), abs(b.x() - a.x()), abs(b.y() - a.y()))
 
 
+def _grab_screen(screen) -> QPixmap:
+    return screen.grabWindow(0)
+
+
 class _ScreenOverlay(QWidget):
     selected = Signal(QImage)
     cancelled = Signal()
     mode_changed = Signal(str)  # the user picked another mode here (toolbar or letter key)
+    delay_changed = Signal(int)  # the user picked a delay (seconds) on the toolbar
+    pointer_changed = Signal(bool)  # the user switched the pointer on or off here
 
     def __init__(self, screen, pixmap: QPixmap, window_rects: list[QRect], sources: list | None = None,
-                 *, mode: str = "area", toolbar: bool = False) -> None:
+                 *, mode: str = "area", toolbar: bool = False, delay: int = 0,
+                 pointer_shot: pointer.PointerShot | None = None, include_pointer: bool = False) -> None:
         """`sources` (optional) describes each of `window_rects`: a winrects.WindowInfo, same order.
-        `toolbar`: show the capture toolbar on this monitor (the one the pointer is on)."""
+        `toolbar`: show the capture toolbar on this monitor. `pointer_shot`: the pointer as it was
+        when the screen froze, drawn into the snip while `include_pointer` is on."""
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self._pixmap = pixmap
-        self._image = pixmap.toImage()
+        self._frozen_pixmap = pixmap
+        self._frozen_image = pixmap.toImage()
         self._dpr = pixmap.devicePixelRatio() or 1.0
+        self._pointer_shot = pointer_shot
+        self._include_pointer = include_pointer
+        self._with_pointer: tuple[QPixmap, QImage] | None = None
         self.setGeometry(screen.geometry())
         origin = screen.geometry().topLeft()
+        self._origin = origin
         self._windows = self._to_local(origin, window_rects)
         self._sources = [(local, info) for r, info in zip(window_rects, sources or [], strict=False)
                          if (local := self._map(origin, r)) is not None]
@@ -66,8 +82,11 @@ class _ScreenOverlay(QWidget):
         self._mode = mode if mode in MODES else "area"
         self.toolbar: CaptureToolbar | None = None
         if toolbar:
-            self.toolbar = CaptureToolbar(self._mode, self)
+            self.toolbar = CaptureToolbar(self._mode, self, delay=delay, pointer=self._pointer_shown(),
+                                          pointer_available=pointer_shot is not None)
             self.toolbar.mode_picked.connect(self._pick_mode)
+            self.toolbar.delay_picked.connect(self.delay_changed)
+            self.toolbar.pointer_toggled.connect(self._pick_pointer)
             self.toolbar.cancel_clicked.connect(self.cancelled)
             self.toolbar.installEventFilter(self)
             self._place_toolbar()
@@ -76,7 +95,52 @@ class _ScreenOverlay(QWidget):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setAccessibleName("Choose what to snip")
         self.setAccessibleDescription(
-            "A to drag an area, W for a window, F for the full screen, Enter for the whole monitor, Esc to cancel")
+            "A to drag an area, W for a window, F for the full screen, Enter for the whole monitor, "
+            "D for a delay, P to include the pointer, Esc to cancel")
+
+    # ------------------------------------------------------------------ what's on screen
+    def _pointer_shown(self) -> bool:
+        return self._include_pointer and self._pointer_shot is not None
+
+    def _pixmap_and_image(self) -> tuple[QPixmap, QImage]:
+        """The frozen screen, with the pointer drawn on when it's included."""
+        if not self._pointer_shown():
+            return self._frozen_pixmap, self._frozen_image
+        if self._with_pointer is None:
+            image = pointer.composite(self._frozen_image, self._pointer_shot, self._origin)
+            pixmap = QPixmap.fromImage(image)
+            pixmap.setDevicePixelRatio(self._dpr)
+            self._with_pointer = (pixmap, image)
+        return self._with_pointer
+
+    @property
+    def _pixmap(self) -> QPixmap:
+        return self._pixmap_and_image()[0]
+
+    @property
+    def _image(self) -> QImage:
+        return self._pixmap_and_image()[1]
+
+    @property
+    def include_pointer(self) -> bool:
+        return self._include_pointer
+
+    def set_include_pointer(self, on: bool) -> None:
+        """Without announcing it (the session keeps monitors in step)."""
+        self._include_pointer = on
+        if self.toolbar is not None:
+            self.toolbar.set_pointer(self._pointer_shown())
+        self.update()
+
+    def _pick_pointer(self, on: bool) -> None:
+        if self._pointer_shot is None:
+            return
+        self.set_include_pointer(on)
+        self.pointer_changed.emit(on)
+
+    def set_delay(self, seconds: int) -> None:
+        if self.toolbar is not None:
+            self.toolbar.set_delay(seconds)
 
     # ------------------------------------------------------------------ mode and toolbar
     @property
@@ -296,9 +360,14 @@ class _ScreenOverlay(QWidget):
             self.cancelled.emit()
         elif e.key() in (Qt.Key_Return, Qt.Key_Enter):
             self._emit(self.rect())
-        elif e.modifiers() in (Qt.NoModifier, Qt.ShiftModifier) and (
-                mode := next((k for k, spec in MODES.items() if e.key() == ord(spec.key)), None)):
+        elif e.modifiers() not in (Qt.NoModifier, Qt.ShiftModifier):
+            super().keyPressEvent(e)
+        elif mode := next((k for k, spec in MODES.items() if e.key() == ord(spec.key)), None):
             self._pick_mode(mode)
+        elif e.key() == Qt.Key_D and self.toolbar is not None:
+            self.toolbar.open_delay_menu()
+        elif e.key() == Qt.Key_P:
+            self._pick_pointer(not self._include_pointer)
         else:
             super().keyPressEvent(e)
 
@@ -317,9 +386,40 @@ class CaptureSession:
         self._overlays: list[_ScreenOverlay] = []
         self._finished = False
         self.focus: _ScreenOverlay | None = None  # the overlay that has the keyboard
+        self.countdown: Countdown | None = None  # counting down before the screen freezes
         self.source = None  # the window the snip came from (winrects.WindowInfo), when known
 
     def start(self) -> None:
+        delay = prefs.capture_delay()
+        if delay:
+            self._count_down(delay)
+        else:
+            self._freeze()
+
+    def snip_now(self) -> None:
+        """Skip the rest of a countdown (the snip key pressed again)."""
+        if self.countdown is not None:
+            self.countdown.snip_now()
+
+    def _count_down(self, seconds: int) -> None:
+        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        self.countdown = Countdown(seconds, screen)
+        self.countdown.finished.connect(self._countdown_done)
+        self.countdown.cancelled.connect(lambda: self._finish(None))
+        self.countdown.start()
+
+    def _countdown_done(self) -> None:
+        self._drop_countdown()
+        if not self._finished:
+            self._freeze()
+
+    def _drop_countdown(self) -> None:
+        if self.countdown is not None:
+            self.countdown.close()
+            self.countdown.deleteLater()
+            self.countdown = None
+
+    def _freeze(self) -> None:
         try:
             self._show_overlays()
         except Exception:  # never leave a half-open session that blocks the next snip
@@ -337,14 +437,19 @@ class CaptureSession:
             infos = []
         windows = [info.rect for info in infos]
         mode = prefs.capture_mode()
+        shot = pointer.grab()  # first: the pointer as it is the moment the screen freezes
         # Every monitor gets the toolbar; the keyboard goes to the one the pointer is on (the main
         # one if the pointer is somewhere Windows doesn't report, e.g. while a remote session reconnects).
         active = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         for screen in QGuiApplication.screens():
-            overlay = _ScreenOverlay(screen, screen.grabWindow(0), windows, infos, mode=mode, toolbar=True)
+            overlay = _ScreenOverlay(screen, _grab_screen(screen), windows, infos, mode=mode, toolbar=True,
+                                     delay=prefs.capture_delay(), pointer_shot=shot,
+                                     include_pointer=prefs.capture_pointer())
             overlay.selected.connect(lambda image, o=overlay: self._finish(image, o.last_source))
             overlay.cancelled.connect(lambda: self._finish(None))
             overlay.mode_changed.connect(self._set_mode)
+            overlay.delay_changed.connect(self._set_delay)
+            overlay.pointer_changed.connect(self._set_pointer)
             self._overlays.append(overlay)
             if screen is active:
                 self.focus = overlay
@@ -361,12 +466,32 @@ class CaptureSession:
             overlay.set_mode(mode)
         prefs.set_capture_mode(mode)
 
+    def _set_delay(self, seconds: int) -> None:
+        """Remembered for the next snip. A delay also starts now: the overlays step aside, the
+        countdown runs, and the screen freezes again (with the menu you opened meanwhile)."""
+        prefs.set_capture_delay(seconds)
+        for overlay in self._overlays:
+            overlay.set_delay(seconds)
+        if seconds and not self._finished:
+            self._close_overlays()
+            self._count_down(seconds)
+
+    def _set_pointer(self, on: bool) -> None:
+        prefs.set_capture_pointer(on)
+        for overlay in self._overlays:
+            overlay.set_include_pointer(on)
+
+    def _close_overlays(self) -> None:
+        for overlay in self._overlays:
+            overlay.close()
+        self._overlays.clear()
+        self.focus = None
+
     def _finish(self, image: QImage | None, source=None) -> None:
         if self._finished:
             return
         self._finished = True
         self.source = source if image is not None else None
-        for overlay in self._overlays:
-            overlay.close()
-        self._overlays.clear()
+        self._drop_countdown()
+        self._close_overlays()
         self._on_done(image)

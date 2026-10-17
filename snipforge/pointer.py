@@ -63,6 +63,8 @@ def composite(screen: QImage, shot: PointerShot, origin: QPoint) -> QImage:
     """A copy of one monitor's frozen screen with the pointer drawn on. `origin` is that monitor's
     top-left in physical screen pixels."""
     result = screen.copy()
+    dpr = result.devicePixelRatio()
+    result.setDevicePixelRatio(1.0)  # paint in the image's own pixels, whatever the monitor's scaling
     top_left = shot.position - origin
     p = QPainter(result)
     p.drawImage(top_left, shot.image)
@@ -72,6 +74,7 @@ def composite(screen: QImage, shot: PointerShot, origin: QPoint) -> QImage:
         if result.valid(sx, sy):
             c = result.pixelColor(sx, sy)
             result.setPixelColor(sx, sy, QColor(255 - c.red(), 255 - c.green(), 255 - c.blue(), c.alpha()))
+    result.setDevicePixelRatio(dpr)
     return result
 
 

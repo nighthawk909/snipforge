@@ -153,6 +153,7 @@ class SnipForgeApp:
 
     def capture(self) -> None:
         if self._session is not None:
+            self._session.snip_now()  # pressed again during a countdown: don't wait
             return
         self._session = CaptureSession(self._on_captured)
         QTimer.singleShot(CAPTURE_DELAY_MS, self._session.start)

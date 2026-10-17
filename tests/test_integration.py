@@ -203,6 +203,19 @@ def test_capture_runs_one_session_at_a_time(forge, monkeypatch):
     assert forge._session is not None
 
 
+def test_pressing_the_snip_key_during_a_countdown_snips_now(forge):
+    calls = []
+
+    class CountingDown:
+        def snip_now(self):
+            calls.append("now")
+
+    forge._session = CountingDown()
+    forge.capture()
+    assert calls == ["now"]
+    forge._session = None
+
+
 def test_command_from_args():
     from snipforge.app import _command_from_args
     assert _command_from_args(["x", "--background"]) == "background"

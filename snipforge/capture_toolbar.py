@@ -1,4 +1,5 @@
-"""The toolbar at the top of the capture overlay: how to choose what to snip, and Cancel.
+"""The toolbar at the top of the capture overlay: how to choose what to snip, a delay, whether the
+mouse pointer is included, and Cancel.
 
 Its buttons never take keyboard focus from the overlay when clicked (Tab still reaches them, and
 Enter or Space presses the focused one), so Esc, Enter and the mode letters keep working however
@@ -9,10 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QSize, Qt, Signal
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QToolButton
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
+from PySide6.QtGui import QActionGroup
+from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QMenu, QToolButton
 
 from .icons import icon
+from .prefs import DELAYS
 
 
 @dataclass(frozen=True)
@@ -52,11 +55,18 @@ class _ToolbarButton(QToolButton):
         super().mousePressEvent(e)
 
 
+def delay_label(seconds: int) -> str:
+    return "No delay" if seconds == 0 else f"{seconds} s delay"
+
+
 class CaptureToolbar(QFrame):
     mode_picked = Signal(str)
+    delay_picked = Signal(int)  # seconds; picking one (other than none) starts the countdown
+    pointer_toggled = Signal(bool)
     cancel_clicked = Signal()
 
-    def __init__(self, mode: str, parent=None) -> None:
+    def __init__(self, mode: str, parent=None, *, delay: int = 0, pointer: bool = False,
+                 pointer_available: bool = True) -> None:
         super().__init__(parent)
         self.setObjectName("CaptureToolbar")
         self.setAccessibleName("Capture")
@@ -79,11 +89,63 @@ class CaptureToolbar(QFrame):
             self.buttons[key] = button
             row.addWidget(button)
         row.addWidget(self._separator())
+        row.addWidget(self._delay_control())
+        self.pointer_button = self._button("select", "", "Include the mouse pointer (P)")
+        self.pointer_button.setAccessibleName("Include the mouse pointer")
+        self.pointer_button.setAccessibleDescription("Draws the pointer into the snip. Shortcut: P")
+        self.pointer_button.setCheckable(True)
+        self.pointer_button.clicked.connect(self.pointer_toggled)
+        row.addWidget(self.pointer_button)
+        row.addWidget(self._separator())
         self.cancel_button = self._button("close", "", "Cancel (Esc)")
         self.cancel_button.setAccessibleName("Cancel")
         self.cancel_button.clicked.connect(self.cancel_clicked)
         row.addWidget(self.cancel_button)
         self.set_mode(mode)
+        self.set_delay(delay)
+        self.set_pointer(pointer)
+        self.set_pointer_available(pointer_available)
+
+    def _delay_control(self) -> QToolButton:
+        self.delay_button = self._button("timer", "", "Wait before freezing the screen, to snip menus and tooltips (D)")
+        self.delay_button.setObjectName("DelayButton")
+        self.delay_button.setAccessibleName("Delay")
+        self.delay_button.setAccessibleDescription("Count down before the screen freezes. Shortcut: D")
+        self.delay_button.setCheckable(True)
+        self.delay_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.delay_button.setPopupMode(QToolButton.InstantPopup)
+        self.delay_menu = QMenu(self.delay_button)
+        self.delay_menu.setAccessibleName("Delay")
+        group = QActionGroup(self.delay_menu)
+        group.setExclusive(True)
+        self._delay_actions = {}
+        for seconds in DELAYS:
+            action = self.delay_menu.addAction("No delay" if seconds == 0 else f"{seconds} seconds")
+            action.setCheckable(True)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, s=seconds: self.delay_picked.emit(s))
+            self._delay_actions[seconds] = action
+        self.delay_button.setMenu(self.delay_menu)
+        return self.delay_button
+
+    def open_delay_menu(self) -> None:
+        """Show the Delay menu under its button (for the D key)."""
+        self.delay_menu.popup(self.delay_button.mapToGlobal(QPoint(0, self.delay_button.height())))
+
+    def set_delay(self, seconds: int) -> None:
+        """Show `seconds` as the chosen delay, without announcing it."""
+        self._delay_actions[seconds].setChecked(True)
+        self.delay_button.setText(f" {delay_label(seconds)}")
+        self.delay_button.setChecked(seconds > 0)
+
+    def set_pointer(self, on: bool) -> None:
+        self.pointer_button.setChecked(on)
+
+    def set_pointer_available(self, available: bool) -> None:
+        """No pointer image (hidden pointer, or not Windows): the toggle can't do anything."""
+        self.pointer_button.setEnabled(available)
+        self.pointer_button.setToolTip("Include the mouse pointer (P)" if available
+                                       else "Including the pointer isn't available on this PC")
 
     def _button(self, icon_name: str, text: str, tip: str) -> QToolButton:
         button = _ToolbarButton(self)
