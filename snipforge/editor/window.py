@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QStatusBar,
-    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -36,6 +35,7 @@ from .panel import PropertiesPanel
 from .share_menu import ShareController
 from .style import Style
 from .textdialog import GrabbedTextDialog
+from .tool_rail import ToolRail
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +94,8 @@ class EditorWindow(QMainWindow):
         column.addWidget(self.commands)
         middle = QHBoxLayout()
         middle.setSpacing(0)
-        middle.addWidget(self._build_tool_rail())
+        self.tool_rail = self._build_tool_rail()
+        middle.addWidget(self.tool_rail)
         middle.addWidget(self.canvas, 1)
         middle.addWidget(self.panel)
         column.addLayout(middle, 1)
@@ -137,26 +138,22 @@ class EditorWindow(QMainWindow):
         theme.on_change(self._retheme)
 
     # ------------------------------------------------------------------ layout
-    def _build_tool_rail(self) -> QToolBar:
-        rail = QToolBar("Tools")
-        rail.setObjectName("ToolRail")
-        rail.setOrientation(Qt.Vertical)
-        rail.setIconSize(QSize(20, 20))
-        rail.setMovable(False)
+    def _build_tool_rail(self) -> ToolRail:
         group = QActionGroup(self)
+        groups: list[list[tuple[str, QAction]]] = [[]]
         for spec in TOOLS:
             if spec is None:
-                rail.addSeparator()
+                groups.append([])
                 continue
             name, tip = spec
             act = QAction(tip, self)
             act.setCheckable(True)
             act.triggered.connect(lambda _=False, n=name: self._choose_tool(n))
             group.addAction(act)
-            rail.addAction(act)
+            groups[-1].append((name, act))
             self._tool_actions[name] = act
         self._tool_actions["select"].setChecked(True)
-        return rail
+        return ToolRail(groups)
 
     def _wire_commands(self) -> None:
         bar = self.commands

@@ -161,10 +161,9 @@ QWidget#CommandBar {{ background: {h.bar}; border-bottom: 1px solid {h.border}; 
 QLabel[sfRole="heading"] {{ font-size: 15px; font-weight: 600; }}
 QWidget#Divider {{ background: {h.border}; }}
 
-QToolBar#ToolRail {{
-    background: {p.surface}; border: none; border-right: 1px solid {p.border}; padding: 8px 6px; spacing: 2px; }}
-QToolBar#ToolRail QToolButton {{ border-radius: 8px; padding: 7px; }}
-QToolBar::separator {{ background: {p.border}; height: 1px; width: 1px; margin: 6px 10px; }}
+QWidget#ToolRail {{ background: {p.surface}; border: none; border-right: 1px solid {p.border}; }}
+#ToolRail QToolButton {{ border-radius: 8px; padding: 7px; }}
+QWidget#RailDivider {{ background: {p.border}; }}
 
 QScrollArea#PropertiesPanel {{ background: {p.surface}; border: none; border-left: 1px solid {p.border}; }}
 QWidget#PanelBody {{ background: {p.surface}; }}
