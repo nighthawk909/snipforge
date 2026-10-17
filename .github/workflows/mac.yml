@@ -5,8 +5,9 @@ name: macOS build
 # real start), and uploads the .dmg as the "snipforge-macos" artifact.
 #
 # Run by hand only (Actions > macOS build > Run workflow). It never runs on pull requests or pushes,
-# so it can't block the required checks. macOS runners are free for public repositories. Read-only,
-# no secrets, no signing: the .dmg is unsigned and needs "Open Anyway" on first launch.
+# so it can't block the required checks. macOS runners are free for public repositories. Read-only
+# and no secrets: the app has only a free ad-hoc signature and isn't notarized, so it needs
+# "Open Anyway" on first launch.
 on:
   workflow_dispatch:
     inputs:
@@ -15,8 +16,6 @@ on:
         type: string
         required: false
         default: ""
-  push:  # TEMPORARY while developing on this branch; removed before merging
-    branches: [feat/mac-groundwork]
 
 permissions:
   contents: read
