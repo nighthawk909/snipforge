@@ -1,8 +1,8 @@
 """The editor's tool rail: every tool always has its own button.
 
-One column when the window is tall enough, two when it isn't, so no tool ever hides behind an
-overflow arrow. The rail's minimum height is the two-column layout, so the window can't get too
-short to show them all.
+One column when the window is tall enough, and two or three when it isn't, so no tool ever hides
+behind an overflow arrow. The rail's minimum height is the three-column layout, so the window can't
+get too short to show them all.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ BORDER = 1  # the rail's right edge line (styles.py)
 SPACING = 2  # between buttons
 DIVIDER_GAP = 6  # above and below the line between groups
 DIVIDER_INSET = 10  # the line is shorter than the buttons
+MAX_COLUMNS = 3
 
 
 class ToolRail(QWidget):
@@ -24,10 +25,9 @@ class ToolRail(QWidget):
         self.setObjectName("ToolRail")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self.setAccessibleName("Tools")
         self._buttons: dict[str, QToolButton] = {}
-        self._groups: list[list[QToolButton]] = []
-        for group in groups:
-            self._groups.append([self._make_button(name, action) for name, action in group])
+        self._groups = [[self._make_button(name, action) for name, action in group] for group in groups if group]
         self._dividers = [self._make_divider() for _ in self._groups[1:]]
         self._columns = 1
 
@@ -60,9 +60,13 @@ class ToolRail(QWidget):
         """Every button is the same square, big enough for the largest one's hint."""
         return max(max(b.sizeHint().width(), b.sizeHint().height()) for b in self._buttons.values())
 
+    @staticmethod
+    def _rows(group: list[QToolButton], columns: int) -> int:
+        return -(-len(group) // columns)
+
     def _height_for(self, columns: int) -> int:
         cell = self._cell()
-        rows = [-(-len(group) // columns) for group in self._groups]
+        rows = [self._rows(group, columns) for group in self._groups]
         buttons = sum(rows) * cell + (sum(rows) - len(rows)) * SPACING
         return PAD_Y * 2 + buttons + len(self._dividers) * (DIVIDER_GAP * 2 + 1)
 
@@ -73,21 +77,25 @@ class ToolRail(QWidget):
         return QSize(self._width_for(self._columns), self._height_for(1))
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
-        return QSize(self._width_for(self._columns), self._height_for(2))
+        return QSize(self._width_for(self._columns), self._height_for(MAX_COLUMNS))
 
     def resizeEvent(self, e) -> None:  # noqa: N802 - Qt API
         super().resizeEvent(e)
-        columns = 1 if self.height() >= self._height_for(1) else 2
-        if columns != self._columns:
-            self._columns = columns
-            self.updateGeometry()  # the window gives the rail its new width
-        self._place()
+        self._relayout()
 
     def changeEvent(self, e) -> None:  # noqa: N802 - Qt API
         super().changeEvent(e)
         if e.type() == QEvent.StyleChange:  # a new theme can change the buttons' size
             self.updateGeometry()
-            self._place()
+            self._relayout()
+
+    def _relayout(self) -> None:
+        """The fewest columns that fit the rail's height."""
+        columns = next((n for n in range(1, MAX_COLUMNS) if self.height() >= self._height_for(n)), MAX_COLUMNS)
+        if columns != self._columns:
+            self._columns = columns
+            self.updateGeometry()  # the window gives the rail its new width
+        self._place()
 
     def _place(self) -> None:
         cell, columns = self._cell(), self._columns
@@ -101,5 +109,5 @@ class ToolRail(QWidget):
             for i, button in enumerate(group):
                 row, col = divmod(i, columns)
                 button.setGeometry(PAD_X + col * (cell + SPACING), y + row * (cell + SPACING), cell, cell)
-            rows = -(-len(group) // columns)
+            rows = self._rows(group, columns)
             y += rows * cell + (rows - 1) * SPACING

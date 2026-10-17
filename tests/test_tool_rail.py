@@ -42,9 +42,7 @@ def _button_rects(editor) -> dict[str, QRect]:
     return rects
 
 
-@pytest.mark.parametrize("size", [(1024, 600), (1280, 640), (1100, 560), (1100, 700), (1440, 880)])
-def test_every_tool_has_a_whole_visible_button(make_editor, size):
-    editor = make_editor(*size)
+def _assert_every_button_whole_and_apart(editor):
     rail_rect = QRect(editor.tool_rail.mapTo(editor, editor.tool_rail.rect().topLeft()), editor.tool_rail.size())
     rects = _button_rects(editor)
     for name, rect in rects.items():
@@ -58,26 +56,57 @@ def test_every_tool_has_a_whole_visible_button(make_editor, size):
             assert not rects[a].intersects(rects[b]), (a, b)
 
 
-def test_one_column_when_there_is_room_and_two_when_short(make_editor):
-    tall = make_editor(1440, 880)
-    assert tall.tool_rail.columns() == 1
-    assert len({r.x() for r in _button_rects(tall).values()}) == 1
-    short = make_editor(1024, 600)
-    assert short.tool_rail.columns() == 2
-    assert len({r.x() for r in _button_rects(short).values()}) == 2
-    assert short.tool_rail.width() > tall.tool_rail.width()
-    short.resize(1440, 880)  # making the window taller goes back to one column
+@pytest.mark.parametrize("size", [(1024, 600), (1280, 640), (1100, 560), (1100, 700), (1024, 470), (1440, 880)])
+def test_every_tool_has_a_whole_visible_button(make_editor, size):
+    editor = make_editor(*size)
+    assert editor.height() == size[1]
+    _assert_every_button_whole_and_apart(editor)
+
+
+def _resize(editor, width: int, height: int) -> None:
+    editor.resize(width, height)
     QApplication.processEvents()
-    assert short.tool_rail.columns() == 1
+
+
+def test_the_fewest_columns_that_fit(make_editor):
+    editor = make_editor(1440, 880)
+    rail = editor.tool_rail
+    widths = {}
+    for height, columns in ((880, 1), (600, 2), (470, 3), (600, 2), (880, 1)):  # shrinking, then growing
+        _resize(editor, 1440, height)
+        assert rail.columns() == columns, height
+        assert len({r.x() for r in _button_rects(editor).values()}) == columns
+        assert rail.width() == rail.sizeHint().width()
+        widths[columns] = rail.width()
+        _assert_every_button_whole_and_apart(editor)
+    assert widths[1] < widths[2] < widths[3]
+
+
+def test_one_column_from_exactly_its_height(make_editor):
+    editor = make_editor(1440, 880)
+    rail = editor.tool_rail
+    one_column = rail.sizeHint().height()
+    _resize(editor, 1440, editor.height() - (rail.height() - one_column))
+    assert rail.height() == one_column and rail.columns() == 1
+    _resize(editor, 1440, editor.height() - 1)
+    assert rail.columns() == 2
 
 
 def test_window_never_gets_too_short_to_show_every_tool(make_editor):
     editor = make_editor(1024, 300)
-    assert editor.height() > 300
-    rail = editor.tool_rail
-    for name in TOOL_NAMES:
-        button = rail.button(name)
-        assert rail.rect().contains(QRect(button.pos(), button.size())), name
+    assert editor.height() >= editor.minimumSizeHint().height() > 300
+    assert editor.minimumSizeHint().height() <= 470  # fits a 1080p screen at 200% scaling
+    assert editor.tool_rail.columns() == 3
+    _assert_every_button_whole_and_apart(editor)
+
+
+def test_a_style_with_bigger_buttons_reflows_the_rail(make_editor, qapp):
+    editor = make_editor(1024, 600)
+    qapp.setStyleSheet(qapp.styleSheet() + "#ToolRail QToolButton { padding: 12px; }")
+    for _ in range(3):
+        QApplication.processEvents()
+    assert editor.tool_rail.button("crop").width() >= 46
+    _assert_every_button_whole_and_apart(editor)
 
 
 def test_tool_buttons_pick_the_tool_and_follow_the_canvas(make_editor):
@@ -88,4 +117,16 @@ def test_tool_buttons_pick_the_tool_and_follow_the_canvas(make_editor):
     editor.canvas.set_tool("spotlight")
     assert editor.tool_rail.button("spotlight").isChecked() and not crop.isChecked()
     assert editor.tool_rail.button("spotlight").toolTip() == "Spotlight (S)"
-    assert editor.tool_rail.button("spotlight").accessibleName()
+    assert editor.tool_rail.button("spotlight").accessibleName() == "Spotlight (S)"
+    assert editor.tool_rail.accessibleName() == "Tools"
+
+
+def test_clicking_a_tool_leaves_the_keyboard_on_the_canvas(make_editor):
+    editor = make_editor(1024, 600)
+    editor.activateWindow()
+    editor.canvas.setFocus()
+    blur = editor.tool_rail.button("blur")
+    QTest.mouseClick(blur, Qt.LeftButton, Qt.NoModifier, blur.rect().center())
+    QApplication.processEvents()
+    assert editor.canvas.tool == "blur"
+    assert QApplication.focusWidget() is editor.canvas

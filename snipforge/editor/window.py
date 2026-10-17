@@ -94,7 +94,8 @@ class EditorWindow(QMainWindow):
         column.addWidget(self.commands)
         middle = QHBoxLayout()
         middle.setSpacing(0)
-        middle.addWidget(self._build_tool_rail())
+        self.tool_rail = self._build_tool_rail()
+        middle.addWidget(self.tool_rail)
         middle.addWidget(self.canvas, 1)
         middle.addWidget(self.panel)
         column.addLayout(middle, 1)
@@ -152,8 +153,7 @@ class EditorWindow(QMainWindow):
             groups[-1].append((name, act))
             self._tool_actions[name] = act
         self._tool_actions["select"].setChecked(True)
-        self.tool_rail = ToolRail(groups)
-        return self.tool_rail
+        return ToolRail(groups)
 
     def _wire_commands(self) -> None:
         bar = self.commands
