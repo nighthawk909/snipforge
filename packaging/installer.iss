@@ -11,6 +11,10 @@
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
+; Windows file versions must be four numbers, so previews (0.6.0-preview.1) pass 0.6.0.1.
+#ifndef FileVersion
+  #define FileVersion "0.0.0.0"
+#endif
 #ifndef SourceDir
   #define SourceDir "..\dist\SnipForge"
 #endif
@@ -41,7 +45,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=force
 RestartApplications=no
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#FileVersion}
 VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} installer
 

@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Everything is in this file (plus the screenshot next to it): no scripts, fonts, trackers or
+     analytics, so it works the same on GitHub Pages, on SharePoint or opened as a local file. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="description" content="SnipForge is a free, open-source screenshot and markup tool for Windows. Press Win+Shift+S, mark up the snip and share it.">
+<title>Download SnipForge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='14' fill='%232563eb'/%3E%3Cpath d='M28 16H16v12M36 16h12v12M28 48H16V36M36 48h12V36' fill='none' stroke='%23fff' stroke-width='5'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --text: #14171f;
+    --muted: #535b6b;
+    --border: #dfe3ea;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-text: #ffffff;
+    --accent-soft: #e8efff;
+    --note-bg: #fff8e6;
+    --note-border: #f1d58a;
+    --kbd-bg: #eef1f5;
+    --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 8%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1218;
+      --surface: #171b23;
+      --text: #e9ecf2;
+      --muted: #a3abba;
+      --border: #2a303c;
+      --accent: #4f86f7;
+      --accent-hover: #6b9bff;
+      --accent-text: #08101f;
+      --accent-soft: #1a2640;
+      --note-bg: #2a2412;
+      --note-border: #5c4b1d;
+      --kbd-bg: #232936;
+      --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 35%);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:hover { color: var(--accent-hover); }
+  a:focus-visible, .download:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+  header.top { padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 18px; color: var(--text); text-decoration: none; }
+  .brand svg { width: 32px; height: 32px; flex: none; }
+
+  .hero { display: grid; gap: 32px; align-items: center; padding: 24px 16px 40px; }
+  @media (min-width: 860px) { .hero { grid-template-columns: 1fr 1.15fr; padding-top: 40px; } }
+  h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 14px; }
+  .lede { font-size: 18px; color: var(--muted); margin: 0 0 26px; max-width: 34em; }
+  .download {
+    display: inline-flex; align-items: center; gap: 14px;
+    padding: 16px 28px; border-radius: 12px;
+    background: var(--accent); color: var(--accent-text);
+    font-size: 20px; font-weight: 600; text-decoration: none;
+    box-shadow: var(--shadow);
+  }
+  .download:hover { background: var(--accent-hover); color: var(--accent-text); }
+  .download svg { width: 24px; height: 24px; flex: none; }
+  .download small { display: block; font-size: 13px; font-weight: 400; opacity: 0.85; }
+  .meta { margin: 14px 0 0; color: var(--muted); font-size: 14px; }
+  .meta a { white-space: nowrap; }
+  .shot { margin: 0; }
+  .shot img { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow); background: var(--surface); }
+
+  section { padding: 36px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: 24px; letter-spacing: -0.01em; margin: 0 0 18px; }
+  h3 { font-size: 17px; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+
+  ol.steps { list-style: none; counter-reset: step; padding: 0; margin: 0; display: grid; gap: 14px; }
+  ol.steps > li { counter-increment: step; position: relative; padding: 16px 18px 16px 62px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 18px; top: 16px;
+    width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent); font-weight: 700;
+  }
+  ol.steps p:last-child { margin-bottom: 0; }
+
+  .smartscreen { display: grid; gap: 16px; align-items: start; margin-top: 10px; }
+  @media (min-width: 720px) { .smartscreen { grid-template-columns: 300px 1fr; } }
+  .dialog {
+    background: #0b5cad; color: #fff; border-radius: 6px; padding: 16px 16px 12px;
+    font-size: 13px; line-height: 1.45; box-shadow: var(--shadow);
+  }
+  .dialog strong { display: block; font-size: 19px; font-weight: 400; margin-bottom: 8px; }
+  .dialog .more { text-decoration: underline; margin: 6px 0 14px; display: inline-block; }
+  .dialog .buttons { display: flex; justify-content: flex-end; gap: 8px; }
+  .dialog .buttons span { border: 1px solid #fff; padding: 4px 14px; }
+  .dialog .buttons .hl { background: #fff; color: #0b5cad; font-weight: 600; outline: 2px dashed #ffd84d; outline-offset: 2px; }
+  .note { background: var(--note-bg); border: 1px solid var(--note-border); border-radius: 10px; padding: 12px 14px; font-size: 15px; }
+
+  kbd {
+    font: 600 13px/1 "Segoe UI", system-ui, sans-serif; background: var(--kbd-bg); border: 1px solid var(--border);
+    border-bottom-width: 2px; border-radius: 5px; padding: 3px 6px; white-space: nowrap;
+  }
+
+  .features { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+  .feature p { color: var(--muted); margin: 0; font-size: 15px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; vertical-align: top; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child th, tr:last-child td { border-bottom: 0; }
+  th { width: 34%; font-weight: 600; }
+  td { color: var(--muted); }
+  code { font: 14px/1.4 Consolas, ui-monospace, monospace; overflow-wrap: anywhere; }
+
+  footer { padding: 28px 0 44px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+  footer ul { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 8px 20px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="https://github.com/nighthawk909/snipforge">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="14" fill="#2563eb"/><path d="M28 16H16v12M36 16h12v12M28 48H16V36M36 48h12V36" fill="none" stroke="#fff" stroke-width="5"/></svg>
+      SnipForge
+    </a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <h1>Snip, mark up and share in seconds.</h1>
+      <p class="lede">A free, open-source screenshot tool for Windows. Press <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, drag over anything, and the snip opens in an editor with arrows, callouts, blur and more.</p>
+      <a class="download" id="download" href="https://github.com/nighthawk909/snipforge/releases/latest/download/SnipForge-setup.exe">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 4.6 10 3.6v7.6H3zm8-1.1 10-1.5v9.2H11zM3 12.3h7v7.6l-7-1zm8 0h10v9.2l-10-1.5z"/></svg>
+        <span>Download for Windows<small>Latest version · free · about 30 MB</small></span>
+      </a>
+      <p class="meta">Windows 10 and 11, 64-bit · No admin rights needed ·
+        <a href="https://github.com/nighthawk909/snipforge/releases/latest">Release notes</a> ·
+        <a href="https://github.com/nighthawk909/snipforge/releases">All downloads</a></p>
+    </div>
+    <figure class="shot">
+      <img src="editor-preview.png" width="1240" height="760" alt="The SnipForge editor with a screenshot marked up with an arrow, a callout and step numbers">
+    </figure>
+  </div>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install in a minute</h2>
+      <ol class="steps">
+        <li>
+          <h3>Open <strong>SnipForge-setup.exe</strong> from your Downloads</h3>
+          <p>If your browser says the file isn't commonly downloaded, choose <strong>Keep</strong> (in Edge: <strong>…</strong> › <strong>Keep</strong> › <strong>Show more</strong> › <strong>Keep anyway</strong>).</p>
+        </li>
+        <li id="smartscreen">
+          <h3>If you see “Windows protected your PC”, click <strong>More info</strong>, then <strong>Run anyway</strong></h3>
+          <div class="smartscreen">
+            <div class="dialog" role="img" aria-label="Windows SmartScreen dialog: click More info, then Run anyway">
+              <strong>Windows protected your PC</strong>
+              Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.
+              <br><span class="more">More info</span>
+              <div class="buttons"><span class="hl">Run anyway</span><span>Don't run</span></div>
+            </div>
+            <div>
+              <p>This warning appears because the installer isn't code-signed yet, so SmartScreen doesn't recognize it. It isn't a sign that anything is wrong with the file. After <strong>More info</strong>, check that the app is <strong>SnipForge-setup.exe</strong>, then choose <strong>Run anyway</strong>.</p>
+              <p>Want to double-check the download first? Every release lists SHA-256 checksums in <a href="https://github.com/nighthawk909/snipforge/releases/latest">SHA256SUMS.txt</a>; compare with <kbd>Get-FileHash SnipForge-setup.exe</kbd> in PowerShell.</p>
+              <p class="note"><strong>No “Run anyway” button?</strong> Your organization blocks apps that aren't recognized yet. Ask your IT team; they may offer SnipForge in Software Center or from a company file share.</p>
+            </div>
+          </div>
+        </li>
+        <li>
+          <h3>Click through the installer</h3>
+          <p>It installs just for you, with no admin rights, and adds Start menu and desktop shortcuts. Tick <strong>Start SnipForge when I sign in</strong> so <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> always works.</p>
+        </li>
+        <li>
+          <h3>Press <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> or <kbd>Print Screen</kbd> to snip</h3>
+          <p>To pin SnipForge to the taskbar, open Start, right-click <strong>SnipForge</strong> and choose <strong>Pin to taskbar</strong>. SnipForge keeps itself up to date and asks before installing a new version.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>What it does</h2>
+      <div class="features">
+        <div class="feature"><h3>Snip anything</h3><p>Click a window, drag a region or press Enter for the whole screen. A magnifier shows exact pixels, and the snip is copied to the clipboard.</p></div>
+        <div class="feature"><h3>Mark it up</h3><p>Arrows, shapes, text, callouts, stamps, step numbers, highlighter, blur, spotlight and crop. Everything stays editable.</p></div>
+        <div class="feature"><h3>Share it</h3><p>Start an Outlook email with the snip inline, open a Teams chat, get a OneDrive link, or drag it straight into an app.</p></div>
+        <div class="feature"><h3>Grab text</h3><p>Copy the text out of any snip with offline OCR built into Windows.</p></div>
+        <div class="feature"><h3>Redact in one click</h3><p>Finds email addresses and phone and card numbers in a snip and blurs them.</p></div>
+        <div class="feature"><h3>Private by design</h3><p>No accounts, telemetry or analytics. Your snips stay on your PC. Free and open source under the MIT license.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="requirements">
+    <div class="wrap">
+      <h2>System requirements</h2>
+      <table>
+        <tr><th scope="row">Windows</th><td>Windows 10 or Windows 11, 64-bit</td></tr>
+        <tr><th scope="row">Permissions</th><td>No admin rights: installs to your user profile (<code>%LOCALAPPDATA%\Programs\SnipForge</code>)</td></tr>
+        <tr><th scope="row">Disk space</th><td>About 120 MB</td></tr>
+        <tr><th scope="row">Network</th><td>Only for update checks and the sharing you choose; snipping and editing work offline</td></tr>
+        <tr><th scope="row">Optional</th><td>Classic Outlook for email sharing, Microsoft Teams for chats, OneDrive for share links</td></tr>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <ul>
+      <li><a href="https://github.com/nighthawk909/snipforge/releases/latest">Release notes</a></li>
+      <li><a href="https://github.com/nighthawk909/snipforge/releases">All downloads and checksums</a></li>
+      <li><a href="https://github.com/nighthawk909/snipforge/blob/main/docs/DISTRIBUTION.md">For IT: deployment options</a></li>
+      <li><a href="https://github.com/nighthawk909/snipforge/blob/main/docs/IT-REVIEW.md">Security and IT review</a></li>
+      <li><a href="https://github.com/nighthawk909/snipforge">Source code</a></li>
+      <li><a href="https://github.com/nighthawk909/snipforge/issues">Report a problem</a></li>
+    </ul>
+    <p>SnipForge is free and open source (MIT). This page has no cookies, trackers or analytics.</p>
+  </div>
+</footer>
+</body>
+</html>
