@@ -1,22 +1,26 @@
 """Freeze-frame capture overlay.
 
-One borderless overlay per monitor shows a frozen screenshot. Hovering
-highlights the window under the cursor (click to take it), dragging selects a
-region, Enter takes the whole monitor. A magnifier shows exact pixels.
+One borderless overlay per monitor shows a frozen screenshot, with the capture toolbar on the
+monitor the pointer is on. The toolbar's mode decides what a click or drag takes: Area (drag an
+area, or click a window), Window (click a window) or Full screen (click a monitor). Enter always
+takes the whole monitor. A magnifier shows exact pixels.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import replace
 
-from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from . import prefs, theme
+from .capture_toolbar import MODES, CaptureToolbar
 
 DIM = QColor(0, 0, 0, 120)
 DRAG_THRESHOLD = 4
+TOOLBAR_TOP = 18
+HINT_BOTTOM = 40  # gap between the hint and the bottom of the monitor
 SOURCE_OVERLAP = 0.9  # share of a snip that must lie inside one window to credit that window
 PRIVATE_MARKERS = ("inprivate", "incognito", "private browsing")
 
@@ -37,9 +41,12 @@ def _span(a: QPoint, b: QPoint) -> QRect:
 class _ScreenOverlay(QWidget):
     selected = Signal(QImage)
     cancelled = Signal()
+    mode_changed = Signal(str)  # the user picked another mode here (toolbar or letter key)
 
-    def __init__(self, screen, pixmap: QPixmap, window_rects: list[QRect], sources: list | None = None) -> None:
-        """`sources` (optional) describes each of `window_rects`: a winrects.WindowInfo, same order."""
+    def __init__(self, screen, pixmap: QPixmap, window_rects: list[QRect], sources: list | None = None,
+                 *, mode: str = "area", toolbar: bool = False) -> None:
+        """`sources` (optional) describes each of `window_rects`: a winrects.WindowInfo, same order.
+        `toolbar`: show the capture toolbar on this monitor (the one the pointer is on)."""
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self._pixmap = pixmap
         self._image = pixmap.toImage()
@@ -56,9 +63,58 @@ class _ScreenOverlay(QWidget):
         self._dragging = False
         self._cursor: QPoint | None = None
         self._hover: QRect | None = None
+        self._mode = mode if mode in MODES else "area"
+        self.toolbar: CaptureToolbar | None = None
+        if toolbar:
+            self.toolbar = CaptureToolbar(self._mode, self)
+            self.toolbar.mode_picked.connect(self._pick_mode)
+            self.toolbar.cancel_clicked.connect(self.cancelled)
+            self.toolbar.installEventFilter(self)
+            self._place_toolbar()
         self.setCursor(Qt.CrossCursor)
         self.setMouseTracking(True)
         self.setAttribute(Qt.WA_DeleteOnClose)
+
+    # ------------------------------------------------------------------ mode and toolbar
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def set_mode(self, mode: str) -> None:
+        """Switch modes without announcing it (the session uses this to keep monitors in step)."""
+        if mode not in MODES:
+            raise ValueError(f"unknown capture mode {mode!r}")
+        self._mode = mode
+        self._hover = self._target_at(self._cursor) if self._cursor is not None else None
+        if self.toolbar is not None:
+            self.toolbar.set_mode(mode)
+        self.update()
+
+    def _pick_mode(self, mode: str) -> None:
+        if mode != self._mode:
+            self.set_mode(mode)
+            self.mode_changed.emit(mode)
+
+    def hint(self) -> str:
+        return MODES[self._mode].hint
+
+    def _place_toolbar(self) -> None:
+        if self.toolbar is None:
+            return
+        self.toolbar.adjustSize()
+        self.toolbar.move((self.width() - self.toolbar.width()) // 2, TOOLBAR_TOP)
+
+    def resizeEvent(self, e) -> None:  # noqa: N802 - Qt API
+        self._place_toolbar()
+        super().resizeEvent(e)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API
+        if watched is self.toolbar and event.type() == QEvent.Enter:
+            self._cursor = None  # no magnifier or window highlight behind the toolbar
+            if self._press is None:
+                self._hover = None
+            self.update()
+        return False
 
     def _map(self, origin: QPoint, r: QRect) -> QRect | None:
         """A window frame in physical screen pixels -> this overlay's coordinates (None if off-screen)."""
@@ -93,8 +149,13 @@ class _ScreenOverlay(QWidget):
             return _span(self._press, self._current).intersected(self.rect())
         return self._hover
 
-    def _window_at(self, pos: QPoint) -> QRect | None:
-        return next((r for r in self._windows if r.contains(pos)), None)
+    def _target_at(self, pos: QPoint) -> QRect | None:
+        """What a click at `pos` takes in the current mode."""
+        if self._mode == "screen":
+            return self.rect()
+        # The last entry is the whole monitor, offered when Area mode hovers the desktop.
+        windows = self._windows if self._mode == "area" else self._windows[:-1]
+        return next((r for r in windows if r.contains(pos)), None)
 
     def _to_physical(self, r: QRect) -> QRect:
         return QRect(round(r.x() * self._dpr), round(r.y() * self._dpr),
@@ -117,7 +178,7 @@ class _ScreenOverlay(QWidget):
             p.drawRect(sel.adjusted(0, 0, -1, -1))
             self._paint_size_label(p, sel)
         if not self._dragging and self._press is None:
-            self._paint_hint(p)
+            self._paint_hint(p, self.hint())
         if self._cursor is not None:
             if self._magnifier:
                 self._paint_magnifier(p, self._cursor)
@@ -131,11 +192,10 @@ class _ScreenOverlay(QWidget):
             QRect(sel.right() + 1, sel.top(), r.right() - sel.right(), sel.height()),
         ]
 
-    def _paint_hint(self, p: QPainter) -> None:
-        text = "Click a window  •  drag a region  •  Enter for full screen  •  Esc to cancel"
+    def _paint_hint(self, p: QPainter, text: str) -> None:
         p.setFont(QFont("Segoe UI", 10))
         w = p.fontMetrics().horizontalAdvance(text) + 28
-        box = QRectF((self.width() - w) / 2, 18, w, 32)
+        box = QRectF((self.width() - w) / 2, self.height() - HINT_BOTTOM - 32, w, 32)
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(20, 20, 20, 225))
         p.drawRoundedRect(box, 8, 8)
@@ -196,10 +256,12 @@ class _ScreenOverlay(QWidget):
         self._cursor = pos
         if self._press is not None:
             self._current = pos
-            if (pos - self._press).manhattanLength() >= DRAG_THRESHOLD:
+            if self._mode == "area" and (pos - self._press).manhattanLength() >= DRAG_THRESHOLD:
                 self._dragging = True
+                if self.toolbar is not None:
+                    self.toolbar.hide()  # out of the way of the area being chosen
         else:
-            self._hover = self._window_at(pos)
+            self._hover = self._target_at(pos)
         self.update()
 
     def leaveEvent(self, _e) -> None:
@@ -212,9 +274,11 @@ class _ScreenOverlay(QWidget):
         if e.button() != Qt.LeftButton or self._press is None:
             return
         sel = _span(self._press, e.position().toPoint()).intersected(self.rect()) \
-            if self._dragging else self._window_at(self._press)
+            if self._dragging else self._target_at(self._press)
         self._press = self._current = None
         self._dragging = False
+        if self.toolbar is not None:
+            self.toolbar.show()
         if sel is None or sel.width() < DRAG_THRESHOLD or sel.height() < DRAG_THRESHOLD:
             self.update()
             return
@@ -225,6 +289,11 @@ class _ScreenOverlay(QWidget):
             self.cancelled.emit()
         elif e.key() in (Qt.Key_Return, Qt.Key_Enter):
             self._emit(self.rect())
+        elif e.modifiers() in (Qt.NoModifier, Qt.ShiftModifier) and (
+                mode := next((k for k, spec in MODES.items() if e.key() == ord(spec.key)), None)):
+            self._pick_mode(mode)
+        else:
+            super().keyPressEvent(e)
 
     def _emit(self, sel: QRect) -> None:
         image = self._image.copy(self._to_physical(sel))
@@ -239,6 +308,7 @@ class CaptureSession:
     def __init__(self, on_done) -> None:
         self._on_done = on_done
         self._overlays: list[_ScreenOverlay] = []
+        self._mode = "area"
         self._finished = False
         self.source = None  # the window the snip came from (winrects.WindowInfo), when known
 
@@ -259,18 +329,33 @@ class CaptureSession:
         except OSError:
             infos = []
         windows = [info.rect for info in infos]
+        self._mode = prefs.capture_mode()
+        # The toolbar and the keyboard go to the monitor the pointer is on (the main one if the
+        # pointer is somewhere Windows doesn't report, e.g. while a remote session reconnects).
+        active = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        focus = None
         for screen in QGuiApplication.screens():
-            overlay = _ScreenOverlay(screen, screen.grabWindow(0), windows, infos)
+            overlay = _ScreenOverlay(screen, screen.grabWindow(0), windows, infos,
+                                     mode=self._mode, toolbar=screen is active)
             overlay.selected.connect(lambda image, o=overlay: self._finish(image, o.last_source))
             overlay.cancelled.connect(lambda: self._finish(None))
+            overlay.mode_changed.connect(self._set_mode)
             self._overlays.append(overlay)
-        active = QGuiApplication.screenAt(QCursor.pos())
+            if screen is active:
+                focus = overlay
         for overlay in self._overlays:
             overlay.showFullScreen()
             overlay.raise_()
-            if overlay.screen() is active:
-                overlay.activateWindow()
-                overlay.setFocus()
+        if focus is not None:
+            focus.activateWindow()
+            focus.setFocus()
+
+    def _set_mode(self, mode: str) -> None:
+        """A mode picked on one monitor applies to all of them, and to the next snip."""
+        self._mode = mode
+        for overlay in self._overlays:
+            overlay.set_mode(mode)
+        prefs.set_capture_mode(mode)
 
     def _finish(self, image: QImage | None, source=None) -> None:
         if self._finished:
