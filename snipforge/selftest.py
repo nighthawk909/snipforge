@@ -198,6 +198,22 @@ def _share() -> str:
     return f"Windows share command offered: {share.has_shell_verb(path, share.WINDOWS_SHARE_VERB)}"
 
 
+def _video() -> str:
+    """Screen recording's encoder made it into the build: Qt Multimedia and its FFmpeg encode a second
+    of frames and sound the way recordings are (H.264 + AAC in MP4), and FFmpeg reads the file back."""
+    from .video import clip, ffmpeg
+
+    folder = Path(tempfile.mkdtemp(prefix="snipforge-selftest-"))
+    info = ffmpeg.probe(clip.make_test_clip(folder / "selftest.mp4", seconds=1.0))
+    video, audio = info.first("video"), info.first("audio")
+    codecs = (video.codec if video else "no video", audio.codec if audio else "no sound")
+    if codecs != ("h264", "aac"):
+        raise RuntimeError(f"recorded {' + '.join(codecs)}, not h264 + aac")
+    if not 0.9 <= (info.duration or 0) <= 1.1:
+        raise RuntimeError(f"a 1 s clip reads back as {info.duration} s")
+    return f"{info.duration:.2f} s clip: h264 {video.width}x{video.height} + aac {audio.sample_rate} Hz"
+
+
 def run(report_path: str) -> int:
     windows = sys.platform == "win32"
     results: dict = {}
@@ -210,6 +226,7 @@ def run(report_path: str) -> int:
     _check(results, "windows", _windows, required=False)
     _check(results, "hotkey", _hotkey if windows else _not_on_this_platform, required=windows)
     _check(results, "share", _share, required=False)
+    _check(results, "video", _video, required=windows)  # on a Mac too, once a Mac has confirmed it
     passed = all(r["ok"] for r in results.values() if r["required"])
     report = {"version": __version__, "platform": sys.platform, "passed": passed, "checks": results}
     try:

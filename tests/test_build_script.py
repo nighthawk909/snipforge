@@ -88,3 +88,13 @@ def test_installer_links_to_the_repository_the_app_names(tmp_path, monkeypatch):
     build.build_installer(tmp_path / "SnipForge", "0.6.0")
 
     assert f"/DRepoUrl={project.REPO_URL}" in commands[0]
+
+
+def test_the_installer_size_is_reported_and_kept_within_its_budget(tmp_path, capsys):
+    installer = tmp_path / "SnipForge-1.0.0-setup.exe"
+    installer.write_bytes(b"x" * 2_500_000)
+
+    assert build.check_size_budget(installer, budget_mb=3) == pytest.approx(2.5)
+    assert "2.5 MB" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="over its 2 MB budget"):
+        build.check_size_budget(installer, budget_mb=2)

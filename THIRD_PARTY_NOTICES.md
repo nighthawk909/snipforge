@@ -7,8 +7,9 @@ below, each under its own license. License texts are in the `licenses` folder ne
 | Component | Version | Used for | License |
 |---|---|---|---|
 | [Python](https://www.python.org/) runtime | 3.14 | runs the app | PSF License 2.0 |
-| [Qt](https://www.qt.io/) libraries (Qt6Core, Qt6Gui, Qt6Widgets, Qt6Svg, Qt6Network and their plugins) | 6.12.0 | user interface | LGPL-3.0 |
-| [PySide6 / Shiboken6](https://pypi.org/project/PySide6-Essentials/6.12.0/) | 6.12.0 | Python bindings for Qt | LGPL-3.0 |
+| [Qt](https://www.qt.io/) libraries (Qt6Core, Qt6Gui, Qt6Widgets, Qt6Svg, Qt6Network, Qt6Multimedia and their plugins) | 6.12.0 | user interface; video encoding and playback | LGPL-3.0 |
+| [PySide6 / Shiboken6](https://pypi.org/project/PySide6-Essentials/6.12.0/) ([PySide6-Essentials](https://pypi.org/project/PySide6-Essentials/6.12.0/), [PySide6-Addons](https://pypi.org/project/PySide6-Addons/6.12.0/)) | 6.12.0 | Python bindings for Qt | LGPL-3.0 |
+| [FFmpeg](https://ffmpeg.org/) libraries (avcodec, avformat, avutil, swscale, swresample), as built by the Qt Project for Qt Multimedia | 9.0.1 | reading and writing video files | LGPL-2.1-or-later (`licenses/LGPL-2.1.txt`) |
 | [pywin32](https://github.com/mhammond/pywin32) | 312 | Outlook draft, Explorer share commands | PSF License 2.0 |
 | [pywinrt](https://github.com/pywinrt/pywinrt) (`winrt-*` packages) | 3.2.1 | Windows built-in text recognition (OCR) | MIT |
 | [Lucide](https://lucide.dev/) icons (path data embedded in `snipforge/icons.py`) | 1.49.0 | toolbar and menu icons | ISC (`licenses/Lucide-ISC.txt`) |
@@ -25,6 +26,25 @@ with your own compatible builds of the same versions. Corresponding source code:
   <https://code.qt.io/cgit/pyside/pyside-setup.git/tag/?h=v6.12.0>
 
 Full texts: `licenses/LGPL-3.0.txt` and `licenses/GPL-3.0.txt` (the LGPL builds on the GPL).
+
+## LGPL-2.1 (FFmpeg)
+
+The FFmpeg libraries come with Qt Multimedia (the PySide6-Addons package) and are used
+**unmodified** and **dynamically linked**: they ship as separate files in `_internal\PySide6`
+(`avcodec-63.dll`, `avformat-63.dll`, `avutil-61.dll`, `swscale-10.dll`, `swresample-7.dll`), which
+you may replace with your own compatible builds of the same version. They are the Qt Project's build
+of FFmpeg 9.0.1 under the LGPL, with no GPL or non-free parts (the libraries report "LGPL version 2.1
+or later"), configured with `--disable-programs --disable-doc --disable-debug --enable-network
+--disable-lzma --enable-pic --disable-vulkan --disable-v4l2-m2m --disable-decoder=truemotion1
+--disable-avdevice --disable-avfilter --enable-zlib --toolchain=msvc --enable-shared --disable-static`
+and built with zlib 1.3.1 (zlib license). SnipForge only ever opens local files with them.
+Corresponding source code:
+
+- FFmpeg 9.0.1: <https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz> (git tag `n9.0.1` at
+  <https://git.ffmpeg.org/ffmpeg.git>)
+
+Full text: `licenses/LGPL-2.1.txt`. H.264 video is encoded by Windows' own Media Foundation encoder,
+which is part of Windows, not of these libraries.
 
 ## Bill of materials
 

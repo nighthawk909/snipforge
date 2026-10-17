@@ -16,7 +16,7 @@ EXCLUDES = [
     "tkinter", "unittest", "pydoc_data",
     "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
     "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.QtQuick", "PySide6.QtQml",
-    "PySide6.QtQuick3D", "PySide6.QtMultimedia", "PySide6.QtPdf", "PySide6.QtCharts",
+    "PySide6.QtQuick3D", "PySide6.QtMultimediaWidgets", "PySide6.QtPdf", "PySide6.QtCharts",
     "PySide6.QtDataVisualization", "PySide6.QtBluetooth", "PySide6.QtPositioning",
     "PySide6.QtSql", "PySide6.QtTest", "PySide6.QtDesigner", "PySide6.QtOpenGL",
 ]
@@ -25,16 +25,28 @@ a = Analysis(
     [str(ROOT / "packaging" / "snipforge_main.py")],
     pathex=[str(ROOT)],
     datas=[(str(ROOT / "assets" / "snipforge.ico"), "assets")],  # license files are copied by scripts/build.py
-    hiddenimports=[] if MAC else [
+    # Qt Multimedia is imported only when needed (snipforge/video), so it's named here.
+    hiddenimports=["PySide6.QtMultimedia"] + ([] if MAC else [
         "winrt.windows.media.ocr", "winrt.windows.graphics.imaging", "winrt.windows.storage.streams",
         "winrt.windows.foundation", "winrt.windows.foundation.collections", "winrt.windows.globalization",
         "win32com.shell", "win32com.client",
-    ],
+    ]),
     excludes=EXCLUDES,
     noarchive=False,
 )
 # Software OpenGL fallback (~20 MB) isn't needed for a widgets app.
 a.binaries = [b for b in a.binaries if not b[0].lower().endswith("opengl32sw.dll")]
+
+
+def _media_backend_we_use(name):
+    """Recording uses Qt Multimedia's FFmpeg back-end only (docs/VIDEO-PLAN.md); its other back-end
+    (Media Foundation on Windows, AVFoundation on macOS) stays out."""
+    name = name.replace("\\", "/").lower()
+    return "/plugins/multimedia/" not in name or "ffmpegmediaplugin" in name
+
+
+a.binaries = [b for b in a.binaries if _media_backend_we_use(b[0])]
+a.datas = [d for d in a.datas if not os.path.basename(d[0]).lower().startswith("qtmultimedia_")]  # translations
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [],

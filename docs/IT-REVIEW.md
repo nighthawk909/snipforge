@@ -45,6 +45,12 @@ as keylogger-like; this is a false positive, and the ~150-line source shows the 
 
 **Startup entry** (optional). Written to the `Run` key so the hotkey works after sign-in.
 
+**FFmpeg libraries** (`avcodec-63.dll`, `avformat-63.dll` and friends in `_internal\PySide6`). They
+come with Qt Multimedia, the part of Qt that encodes video for the coming screen recording feature
+(see `THIRD_PARTY_NOTICES.md`). They contain code for network protocols, but SnipForge only ever
+gives them local file paths, with FFmpeg's protocol whitelist set to `file`, so they can't go
+online. Today they're only used by the packaged self-test.
+
 **Explorer right-click commands** (`snipforge/share.py`). The Share menu invokes the same
 right-click commands a user would click by hand (OneDrive "Copy link"/"Share", Windows "Share") on
 the exported image.
