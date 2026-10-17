@@ -276,6 +276,7 @@ def fetch_json(url: str, api_root: str) -> dict:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:  # noqa: S310
             return json.load(response)
     except urllib.error.HTTPError as e:
+        e.close()  # it carries the response; don't leave it open
         private = ("If the repository is private, download the release with `gh release download <tag> "
                    "--dir <folder>` and publish it with --dist <folder>.")
         if e.code == 404:

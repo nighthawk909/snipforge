@@ -4,7 +4,7 @@ import tempfile
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QEvent, QSettings
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -29,6 +29,20 @@ def _isolated_settings():
     assert os.path.normcase(os.path.normpath(probe.fileName())).startswith(
         os.path.normcase(os.path.normpath(_SETTINGS_DIR))), "tests must never touch real settings"
     yield
+
+
+@pytest.fixture(autouse=True)
+def _delete_leftover_windows():
+    """Windows a test opened are deleted when it ends, not just closed: left alive, every later
+    app-wide restyle (theme tests, the tool rail) re-polishes thousands of stale widgets."""
+    yield
+    if QApplication.instance() is None:
+        return
+    for window in QApplication.topLevelWidgets():
+        if window.isVisible():
+            window.close()  # once: the test may have closed it already
+        window.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 @pytest.fixture
