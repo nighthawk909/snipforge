@@ -1,4 +1,5 @@
-"""Where releases come from: GitHub Releases (the default) or a feed IT points SnipForge at.
+"""Where releases come from: GitHub Releases (the default, in the repository snipforge/project.py
+names) or a feed IT points SnipForge at.
 
 A source lists releases (fetch) and downloads one release's installer, checks its SHA-256 and
 saves it (download). Results arrive on the main thread through callbacks:
@@ -21,10 +22,10 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 
-from . import REPO
+from . import project
 from .update_platform import PLATFORM, installer_suffix_ok
 from .update_policy import PolicyInfo, feed_location
-from .update_transport import CANCELED, FileTransport, NetworkTransport
+from .update_transport import CANCELED, NEEDS_SIGN_IN, NOT_FOUND, FileTransport, NetworkTransport
 from .updates import (
     SHA256_RE,
     Release,
@@ -41,7 +42,6 @@ from .updates import (
 
 log = logging.getLogger(__name__)
 
-GITHUB_API = "https://api.github.com"
 MANIFEST_NAME = "releases.json"
 MANIFEST_SCHEMA = 1
 MAX_FEED_RELEASES = 200
@@ -107,13 +107,24 @@ class UpdateSource:
 class GitHubSource(UpdateSource):
     label = "GitHub"
 
-    def __init__(self, repo: str = REPO, api_base: str = GITHUB_API, transport=None) -> None:
+    def __init__(self, repo: str = project.REPO, server_url: str = project.SERVER_URL, api_base: str | None = None,
+                 transport=None) -> None:
+        api_base = api_base or project.api_url(server_url)
         if urlparse(api_base).scheme != "https":
             raise ValueError("The GitHub API address must use https.")
-        self._repo = repo
+        self._repo, self._server = repo, server_url
         self._url = f"{api_base.rstrip('/')}/repos/{repo}/releases?per_page=20"
-        self._assets = f"https://github.com/{repo}/releases/download/"
+        self._releases = f"{project.repo_url(server_url, repo)}/releases"
+        self._assets = f"{self._releases}/download/"
+        self._hosts = project.download_hosts(server_url)
         self._transport = transport
+
+    def _cant_see(self) -> str:
+        """A private or internal repository (GitHub Enterprise) answers anonymous requests with a
+        sign-in, "not found" or a sign-in page; point people at their organization's own copy."""
+        return (f"SnipForge can't see the releases at {self._releases}: the repository is private, needs a "
+                "sign-in (which SnipForge doesn't do) or has moved. If your organization keeps SnipForge "
+                "updates in a shared folder, ask your IT team to point SnipForge at it (the UpdateFeed policy).")
 
     @property
     def transport(self):
@@ -124,13 +135,14 @@ class GitHubSource(UpdateSource):
     def fetch(self, done: FetchDone):
         def got(data, error, final):
             if data is None:
-                done(None, error)
+                done(None, self._cant_see() if error in (NEEDS_SIGN_IN, NOT_FOUND) else error)
                 return
-            if urlparse(final).hostname != urlparse(self._url).hostname:
-                done(None, f"GitHub's answer came from an unexpected location ({urlparse(final).hostname}).")
+            if urlparse(final).hostname != urlparse(self._url).hostname:  # usually a sign-in page
+                log.info("The release list came from %s instead of GitHub", urlparse(final).hostname)
+                done(None, self._cant_see())
                 return
             try:
-                releases = parse_releases(json.loads(data.decode("utf-8")), self._repo)
+                releases = parse_releases(json.loads(data.decode("utf-8")), self._repo, server_url=self._server)
             except ValueError as exc:
                 done(None, f"Unexpected response from GitHub ({exc}).")
                 return
@@ -145,7 +157,7 @@ class GitHubSource(UpdateSource):
         if not (name and installer and sums):
             done(None, "This release has no installer to download.", "")
             return chain
-        if not all(url.startswith(self._assets) and trusted_download(url) for url in (installer, sums)):
+        if not all(url.startswith(self._assets) and trusted_download(url, self._hosts) for url in (installer, sums)):
             done(None, UNEXPECTED, "")
             return chain
 
@@ -153,7 +165,7 @@ class GitHubSource(UpdateSource):
             def handler(data, error, final):
                 if data is None:
                     done(None, error, "")
-                elif not trusted_download(final):
+                elif not trusted_download(final, self._hosts):
                     done(None, UNEXPECTED, "")
                 else:
                     done(*save_verified(data, expected, folder, name))
@@ -163,7 +175,7 @@ class GitHubSource(UpdateSource):
             if data is None:
                 done(None, error, "")
                 return
-            if not trusted_download(final):
+            if not trusted_download(final, self._hosts):
                 done(None, UNEXPECTED, "")
                 return
             expected = expected_hash(data.decode("utf-8", errors="replace"), name)
@@ -217,10 +229,18 @@ class FolderFeedSource(UpdateSource):
     def _secure(self, final: str) -> bool:
         return not _is_url(self.location) or urlparse(final).scheme == "https"
 
+    def _fetch_error(self, error: str) -> str:
+        if error == NEEDS_SIGN_IN:
+            return (f"{self.location} wants a sign-in, which SnipForge doesn't do. Ask your IT team to use a "
+                    "synced folder or a file share for updates instead.")
+        if error == NOT_FOUND:
+            return f"There's no {MANIFEST_NAME} at {self._manifest}."
+        return error
+
     def fetch(self, done: FetchDone):
         def got(data, error, final):
             if data is None:
-                done(None, error)
+                done(None, self._fetch_error(error))
                 return
             if not self._secure(final):
                 done(None, UNEXPECTED)

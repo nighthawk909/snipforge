@@ -70,6 +70,9 @@ python -m pytest                    # tests
 python scripts/build.py --installer # SnipForge.exe, portable zip and installer (needs Inno Setup 6)
 ```
 
+To run your organization's own copy (for example on GitHub Enterprise), see
+[docs/PORTING.md](docs/PORTING.md).
+
 ## Contributing
 
 Bug reports and ideas are welcome in [Issues](https://github.com/nighthawk909/snipforge/issues).

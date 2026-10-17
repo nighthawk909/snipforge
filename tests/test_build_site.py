@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from snipforge import project
+
 ROOT = Path(__file__).resolve().parents[1]
-REPO = "https://github.com/nighthawk909/snipforge"
+REPO = project.REPO_URL
 PERMANENT_LINK = f"{REPO}/releases/latest/download/SnipForge-setup.exe"
 
 
@@ -22,10 +24,10 @@ def _load(name):
 site = _load("build_site")
 
 NOTES_060 = (
-    "## [0.6.0](https://github.com/nighthawk909/snipforge/compare/v0.5.0...v0.6.0) (2026-10-20)\n\n\n"
+    f"## [0.6.0]({REPO}/compare/v0.5.0...v0.6.0) (2026-10-20)\n\n\n"
     "### Features\n\n"
-    "* **updates:** choose Stable or Preview updates ([#12](https://github.com/nighthawk909/snipforge/issues/12)) "
-    "([abc1234](https://github.com/nighthawk909/snipforge/commit/abc1234))\n"
+    f"* **updates:** choose Stable or Preview updates ([#12]({REPO}/issues/12)) "
+    f"([abc1234]({REPO}/commit/abc1234))\n"
     "* themes: light and dark\n  with a new accent color\n\n\n"
     "### Bug fixes\n\n"
     "* **crop:** Esc cancels a crop <script>alert(1)</script> ([def5678](https://github.com/x/commit/def5678))\n\n"
@@ -50,7 +52,7 @@ TEMPLATE = (ROOT / "docs" / "site" / "index.html").read_text(encoding="utf-8")
 
 
 def render(releases):
-    return site.render(TEMPLATE, releases, "nighthawk909/snipforge")
+    return site.render(TEMPLATE, releases, project.REPO, project.SERVER_URL)
 
 
 def test_download_note_shows_the_current_version_date_and_size():
@@ -135,7 +137,7 @@ def test_no_stable_release_is_an_error():
 
 def test_missing_marker_is_an_error():
     with pytest.raises(site.SiteError, match="whats-new"):
-        site.render(TEMPLATE.replace("<!-- generated:whats-new -->", ""), [release("v0.6.0")], "nighthawk909/snipforge")
+        site.render(TEMPLATE.replace("<!-- generated:whats-new -->", ""), [release("v0.6.0")], project.REPO)
 
 
 def test_generated_page_still_loads_nothing_from_elsewhere():
@@ -144,6 +146,25 @@ def test_generated_page_still_loads_nothing_from_elsewhere():
     for chunk in page.split('href="')[1:]:
         href = chunk.split('"', 1)[0]
         assert href.startswith((REPO, "#", "data:")), href
+
+
+def test_page_points_at_the_repository_it_is_built_for():
+    """Built in a copy on GitHub Enterprise, every link (the template's own ones too) goes to that copy."""
+    ghe = "https://ghe.example.test/fixture-org/snipforge"
+    page = site.render(TEMPLATE, [release("v0.7.0-preview.1", prerelease=True, alias=False),
+                                  release("v0.6.0", body=NOTES_060)], "fixture-org/snipforge", "https://ghe.example.test")
+    assert f'id="download" href="{ghe}/releases/latest/download/SnipForge-setup.exe"' in page
+    assert f'{ghe}/releases/download/v0.7.0-preview.1/SnipForge-0.7.0-preview.1-setup.exe' in page
+    for chunk in page.split('href="')[1:]:
+        href = chunk.split('"', 1)[0]
+        assert href.startswith((ghe, "#", "data:")), href
+    assert REPO not in page
+
+
+@pytest.mark.parametrize("server", ["http://ghe.example.test", "https://ghe.example.test/sub"])
+def test_server_url_is_validated(server):
+    with pytest.raises(site.SiteError):
+        site.render(TEMPLATE, [release("v0.6.0")], "fixture-org/snipforge", server)
 
 
 def test_cli_builds_the_site_folder(tmp_path):
@@ -155,6 +176,16 @@ def test_cli_builds_the_site_folder(tmp_path):
 
     assert "Version 0.6.0" in (out / "index.html").read_text(encoding="utf-8")
     assert (out / "editor-preview.png").read_bytes() == (ROOT / "docs" / "site" / "editor-preview.png").read_bytes()
+
+
+def test_cli_takes_the_server_and_repository(tmp_path):
+    releases = tmp_path / "releases.json"
+    releases.write_text(json.dumps([release("v0.6.0")]), encoding="utf-8")
+    out = tmp_path / "_site"
+    assert site.main(["--releases", str(releases), "--site", str(ROOT / "docs" / "site"), "--out", str(out),
+                      "--repo", "fixture-org/snipforge", "--server-url", "https://ghe.example.test"]) == 0
+    assert 'href="https://ghe.example.test/fixture-org/snipforge/releases/latest"' in (out / "index.html").read_text(
+        encoding="utf-8")
 
 
 def test_cli_refuses_a_non_empty_output_folder(tmp_path, capsys):
