@@ -12,6 +12,7 @@ from PySide6.QtCore import QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QApplication,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -22,7 +23,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -116,7 +116,7 @@ class SettingsWindow(QMainWindow):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
         row.addWidget(self._build_nav())
-        scroll = QScrollArea()
+        self._scroll = scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -132,8 +132,11 @@ class SettingsWindow(QMainWindow):
         self._blurb.setContentsMargins(0, 0, 0, 14)
         col.addWidget(self._title)
         col.addWidget(self._blurb)
-        self._pages = QStackedWidget()
-        self._page_index: dict[str, int] = {}
+        # Only the current page is shown. Hidden pages take no room, so a short page like About
+        # doesn't scroll (a QStackedWidget is always as tall as its tallest page, here Updates).
+        pages = QVBoxLayout()
+        pages.setContentsMargins(0, 0, 0, 0)
+        self._pages: dict[str, QWidget] = {}
         builders = {"general": self._general, "capture": self._capture, "saving": self._saving,
                     "appearance": self._appearance, "about": self._about,
                     "updates": lambda: self._updates(update_controller)}
@@ -144,8 +147,10 @@ class SettingsWindow(QMainWindow):
             wcol.setContentsMargins(0, 0, 0, 0)
             wcol.addWidget(page)
             wcol.addStretch(1)
-            self._page_index[key] = self._pages.addWidget(wrapper)
-        col.addWidget(self._pages)
+            wrapper.hide()
+            self._pages[key] = wrapper
+            pages.addWidget(wrapper)
+        col.addLayout(pages)
         col.addStretch(1)
         body.setMaximumWidth(900)
         scroll.setWidget(body)
@@ -188,7 +193,13 @@ class SettingsWindow(QMainWindow):
 
     def show_section(self, key: str) -> None:
         label, _icon, blurb, _words = SECTIONS[key]
-        self._pages.setCurrentIndex(self._page_index[key])
+        focused = QApplication.focusWidget()
+        if focused is not None and not self._pages[key].isAncestorOf(focused) and any(
+                page.isAncestorOf(focused) for page in self._pages.values()):
+            focused.clearFocus()  # hiding its page would hand the keyboard to the Find box
+        for k, page in self._pages.items():
+            page.setVisible(k == key)
+        self._scroll.verticalScrollBar().setValue(0)  # every page opens at its top, even the same one
         self._title.setText(label)
         self._blurb.setText(blurb)
         for k, item in self._nav.items():
