@@ -46,29 +46,42 @@ jobs:
       # CI runs as a normal PR check, which the "Protect main" ruleset requires before merging.
       - name: Approve CI on the release PR
         if: ${{ steps.release.outputs.prs_created == 'true' }}
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           # Raw JSON, parsed below: step env is evaluated even when the step is skipped, and
           # `pr` is empty on most runs, so fromJSON() here would fail the workflow.
           PR_JSON: ${{ steps.release.outputs.pr }}
         run: |
-          BRANCH=$(printf '%s' "$PR_JSON" | jq -r '.headBranchName // empty' 2>/dev/null || true)
-          if [ -z "$BRANCH" ]; then
+          NUMBER=$(printf '%s' "$PR_JSON" | jq -r '.number // empty' 2>/dev/null || true)
+          if [ -z "$NUMBER" ]; then
             echo "No release PR on this run."
             exit 0
           fi
+          # release-please reuses one branch for every release PR, so only runs for the PR's current
+          # commit are its own; runs left waiting by earlier release PRs stay as they are.
+          SHA=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          approved=0
           for attempt in $(seq 1 12); do
-            ids=$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$BRANCH" --event pull_request \
+            ids=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --event pull_request \
                     --status action_required --json databaseId --jq '.[].databaseId')
-            if [ -n "$ids" ]; then
-              for id in $ids; do
-                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve" && echo "approved run $id"
-              done
+            # The PR's workflows can start a few seconds apart: stop once a check finds no more.
+            if [ -z "$ids" ] && [ "$approved" -gt 0 ]; then
               exit 0
             fi
+            for id in $ids; do
+              if gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"; then
+                echo "approved run $id"
+                approved=$((approved + 1))
+              else
+                echo "::warning::Couldn't approve run $id; approve it from the Actions tab."
+              fi
+            done
             sleep 10
           done
-          echo "::warning::No release-PR runs were waiting for approval; approve them from the Actions tab if CI is missing."
+          if [ "$approved" -eq 0 ]; then
+            echo "::warning::No runs for the release PR's commit $SHA were waiting for approval; approve them from the Actions tab if CI is missing."
+          fi
 
   build:
     needs: release-please
