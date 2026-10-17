@@ -3,13 +3,25 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStatusBar, QToolButton, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QStatusBar,
+    QToolButton,
+    QWidget,
+)
 
 from .. import theme
 from ..icons import icon
+from ..widgets import ToggleSwitch
 
 ZOOM_STEP = 1.25
 RECENT_COUNT = 10
+COMPACT_BELOW = 1180  # command bar width where secondary buttons drop their labels
 
 
 def _divider() -> QWidget:
@@ -44,9 +56,11 @@ class CommandBar(QWidget):
         row.setContentsMargins(10, 7, 10, 7)
         row.setSpacing(4)
         self._icons: list[tuple[QPushButton | QToolButton, str, str]] = []  # widget, icon, role
+        self._labels: dict[QPushButton, str] = {}  # buttons that drop their label when the bar is narrow
+        self._compact = False
 
         self.new_button = self._button("New capture", "plus", "Take a new snip (Ctrl+N)", self.new_capture,
-                                       variant="outline")
+                                       variant="outline", keep_label=True)
         row.addWidget(self.new_button)
         row.addSpacing(4)
         row.addWidget(_divider())
@@ -63,7 +77,7 @@ class CommandBar(QWidget):
         self.zoom_label.setMinimumWidth(48)
         row.addWidget(self.zoom_label)
         row.addWidget(self._tool("zoom_in", "Zoom in (Ctrl+wheel)", self.zoom_in))
-        row.addWidget(self._button("Fit", None, "Fit the snip in the window (Ctrl+0)", self.fit))
+        row.addWidget(self._button("Fit", None, "Fit the snip in the window (Ctrl+0)", self.fit, keep_label=True))
         row.addStretch(1)
         row.addWidget(self._button("Grab text", "ocr", "Copy the text in this snip (Ctrl+Shift+T)", self.grab_text))
         row.addWidget(self._button("Redact", "redact", "Blur emails, phone and card numbers automatically",
@@ -73,17 +87,23 @@ class CommandBar(QWidget):
         row.addWidget(self.share_button)
         row.addWidget(self._button("Save", "save", "Save a PNG to Pictures\\SnipForge (Ctrl+S)", self.save))
         row.addSpacing(4)
-        self.copy_button = self._button("Copy", "copy", "Copy to clipboard (Ctrl+C)", self.copy, variant="primary")
+        self.copy_button = self._button("Copy", "copy", "Copy to clipboard (Ctrl+C)", self.copy, variant="primary",
+                                        keep_label=True)
         row.addWidget(self.copy_button)
         self.theme_button = self._tool("moon", "Switch between light and dark", self.toggle_theme)
         row.addWidget(self.theme_button)
-        for w in self.findChildren(QWidget):  # keep keyboard focus on the canvas
-            w.setFocusPolicy(Qt.NoFocus)
+        for w in self.findChildren(QWidget):  # reachable with Tab; clicks leave the keyboard on the canvas
+            w.setFocusPolicy(Qt.TabFocus if isinstance(w, (QPushButton, QToolButton)) else Qt.NoFocus)
         self.retheme()
 
-    def _button(self, text: str, icon_name: str | None, tip: str, signal, variant: str | None = None) -> QPushButton:
+    def _button(self, text: str, icon_name: str | None, tip: str, signal, variant: str | None = None,
+                keep_label: bool = False) -> QPushButton:
         b = QPushButton(text)
         b.setToolTip(tip)
+        b.setAccessibleName(text)
+        if not keep_label:
+            self._labels[b] = text
+            b.setMinimumWidth(36)  # may shrink to its icon, so the bar never forces a wide window
         b.setCursor(Qt.PointingHandCursor)
         if variant:
             b.setProperty("variant", variant)
@@ -107,9 +127,24 @@ class CommandBar(QWidget):
         """For buttons the window owns, like Drag out."""
         row = self.layout()
         row.insertWidget(row.indexOf(self.share_button), widget)
-        widget.setFocusPolicy(Qt.NoFocus)
+        widget.setFocusPolicy(Qt.TabFocus)
+        widget.setAccessibleName(widget.text())
         self._icons.append((widget, icon_name, ""))
+        self._labels[widget] = widget.text()
+        widget.setMinimumWidth(36)
+        self._apply_compact(self._compact)
         self.retheme()
+
+    def resizeEvent(self, e) -> None:  # noqa: N802 - Qt API
+        super().resizeEvent(e)
+        compact = self.width() < COMPACT_BELOW
+        if compact != self._compact:
+            self._apply_compact(compact)
+
+    def _apply_compact(self, compact: bool) -> None:
+        self._compact = compact
+        for button, label in self._labels.items():
+            button.setText("" if compact else label)
 
     def set_zoom(self, zoom: float) -> None:
         self.zoom_label.setText(f"{round(zoom * 100)}%")
@@ -126,14 +161,17 @@ class CommandBar(QWidget):
                 name = "sun" if t.dark else "moon"
             color = header.primary_text if role == "primary" else header.ink
             widget.setIcon(icon(name, color, color, color))
-        self.theme_button.setToolTip("Switch to light" if t.dark else "Switch to dark")
+        tip = "Switch to light" if t.dark else "Switch to dark"
+        self.theme_button.setToolTip(tip)
+        self.theme_button.setAccessibleName(tip)
 
 
 class Tray(QWidget):
-    """Recent snips on the left; status messages, image size and save state on the right."""
+    """Recent snips on the left; status messages, Beautify, image size and save state on the right."""
 
     open_entry = Signal(str)
     open_library = Signal()
+    beautify_changed = Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -145,9 +183,21 @@ class Tray(QWidget):
         self._label = QLabel("Recent")
         self._label.setProperty("sfRole", "section")
         row.addWidget(self._label)
-        self._thumbs = QHBoxLayout()
+        strip = QWidget()
+        self._thumbs = QHBoxLayout(strip)
+        self._thumbs.setContentsMargins(0, 0, 0, 0)
         self._thumbs.setSpacing(6)
-        row.addLayout(self._thumbs)
+        self._thumbs.addStretch(1)
+        self._strip = QScrollArea()  # recent snips shrink away before messages do
+        self._strip.setObjectName("TrayThumbs")
+        self._strip.setWidget(strip)
+        self._strip.setWidgetResizable(True)
+        self._strip.setFrameShape(QFrame.NoFrame)
+        self._strip.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._strip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._strip.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self._strip.setFixedHeight(46)
+        row.addWidget(self._strip, 2)
         self.library_button = QPushButton("Open library")
         self.library_button.setProperty("variant", "ghost")
         self.library_button.clicked.connect(self.open_library)
@@ -155,18 +205,27 @@ class Tray(QWidget):
         self.status = QStatusBar()
         self.status.setSizeGripEnabled(False)
         self.status.setObjectName("TrayStatus")
-        row.addWidget(self.status, 1)
+        self.status.setMinimumWidth(240)
+        row.addWidget(self.status, 3)
+        beautify_label = QLabel("Beautify")
+        beautify_label.setToolTip("Backdrop, rounded corners and a shadow when you copy, save or drag")
+        row.addWidget(beautify_label)
+        self.beautify = ToggleSwitch("Beautify when copying, saving or dragging")
+        self.beautify.toggled.connect(lambda on: None if self._loading else self.beautify_changed.emit(on))
+        row.addWidget(self.beautify)
+        row.addSpacing(6)
         self._size = QLabel()
         self._size.setProperty("sfRole", "muted")
         row.addWidget(self._size)
         self._saved = QLabel()
         self._saved.setProperty("sfRole", "muted")
         row.addWidget(self._saved)
+        self._loading = False
         for w in self.findChildren(QWidget):
-            w.setFocusPolicy(Qt.NoFocus)
+            w.setFocusPolicy(Qt.TabFocus if isinstance(w, (QPushButton, QToolButton, ToggleSwitch)) else Qt.NoFocus)
 
     def set_recent(self, entries) -> None:
-        while self._thumbs.count():
+        while self._thumbs.count() > 1:  # keep the trailing stretch
             widget = self._thumbs.takeAt(0).widget()
             if widget:
                 widget.deleteLater()
@@ -181,15 +240,24 @@ class Tray(QWidget):
             when = entry.created.strftime("%b %d, %I:%M %p")
             thumb.setToolTip(f"{when} · click to open")
             thumb.setAccessibleName(f"Open snip from {when}")
-            thumb.setFocusPolicy(Qt.NoFocus)
+            thumb.setFocusPolicy(Qt.TabFocus)
             thumb.clicked.connect(lambda _=False, i=entry.id: self.open_entry.emit(i))
-            self._thumbs.addWidget(thumb)
+            self._thumbs.insertWidget(self._thumbs.count() - 1, thumb)
 
     def thumb_count(self) -> int:
-        return self._thumbs.count()
+        return self._thumbs.count() - 1
+
+    def set_beautify(self, on: bool) -> None:
+        self._loading = True
+        self.beautify.setChecked(on)
+        self._loading = False
 
     def set_image_size(self, width: int, height: int) -> None:
         self._size.setText(f"{width} × {height} px")
 
-    def set_saved(self, text: str) -> None:
+    def set_saved(self, text: str, tip: str = "") -> None:
         self._saved.setText(text)
+        self._saved.setToolTip(tip)
+
+    def saved_text(self) -> str:
+        return self._saved.text()

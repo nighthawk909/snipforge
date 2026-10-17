@@ -181,6 +181,7 @@ QWidget#Segmented {{ background: {p.surface2}; border: 1px solid {p.border}; bor
 
 QWidget#Tray {{ background: {p.surface}; border-top: 1px solid {p.border}; }}
 QStatusBar#TrayStatus {{ background: transparent; border: none; color: {p.text2}; }}
+QScrollArea#TrayThumbs, QScrollArea#TrayThumbs > QWidget > QWidget {{ background: transparent; border: none; }}
 #Thumb {{ background: {p.surface2}; border: 1px solid {p.border}; border-radius: 6px; padding: 2px; }}
 #Thumb:hover {{ border-color: {a.fill}; }}
 #ZoomLabel {{ color: {h.text2}; }}

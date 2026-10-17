@@ -9,7 +9,7 @@ discarded, so re-entering Crop can always bring them back.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
 from .. import theme
@@ -81,6 +81,7 @@ class CropMask(QGraphicsItem):
         super().__init__()
         self._image = QRectF(image_rect)
         self._background = QColor(background)
+        self._pattern = None  # callable -> (QBrush, origin in viewport pixels); the canvas's dot grid
         self.crop = QRectF(image_rect)
         self.editing = False
         self.setZValue(1000)
@@ -92,6 +93,10 @@ class CropMask(QGraphicsItem):
 
     def set_background(self, color: QColor) -> None:
         self._background = QColor(color)
+        self.update()
+
+    def set_pattern(self, pattern) -> None:
+        self._pattern = pattern
         self.update()
 
     def set_editing(self, editing: bool) -> None:
@@ -116,8 +121,18 @@ class CropMask(QGraphicsItem):
 
     def _paint_cut(self, p: QPainter) -> None:
         p.setPen(Qt.NoPen)
-        p.setBrush(self._background)
-        p.drawPath(self._outside(self.boundingRect()))
+        outside = self._outside(self.boundingRect())
+        if self._pattern is not None and p.device() is not None and not isinstance(p.device(), QImage):
+            brush, origin = self._pattern()  # the same dots as the canvas, so the cut blends in
+            device_path = p.worldTransform().map(outside)
+            p.save()
+            p.resetTransform()
+            p.setBrushOrigin(origin)
+            p.fillPath(device_path, brush)
+            p.restore()
+        else:
+            p.setBrush(self._background)
+            p.drawPath(outside)
         for grow, alpha in ((6, 30), (3, 50), (1, 90)):  # soft edge so the kept area reads as a page
             ring = QPainterPath()
             ring.addRect(self.crop.adjusted(-grow, -grow + 2, grow, grow + 2))
