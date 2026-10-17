@@ -223,6 +223,7 @@ def test_second_launch_hands_command_to_running_instance(qapp, monkeypatch):
         QApplication.processEvents()
         time.sleep(0.01)
     launcher.wait(timeout=10)
+    server.close()
     assert received == ["snip"]
 
 

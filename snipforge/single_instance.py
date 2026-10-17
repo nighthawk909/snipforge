@@ -34,22 +34,31 @@ class InstanceServer(QObject):
         self.listening = self._server.listen(SERVER_NAME)
         self._server.newConnection.connect(self._accept)
 
+    def close(self) -> None:
+        self._server.close()
+
     def _accept(self) -> None:
         while (socket := self._server.nextPendingConnection()) is not None:
-            socket.readyRead.connect(lambda s=socket: self._read(s))
-            socket.disconnected.connect(lambda s=socket: self._finish(s))
+            # Bound slots, not lambdas: a lambda holding the socket kept a second owner alive and
+            # the socket could be freed twice when its deleteLater ran.
+            socket.readyRead.connect(self._on_ready_read)
+            socket.disconnected.connect(self._on_disconnected)
             # The launcher writes and disconnects immediately, so its bytes are often already
             # buffered and readyRead won't fire again: read now or the command is lost.
             if socket.bytesAvailable():
                 self._read(socket)
 
-    def _finish(self, socket: QLocalSocket) -> None:
+    def _on_ready_read(self) -> None:
+        self._read(self.sender())
+
+    def _on_disconnected(self) -> None:
+        socket = self.sender()
         self._read(socket)
-        if isValid(socket):
+        if isinstance(socket, QLocalSocket) and isValid(socket):
             socket.deleteLater()
 
-    def _read(self, socket: QLocalSocket) -> None:
-        if not isValid(socket):  # already torn down (e.g. while the app is quitting)
+    def _read(self, socket) -> None:
+        if not isinstance(socket, QLocalSocket) or not isValid(socket):  # torn down, e.g. while quitting
             return
         text = bytes(socket.readAll()).decode(errors="ignore").strip()
         if text in COMMANDS:
