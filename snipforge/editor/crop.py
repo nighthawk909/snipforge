@@ -12,10 +12,11 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
+from .. import theme
+
 HANDLE_PX = 10
 MIN_CROP = 8.0
 HIDE_MARGIN = 5000.0  # how far past the image the "cut" fill extends (covers stray annotations)
-ACCENT = QColor("#3b82f6")
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +90,10 @@ class CropMask(QGraphicsItem):
         self.crop = QRectF(rect)
         self.update()
 
+    def set_background(self, color: QColor) -> None:
+        self._background = QColor(color)
+        self.update()
+
     def set_editing(self, editing: bool) -> None:
         self.editing = editing
         self.update()
@@ -136,7 +141,7 @@ class CropMask(QGraphicsItem):
         p.setPen(QPen(QColor("#ffffff"), 1.5 / scale))
         p.drawRect(r)
         size = HANDLE_PX / scale
-        p.setPen(QPen(ACCENT, 1.5 / scale))
+        p.setPen(QPen(QColor(theme.current().accent.fill), 1.5 / scale))
         p.setBrush(QColor("#ffffff"))
         for pt in crop_handle_points(r).values():
             p.drawRect(QRectF(pt.x() - size / 2, pt.y() - size / 2, size, size))

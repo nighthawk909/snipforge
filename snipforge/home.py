@@ -18,22 +18,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import theme
 from .icons import icon
 from .library import Library
 
-STYLE = """
-QMainWindow, #HomeRoot { background: #1f1f1f; }
-QLabel { color: #b5b5b5; }
-#HomeTitle { color: #f0f0f0; font-size: 18px; font-weight: 600; }
-QPushButton { color: #e5e5e5; background: #2f2f2f; border: 1px solid #3d3d3d; border-radius: 6px; padding: 7px 14px; }
-QPushButton:hover { background: #383838; }
-QPushButton#Primary { background: #2563eb; border-color: #2563eb; color: white; font-weight: 600; }
-QPushButton#Primary:hover { background: #1d4ed8; }
-QListWidget { background: #181818; border: none; color: #c8c8c8; }
-QListWidget::item { border-radius: 6px; padding: 6px; }
-QListWidget::item:hover { background: #262626; }
-QListWidget::item:selected { background: #1e3a8a; }
-"""
 THUMB = QSize(220, 140)
 
 
@@ -43,7 +31,6 @@ class HomeWindow(QMainWindow):
         self._library = library
         self._on_open_entry = on_open_entry
         self.setWindowTitle("SnipForge")
-        self.setStyleSheet(STYLE)
         self.resize(1000, 680)
 
         root = QWidget()
@@ -52,18 +39,19 @@ class HomeWindow(QMainWindow):
         col.setContentsMargins(20, 16, 20, 16)
         header = QHBoxLayout()
         title = QLabel("Your snips")
-        title.setObjectName("HomeTitle")
+        title.setProperty("sfRole", "title")
         header.addWidget(title)
         header.addStretch(1)
         hint = QLabel("Win+Shift+S or Print Screen to snip from anywhere")
+        hint.setProperty("sfRole", "muted")
         header.addWidget(hint)
-        folder = QPushButton(icon("folder"), "Open folder")
-        folder.clicked.connect(lambda: self._reveal(self._library.root))
-        header.addWidget(folder)
-        new = QPushButton(icon("plus", "#ffffff"), "New snip")
-        new.setObjectName("Primary")
-        new.clicked.connect(on_new_snip)
-        header.addWidget(new)
+        self._folder = QPushButton("Open folder")
+        self._folder.clicked.connect(lambda: self._reveal(self._library.root))
+        header.addWidget(self._folder)
+        self._new = QPushButton("New snip")
+        self._new.setProperty("variant", "primary")
+        self._new.clicked.connect(on_new_snip)
+        header.addWidget(self._new)
         col.addLayout(header)
 
         self._list = QListWidget()
@@ -80,8 +68,16 @@ class HomeWindow(QMainWindow):
         col.addWidget(self._list, 1)
         self._empty = QLabel("Your snips will show up here. Press Win+Shift+S to take one.")
         self._empty.setAlignment(Qt.AlignCenter)
+        self._empty.setProperty("sfRole", "muted")
         col.addWidget(self._empty)
         self.setCentralWidget(root)
+        self._retheme()
+        theme.on_change(self._retheme)
+
+    def _retheme(self, _theme=None) -> None:
+        self._folder.setIcon(icon("folder"))
+        on_accent = theme.current().accent.on
+        self._new.setIcon(icon("plus", on_accent, on_accent, on_accent))
 
     def refresh(self) -> None:
         self._list.clear()

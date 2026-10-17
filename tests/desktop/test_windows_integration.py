@@ -94,3 +94,19 @@ def test_clipboard_round_trip(qapp):
     QGuiApplication.clipboard().setImage(image)
     pump(0.2)
     assert QGuiApplication.clipboard().image().size() == image.size()
+
+
+def test_title_bar_follows_the_theme(window):
+    """Windows 11 accepts SnipForge's dark/light and caption colors for a real window."""
+    import ctypes
+
+    from snipforge.theme import titlebar
+
+    hwnd = int(window.winId())
+    assert titlebar.style_title_bar(hwnd, True, "#211359", "#FFFFFF") is True
+    value = ctypes.c_int(0)
+    result = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+        ctypes.c_void_p(hwnd), ctypes.c_uint(titlebar.DWMWA_USE_IMMERSIVE_DARK_MODE),
+        ctypes.byref(value), ctypes.sizeof(value))
+    assert result == 0 and value.value == 1
+    assert titlebar.style_title_bar(hwnd, False, "#F3F3F5", "#1B1B1F") is True

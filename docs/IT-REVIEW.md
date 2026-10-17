@@ -21,7 +21,9 @@ be checked in the source code; file references are given where useful.
 | What | Where | Removed on uninstall? |
 |---|---|---|
 | The user's snips (original capture, editable markup, rendered image) | `%USERPROFILE%\Pictures\SnipForge` | No (it's the user's work) |
-| Settings: tool styles, Beautify on/off, recent Teams recipients' email addresses | `HKCU\Software\SnipForge\SnipForge` | Yes |
+| Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses | `HKCU\Software\SnipForge\SnipForge` | Yes |
+| Small theme images (check mark, arrows) regenerated at start | `%LOCALAPPDATA%\SnipForge\cache` | Yes |
+| Theme packs (optional, read-only JSON colors; see [THEMES.md](THEMES.md)) | `themes\` next to `SnipForge.exe`, and `%LOCALAPPDATA%\SnipForge\themes` | Install folder: yes. User folder: no |
 | Temporary copies for drag-out and sharing (auto-deleted after 24 hours) and downloaded updates | `%TEMP%\SnipForge` | Yes |
 | Startup entry (if enabled) | `HKCU` or, for all-users installs, `HKLM\...\CurrentVersion\Run` | Yes |
 | OneDrive shares | `<OneDrive>\SnipForge` (synced by the user's OneDrive client) | No |

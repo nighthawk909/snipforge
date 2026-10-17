@@ -10,9 +10,10 @@ The Select tool adds rubber-band selection and never draws.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QUndoStack
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPixmap, QUndoStack
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
+from .. import theme
 from .commands import AddItemsCommand, CropCommand, RemoveItemsCommand, StateCommand
 from .crop import MIN_CROP, CropMask, crop_handle_at, move_crop, new_crop, resize_crop
 from .factory import create_item
@@ -37,7 +38,7 @@ from .text_items import CalloutItem, EditableText, TextItem
 DRAG_THRESHOLD = 4  # view pixels before a press counts as a drag
 DUPLICATE_OFFSET = 16.0
 SCENE_MARGIN = 60.0
-BACKGROUND = QColor("#181818")
+DOT_GAP = 18  # on-screen pixels between background dots
 DEFAULT_CALLOUT = (190.0, 64.0)
 
 # Single-key tool shortcuts live here (not as QActions) so they never steal text input.
@@ -77,7 +78,7 @@ class Canvas(QGraphicsView):
         self._base_item.setAcceptedMouseButtons(Qt.NoButton)
         self._scene.addItem(self._base_item)
         self._crop_rect = QRectF(self._image_rect)
-        self._mask = CropMask(self._image_rect, BACKGROUND)
+        self._mask = CropMask(self._image_rect, QColor(theme.current().palette.well))
         self._scene.addItem(self._mask)
         self._overlay = HandleOverlay(self._scene.sceneRect())
         self._scene.addItem(self._overlay)
@@ -85,7 +86,8 @@ class Canvas(QGraphicsView):
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.setBackgroundBrush(BACKGROUND)
+        self.setBackgroundBrush(QColor(theme.current().palette.well))
+        self._dot_tile = self._make_dot_tile()
         self.setFrameShape(QGraphicsView.NoFrame)
         self.setMouseTracking(True)
 
@@ -95,6 +97,7 @@ class Canvas(QGraphicsView):
         self._unparsed: list[dict] = []  # saved items this version couldn't load; written back untouched
 
         self._scene.selectionChanged.connect(self._on_selection_changed)
+        theme.on_change(self.retheme)
         self.undo_stack.indexChanged.connect(self._on_undo_index)
         self._apply_drag_mode()
 
@@ -360,8 +363,35 @@ class Canvas(QGraphicsView):
         else:
             super().wheelEvent(e)
 
+    def retheme(self, _theme=None) -> None:
+        well = QColor(theme.current().palette.well)
+        self.setBackgroundBrush(well)
+        self._mask.set_background(well)
+        self._dot_tile = self._make_dot_tile()
+        self.viewport().update()
+
+    def _make_dot_tile(self) -> QPixmap:
+        """One grid cell with its dot; tiled by the painter, so a repaint is a single fill."""
+        t = theme.current().palette
+        ratio = self.devicePixelRatioF() or 1.0
+        tile = QPixmap(round(DOT_GAP * ratio), round(DOT_GAP * ratio))
+        tile.setDevicePixelRatio(ratio)
+        tile.fill(QColor(t.well))
+        p = QPainter(tile)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(t.dot))
+        p.drawEllipse(QPointF(DOT_GAP / 2, DOT_GAP / 2), 1.1, 1.1)
+        p.end()
+        return tile
+
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:
-        super().drawBackground(p, rect)
+        p.save()
+        p.resetTransform()
+        origin = self.mapFromScene(QPointF(0, 0))  # dots pan with the snip
+        p.setBrushOrigin(origin.x() % DOT_GAP - DOT_GAP / 2, origin.y() % DOT_GAP - DOT_GAP / 2)
+        p.fillRect(self.viewport().rect(), QBrush(self._dot_tile))
+        p.restore()
         p.setPen(Qt.NoPen)
         for i, alpha in ((6, 30), (3, 50), (1, 90)):
             p.setBrush(QColor(0, 0, 0, alpha))

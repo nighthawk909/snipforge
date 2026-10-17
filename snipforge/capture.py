@@ -12,7 +12,8 @@ from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
-ACCENT = QColor("#3b82f6")
+from . import theme
+
 DIM = QColor(0, 0, 0, 120)
 DRAG_THRESHOLD = 4
 MAG_SAMPLE = 15  # physical pixels sampled around the cursor
@@ -82,7 +83,7 @@ class _ScreenOverlay(QWidget):
             for r in self._outside(sel):
                 p.drawRect(r)
             p.setBrush(Qt.NoBrush)
-            p.setPen(QPen(ACCENT, 2 if not self._dragging else 1))
+            p.setPen(QPen(QColor(theme.current().accent.fill), 2 if not self._dragging else 1))
             p.drawRect(sel.adjusted(0, 0, -1, -1))
             self._paint_size_label(p, sel)
         if not self._dragging and self._press is None:
@@ -133,7 +134,7 @@ class _ScreenOverlay(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform, False)
         p.drawImage(target, sample)
         cell = MAG_SIZE / MAG_SAMPLE
-        p.setPen(QPen(ACCENT, 1))
+        p.setPen(QPen(QColor(theme.current().accent.fill), 1))
         p.setBrush(Qt.NoBrush)
         p.drawRect(QRectF(x + half * cell, y + half * cell, cell, cell))
         p.setPen(QPen(QColor("#ffffff"), 1))

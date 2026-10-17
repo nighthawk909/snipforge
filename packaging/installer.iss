@@ -78,6 +78,8 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#AppExe} /F"; Flags: runhidden
 [UninstallDelete]
 ; Temporary copies made for drag-out and sharing. The user's own snips in Pictures are kept.
 Type: filesandordirs; Name: "{%TEMP}\SnipForge"
+; Small theme images SnipForge regenerates on start.
+Type: filesandordirs; Name: "{localappdata}\SnipForge\cache"
 
 [Code]
 function RelaunchAfterSilentInstall: Boolean;
