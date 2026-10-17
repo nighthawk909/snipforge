@@ -203,6 +203,23 @@ def test_the_frame_is_there_from_the_start_under_the_pointer(qapp):
     assert where(o.got[0]) == (200, 150)
 
 
+def test_x_before_the_mouse_moves_puts_the_frame_under_the_pointer(qapp):
+    from snipforge import capture
+    o = make_overlay((200, 100), mode="area")
+    capture.QCursor.at = o.geometry().topLeft() + QPoint(150, 120)
+    key(o, Qt.Key_X, text="x")
+    assert o._selection() == QRect(50, 70, 200, 100)
+
+
+def test_picking_fixed_size_on_the_toolbar_puts_the_frame_in_the_middle(qapp):
+    from snipforge import capture
+    o = shown(mode="area")
+    bar = o.toolbar
+    capture.QCursor.at = o.geometry().topLeft() + bar.buttons["fixed"].mapTo(o, QPoint(5, 5))
+    bar.buttons["fixed"].click()  # not centred up under the toolbar, where the pointer is
+    assert o._selection() == QRect(400, 300, 200, 100)
+
+
 def test_ctrl_or_alt_arrows_do_not_nudge(qapp):
     o = make_overlay((200, 100))
     move(o, (400, 300))
@@ -368,6 +385,17 @@ def test_a_number_below_the_smallest_size_means_the_smallest(qapp):
     assert picked == [(prefs.MIN_FIXED, 100)]
 
 
+def test_an_emptied_box_keeps_its_size(qapp):
+    o = shown(size=(200, 100))
+    picked = []
+    o.size_changed.connect(lambda w, h: picked.append((w, h)))
+    box = o.toolbar.custom_size.width_box
+    QTest.keyClick(box, Qt.Key_A, Qt.ControlModifier)
+    QTest.keyClick(box, Qt.Key_Backspace)
+    QTest.keyClick(box, Qt.Key_Return)
+    assert picked == [(200, 100)]
+
+
 def test_reopening_the_size_menu_starts_fresh(qapp):
     o = shown(size=(640, 480))
     bar = o.toolbar
@@ -380,8 +408,10 @@ def test_reopening_the_size_menu_starts_fresh(qapp):
     QTest.qWait(30)
     try:
         assert bar.custom_size.width_box.value() == 640
-        assert bar.size_menu.focusWidget() is not bar.custom_size.width_box  # arrows move through the menu
-        assert bar.size_menu.activeAction() is bar._size_actions[(640, 480)]
+        assert bar.size_menu.focusWidget() is not bar.custom_size.width_box
+        QTest.keyClick(bar.size_menu, Qt.Key_Down)  # the arrows move through the menu, not a number
+        assert bar.custom_size.width_box.value() == 640
+        assert bar.size_menu.activeAction() in bar._size_actions.values()
     finally:
         bar.size_menu.close()
 
@@ -491,9 +521,13 @@ def test_a_snip_starts_in_fixed_size_with_the_remembered_size(qapp, monkeypatch)
         overlay.toolbar.custom_size.use_button.click()
         assert prefs.capture_fixed_size() == (500, 200)
         assert all(o.fixed_size == (500, 200) for o in session._overlays)
+        other = make_overlay((500, 200))  # stands in for a second monitor, with its frame still drawn
+        move(other, (400, 300))
+        session._overlays.append(other)
         session.focus = None
         overlay.keyboard_taken.emit()  # the pointer came to this monitor
-        assert session.focus is overlay
+        assert session.focus is overlay and other._selection() is None
+        session._overlays.remove(other)
         click(overlay, (300, 300))
         screen = overlay._frozen_image.size()
         assert results[0].size().toTuple() == (min(500, screen.width()), min(200, screen.height()))

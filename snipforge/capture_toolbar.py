@@ -46,7 +46,7 @@ MODES = {
     "screen": CaptureMode("Full screen", "monitor", "F", "Click a monitor to take all of it",
                           "Click a monitor, or press Enter  •  Esc to cancel"),
     "fixed": CaptureMode("Fixed size", "fixed", "X", "A frame of an exact size: move it and click",
-                         "Click to snip the frame  •  arrow keys nudge it  •  X again for its size"
+                         "Click or Enter to snip the frame  •  arrow keys nudge it  •  X again for its size"
                          "  •  Esc to cancel"),
     "scroll": CaptureMode("Scrolling", "scroll", "S", "A long page or list, captured as one image",
                           "Drag over the part that scrolls, or click a window  •  SnipForge scrolls to the end"
@@ -91,6 +91,29 @@ FIXED_PRESETS = (
 )
 
 
+class _SizeBox(QSpinBox):
+    """A side of the custom size. A number below the smallest means the smallest; an emptied box
+    keeps the size it had (Qt would make it the smallest)."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setRange(MIN_FIXED, MAX_FIXED)
+        self.setCorrectionMode(QSpinBox.CorrectToNearestValue)
+
+    def keep_if_empty(self) -> None:
+        if not self.lineEdit().text().strip():
+            self.lineEdit().setText(self.textFromValue(self.value()))
+
+    def keyPressEvent(self, e) -> None:  # noqa: N802 - Qt API
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.keep_if_empty()
+        super().keyPressEvent(e)
+
+    def focusOutEvent(self, e) -> None:  # noqa: N802 - Qt API
+        self.keep_if_empty()
+        super().focusOutEvent(e)
+
+
 class _EnterButton(QPushButton):
     """Enter presses it when it has the keyboard (a QPushButton only does that in a dialog)."""
 
@@ -127,9 +150,7 @@ class _CustomSize(QWidget):
         self.setFocusProxy(self.width_box)
 
     def _box(self, name: str) -> QSpinBox:
-        box = QSpinBox(self)
-        box.setRange(MIN_FIXED, MAX_FIXED)
-        box.setCorrectionMode(QSpinBox.CorrectToNearestValue)  # "5" means the smallest, not what was there
+        box = _SizeBox(self)
         box.setAccessibleName(name)
         box.setToolTip(name)
         box.lineEdit().returnPressed.connect(self._pick)
@@ -158,7 +179,8 @@ class _CustomSize(QWidget):
 
     def _pick(self) -> None:
         for box in (self.width_box, self.height_box):
-            box.interpretText()  # what's typed, even if Enter came before the box finished with it
+            box.keep_if_empty()
+            box.interpretText()  # what's typed, even if Use came before the box finished with it
         self.picked.emit(self.width_box.value(), self.height_box.value())
 
 

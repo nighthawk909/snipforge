@@ -193,8 +193,8 @@ class _ScreenOverlay(QWidget):
             return
         if mode != self._mode:
             self.set_mode(mode)
-            if mode == "fixed" and self._hover is None:  # picked on the toolbar: show the frame at once
-                self._set_fixed(self._fixed_at(self._middle()))
+            if mode == "fixed":
+                self._show_frame()  # at once, before the mouse moves
             self.mode_changed.emit(mode)
 
     def hint(self) -> str:
@@ -256,8 +256,17 @@ class _ScreenOverlay(QWidget):
         if self._fixed is not None:
             return True
         at = self._pointer_here()
-        self._set_fixed(self._fixed_at(at if at is not None else self._middle()))
+        if at is None or (self.toolbar is not None and self.toolbar.geometry().contains(at)):
+            at = self._middle()  # elsewhere, or picking it on the toolbar: not up under the toolbar
+        self._set_fixed(self._fixed_at(at))
         return False
+
+    def pointer_left(self) -> None:
+        """The pointer (and the keyboard) went to another monitor: nothing stays aimed here, even
+        if a menu kept the overlay from hearing that it left."""
+        if self._press is None:
+            self._cursor = self._hover = self._fixed = None
+            self.update()
 
     def _middle(self) -> QPoint:
         return QPoint(self.width() // 2, self.height() // 2)
@@ -652,7 +661,7 @@ class CaptureSession:
             overlay.delay_changed.connect(self._set_delay)
             overlay.pointer_changed.connect(self._set_pointer)
             overlay.size_changed.connect(self._set_fixed_size)
-            overlay.keyboard_taken.connect(lambda o=overlay: setattr(self, "focus", o))
+            overlay.keyboard_taken.connect(lambda o=overlay: self._keyboard_to(o))
             overlay.scroll_requested.connect(lambda rect, o=overlay: self._scroll(o, rect))
             self._overlays.append(overlay)
             if screen is active:
@@ -682,6 +691,13 @@ class CaptureSession:
         if seconds and not self._finished:
             self._close_overlays()
             self._count_down(seconds)
+
+    def _keyboard_to(self, overlay: _ScreenOverlay) -> None:
+        """The pointer came to `overlay`'s monitor: it has the keyboard now, and the others let go."""
+        self.focus = overlay
+        for other in self._overlays:
+            if other is not overlay:
+                other.pointer_left()
 
     def _set_fixed_size(self, width: int, height: int) -> None:
         """A size picked on one monitor applies to all of them, and to the next snip."""
