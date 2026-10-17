@@ -15,6 +15,8 @@ plays buffers end to end. Pure Python is fast enough (48 kHz stereo is ~100k sam
 from __future__ import annotations
 
 import array
+import itertools
+import operator
 import threading
 from dataclasses import dataclass, field
 
@@ -113,29 +115,27 @@ class Mixer:
                 return None
             ch = self.channels
             out = array.array("f", bytes(4 * (end - start) * ch))
-            for src in self.sources.values():
+            for first_source, src in enumerate(self.sources.values()):
                 keep = []
                 for index, samples in src.chunks:
                     stop = index + len(samples) // ch
                     a, b = max(index, start), min(stop, end)
                     if a < b:
-                        _add(out, (a - start) * ch, samples, (a - index) * ch, (b - a) * ch, src.gain)
+                        piece = samples[(a - index) * ch:(b - index) * ch]
+                        _add(out, (a - start) * ch, piece, src.gain, empty=first_source == 0)
                     if stop > end:
                         keep.append((index, samples))
                 src.chunks = keep
-            for i, v in enumerate(out):
-                if v > 1.0:
-                    out[i] = 1.0
-                elif v < -1.0:
-                    out[i] = -1.0
+            if out and (max(out) > 1.0 or min(out) < -1.0):
+                out = array.array("f", (min(1.0, max(-1.0, v)) for v in out))
             self.emitted = end
             return start, out
 
 
-def _add(out: array.array, at: int, samples: array.array, frm: int, count: int, gain: float) -> None:
-    if gain == 1.0:
-        for i in range(count):
-            out[at + i] += samples[frm + i]
-    else:
-        for i in range(count):
-            out[at + i] += samples[frm + i] * gain
+def _add(out: array.array, at: int, piece: array.array, gain: float, empty: bool) -> None:
+    """Add `piece` into `out` at `at`. A source's own chunks never overlap, so the first source can
+    simply be copied in; C-level map() keeps the rest quick (no per-sample Python loop)."""
+    if gain != 1.0:
+        piece = array.array("f", map(operator.mul, piece, itertools.repeat(gain)))
+    end = at + len(piece)
+    out[at:end] = piece if empty else array.array("f", map(operator.add, out[at:end], piece))
