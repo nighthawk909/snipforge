@@ -30,7 +30,7 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from .beautify import apply_beautify
-from .canvas import Canvas
+from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
 from .panel import PropertiesPanel
 from .share_menu import ShareController
@@ -53,7 +53,6 @@ TOOLS = [
 ]
 EXPORT_DIR = Path.home() / "Pictures" / "SnipForge"
 AUTOSAVE_MS = 700
-MIN_ZOOM, MAX_ZOOM = 0.05, 16.0
 
 
 def load_tool_styles(settings: QSettings) -> dict[str, Style]:
@@ -108,6 +107,7 @@ class EditorWindow(QMainWindow):
         self._autosave.timeout.connect(self._save_to_library)
         self.canvas.document_changed.connect(self._autosave.start)
         self.canvas.document_changed.connect(self._refresh_size)
+        self.canvas.document_changed.connect(self._mark_unsaved)
         self.canvas.selection_changed.connect(self._refresh_props)
         self.canvas.tool_changed.connect(lambda t: self._tool_actions[t].setChecked(True))
         self.canvas.zoom_changed.connect(self.commands.set_zoom)
@@ -116,12 +116,16 @@ class EditorWindow(QMainWindow):
         self.canvas.undo_stack.canRedoChanged.connect(self.commands.redo_button.setEnabled)
         self.panel.changed.connect(lambda changes: self.canvas.apply_style(**changes))
         self.panel.crop_action.connect(self._crop_action)
-        self.panel.beautify_changed.connect(self._set_beautify)
-        self.panel.set_beautify(self._beautify)
+        self.panel.editing_done.connect(self.canvas.setFocus)
+        self.tray.beautify_changed.connect(self._set_beautify)
+        self.tray.set_beautify(self._beautify)
         self.tray.open_entry.connect(self._open_entry)
         self.tray.open_library.connect(self._open_library)
         self.tray.library_button.setVisible(self._on_open_library is not None)
-        self.tray.set_saved("Saved to library" if self._autosave_enabled else "")
+        if self._autosave_enabled:
+            self.tray.set_saved("Saved", "Changes save to your library automatically")
+        elif entry is not None:
+            self.tray.set_saved("Autosave off", "Use Save or Copy to keep what you change")
 
         self._update_title()
         self._refresh_props()
@@ -220,8 +224,13 @@ class EditorWindow(QMainWindow):
         self.canvas.setFocus()
 
     def _fit_once(self) -> None:
-        if self.isVisible():
-            self.canvas.fit_image()
+        if not self.isVisible():
+            return
+        self.canvas.fit_image()
+        avail = self.screen().availableGeometry()
+        frame = self.frameGeometry()  # the real size, after minimum sizes were applied
+        frame.moveCenter(avail.center())
+        self.move(max(avail.left(), frame.left()), max(avail.top(), frame.top()))
 
     def changeEvent(self, e) -> None:
         super().changeEvent(e)
@@ -274,6 +283,10 @@ class EditorWindow(QMainWindow):
     def _refresh_props(self) -> None:
         kind, style = self.canvas.style_target()
         self.panel.load(kind, style, bool(self.canvas.selected_annotations()))
+
+    def _mark_unsaved(self) -> None:
+        if self._autosave_enabled:
+            self.tray.set_saved("Saving…")
 
     def _refresh_size(self) -> None:
         size = self.canvas.crop_rect().toAlignedRect().size()
@@ -396,7 +409,10 @@ class EditorWindow(QMainWindow):
                                self.canvas.render_image(commit=False, use_draft=False))
         except OSError as exc:
             log.warning("Autosave failed: %s", exc)
+            self.tray.set_saved("Not saved", f"Couldn't autosave: {exc}")
             self.statusBar().showMessage(f"Couldn't autosave: {exc}", 5000)
+            return
+        self.tray.set_saved("Saved", dt.datetime.now().strftime("Saved to your library at %I:%M %p"))
 
     def closeEvent(self, e) -> None:
         self.canvas.commit_text()

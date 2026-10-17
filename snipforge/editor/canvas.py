@@ -39,6 +39,7 @@ DRAG_THRESHOLD = 4  # view pixels before a press counts as a drag
 DUPLICATE_OFFSET = 16.0
 SCENE_MARGIN = 60.0
 DOT_GAP = 18  # on-screen pixels between background dots
+MIN_ZOOM, MAX_ZOOM = 0.05, 16.0
 DEFAULT_CALLOUT = (190.0, 64.0)
 
 # Single-key tool shortcuts live here (not as QActions) so they never steal text input.
@@ -87,7 +88,8 @@ class Canvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.setBackgroundBrush(QColor(theme.current().palette.well))
-        self._dot_tile = self._make_dot_tile()
+        self._dot_tiles: dict[float, QPixmap] = {}
+        self._mask.set_pattern(self._background_pattern)
         self.setFrameShape(QGraphicsView.NoFrame)
         self.setMouseTracking(True)
 
@@ -357,7 +359,7 @@ class Canvas(QGraphicsView):
         if e.modifiers() & Qt.ControlModifier:
             factor = 1.15 if e.angleDelta().y() > 0 else 1 / 1.15
             new_zoom = self.zoom() * factor
-            if 0.05 <= new_zoom <= 16:
+            if MIN_ZOOM <= new_zoom <= MAX_ZOOM:
                 self.scale(factor, factor)
                 self.zoom_changed.emit(self.zoom())
         else:
@@ -367,30 +369,44 @@ class Canvas(QGraphicsView):
         well = QColor(theme.current().palette.well)
         self.setBackgroundBrush(well)
         self._mask.set_background(well)
-        self._dot_tile = self._make_dot_tile()
+        self._dot_tiles.clear()
         self.viewport().update()
 
-    def _make_dot_tile(self) -> QPixmap:
-        """One grid cell with its dot; tiled by the painter, so a repaint is a single fill."""
-        t = theme.current().palette
+    def _dot_tile(self) -> QPixmap:
+        """One grid cell with its dot, a whole number of physical pixels wide so it tiles without
+        drifting at 125% or 175% scaling. Tiled by the painter, so a repaint is a single fill."""
         ratio = self.devicePixelRatioF() or 1.0
-        tile = QPixmap(round(DOT_GAP * ratio), round(DOT_GAP * ratio))
+        tile = self._dot_tiles.get(ratio)
+        if tile is not None:
+            return tile
+        t = theme.current().palette
+        size = max(4, round(DOT_GAP * ratio))
+        tile = QPixmap(size, size)
         tile.setDevicePixelRatio(ratio)
         tile.fill(QColor(t.well))
+        gap = size / ratio
         p = QPainter(tile)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(t.dot))
-        p.drawEllipse(QPointF(DOT_GAP / 2, DOT_GAP / 2), 1.1, 1.1)
+        p.drawEllipse(QPointF(gap / 2, gap / 2), 1.1, 1.1)
         p.end()
+        self._dot_tiles[ratio] = tile
         return tile
 
+    def _background_pattern(self) -> tuple[QBrush, QPointF]:
+        """The dotted background and where it starts, in viewport pixels (dots pan with the snip)."""
+        tile = self._dot_tile()
+        gap = tile.width() / tile.devicePixelRatio()
+        origin = self.mapFromScene(QPointF(0, 0))
+        return QBrush(tile), QPointF(origin.x() % gap - gap / 2, origin.y() % gap - gap / 2)
+
     def drawBackground(self, p: QPainter, rect: QRectF) -> None:
+        brush, origin = self._background_pattern()
         p.save()
         p.resetTransform()
-        origin = self.mapFromScene(QPointF(0, 0))  # dots pan with the snip
-        p.setBrushOrigin(origin.x() % DOT_GAP - DOT_GAP / 2, origin.y() % DOT_GAP - DOT_GAP / 2)
-        p.fillRect(self.viewport().rect(), QBrush(self._dot_tile))
+        p.setBrushOrigin(origin)
+        p.fillRect(self.viewport().rect(), brush)
         p.restore()
         p.setPen(Qt.NoPen)
         for i, alpha in ((6, 30), (3, 50), (1, 90)):

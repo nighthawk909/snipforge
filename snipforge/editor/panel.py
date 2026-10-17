@@ -52,6 +52,8 @@ SHAPE_LABELS = {"rounded": "Rounded box", "rect": "Box", "ellipse": "Ellipse", "
 SWITCHES = ("tail", "fill", "dash", "shadow")
 STAMP_COLUMNS = 6
 EDGE_SWATCHES = {"#ffffff", "#1c1c1e"}  # need an outline to show against the panel
+COLOR_NAMES = {"#ff3b30": "Red", "#ff9500": "Orange", "#ffd60a": "Yellow", "#34c759": "Green",
+               "#0a84ff": "Blue", "#bf5af2": "Purple", "#ffffff": "White", "#1c1c1e": "Black"}
 
 
 class Swatch(QPushButton):
@@ -63,8 +65,9 @@ class Swatch(QPushButton):
         self.setFixedSize(24, 24)
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(color)
-        self.setAccessibleName(f"Color {color}")
+        name = COLOR_NAMES.get(color.lower(), color)
+        self.setToolTip(name)
+        self.setAccessibleName(f"Color: {name}")
 
     def paintEvent(self, _e) -> None:
         t = theme.current()
@@ -80,10 +83,19 @@ class Swatch(QPushButton):
         p.end()
 
 
+class NoWheelSlider(QSlider):
+    """The wheel scrolls the panel instead of silently changing the size."""
+
+    def wheelEvent(self, e) -> None:  # noqa: N802 - Qt API
+        e.ignore()
+
+
 class QuickStyleTile(QAbstractButton):
     def __init__(self, quick: QuickStyle) -> None:
         super().__init__()
         self.quick = quick
+        self.setMinimumSize(44, 40)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(quick.label)
         self.setAccessibleName(f"Quick style: {quick.label}")
@@ -124,7 +136,7 @@ class QuickStyleTile(QAbstractButton):
 class PropertiesPanel(QScrollArea):
     changed = Signal(dict)          # style field -> new value
     crop_action = Signal(str)       # apply | cancel | reset
-    beautify_changed = Signal(bool)
+    editing_done = Signal()         # finished typing in a field: give the keyboard back to the canvas
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -132,7 +144,10 @@ class PropertiesPanel(QScrollArea):
         self.setFixedWidth(PANEL_WIDTH)
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # never hide controls at large text sizes
+        # Clicking the panel must not take the keyboard from the canvas (tool keys, Delete, Esc...).
+        self.setFocusPolicy(Qt.NoFocus)
+        self.viewport().setFocusPolicy(Qt.NoFocus)
         self._loading = False
         self._kind = "select"
         self._style_color = ""
@@ -156,10 +171,12 @@ class PropertiesPanel(QScrollArea):
         self._build_image()
         self._column.addStretch(1)
         self.setWidget(body)
-        # Clicking controls must not take keyboard focus from the canvas (tool keys, Delete...).
+        # Controls are reachable with Tab but don't take the keyboard when clicked; you can type a font size.
         for w in body.findChildren(QWidget):
-            if not isinstance(w, QSpinBox):
-                w.setFocusPolicy(Qt.NoFocus)
+            w.setFocusPolicy(Qt.TabFocus if isinstance(w, (QAbstractButton, QSlider)) else Qt.NoFocus)
+        self._font.setFocusPolicy(Qt.StrongFocus)
+        self._font.lineEdit().setFocusPolicy(Qt.StrongFocus)
+        self._font.editingFinished.connect(self.editing_done)
         self.retheme()
 
     # ------------------------------------------------------------------ builders
@@ -174,7 +191,6 @@ class PropertiesPanel(QScrollArea):
             label = QLabel(title.upper())
             label.setProperty("sfRole", "section")
             col.addWidget(label)
-            box.setProperty("title", label)
         self._sections[name] = box
         self._column.addWidget(box)
         return col
@@ -215,6 +231,8 @@ class PropertiesPanel(QScrollArea):
         for shape in CALLOUT_SHAPES:
             b = self._shapes.button(shape)
             b.setToolTip(SHAPE_LABELS[shape])
+            b.setAccessibleName(SHAPE_LABELS[shape])
+            b.setText("")  # icon only; the name stays in the tooltip and for screen readers
             b.setToolButtonStyle(Qt.ToolButtonIconOnly)
             b.setIconSize(QSize(20, 20))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -246,10 +264,8 @@ class PropertiesPanel(QScrollArea):
         row = QHBoxLayout()
         row.setSpacing(2)
         self._swatches = {c: Swatch(c) for c in PALETTE}
-        group = QButtonGroup(self)
-        for color, swatch in self._swatches.items():
-            group.addButton(swatch)
-            swatch.clicked.connect(lambda _=False, c=color: self._emit(color=c))
+        for color, swatch in self._swatches.items():  # checked by hand: a custom color clears every ring
+            swatch.clicked.connect(lambda _=False, c=color: self._pick_swatch(c))
             row.addWidget(swatch)
         self._custom = QToolButton()
         self._custom.setObjectName("CustomColor")
@@ -271,7 +287,7 @@ class PropertiesPanel(QScrollArea):
         head.addStretch(1)
         head.addWidget(self._size_value)
         col.addLayout(head)
-        self._slider = QSlider(Qt.Horizontal)
+        self._slider = NoWheelSlider(Qt.Horizontal)
         self._slider.setRange(1, 20)
         self._slider.valueChanged.connect(lambda v: self._emit(width=float(v)))
         col.addWidget(self._slider)
@@ -334,9 +350,6 @@ class PropertiesPanel(QScrollArea):
         self._image_size = QLabel()
         self._image_size.setProperty("sfRole", "secondary")
         col.addWidget(self._image_size)
-        beautify = self._switch_row(col, "beautify", "Beautify when copying, saving or dragging")
-        beautify.setToolTip("Gradient backdrop, rounded corners and a shadow")
-        beautify.toggled.connect(lambda on: None if self._loading else self.beautify_changed.emit(on))
 
     # ------------------------------------------------------------------ state
     def load(self, kind: str, style: Style | None, has_selection: bool) -> None:
@@ -359,6 +372,7 @@ class PropertiesPanel(QScrollArea):
         self._switches["fill"].property("rowLabel").setText(
             {"text": "Background", "callout": "Filled"}.get(kind, "Fill"))
         self._size_label.setText(self.size_label().upper())
+        self._slider.setAccessibleName(self.size_label())
         if style:
             self._load_style(style)
         self._loading = False
@@ -380,11 +394,6 @@ class PropertiesPanel(QScrollArea):
     def set_image_size(self, width: int, height: int) -> None:
         self._image_size.setText(f"{width} × {height} px")
 
-    def set_beautify(self, on: bool) -> None:
-        self._loading = True
-        self._switches["beautify"].setChecked(on)
-        self._loading = False
-
     def retheme(self) -> None:
         for shape in CALLOUT_SHAPES:
             self._shapes.button(shape).setIcon(icon(f"shape_{shape}"))
@@ -392,6 +401,11 @@ class PropertiesPanel(QScrollArea):
         self.viewport().update()
         for w in (*self._swatches.values(), *self._tiles, *self._switches.values()):
             w.update()
+
+    def _pick_swatch(self, color: str) -> None:
+        for c, swatch in self._swatches.items():
+            swatch.setChecked(c == color)
+        self._emit(color=color)
 
     def _emit(self, **changes) -> None:
         if "width" in changes:
