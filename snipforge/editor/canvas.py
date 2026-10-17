@@ -14,6 +14,7 @@ from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPixmap, QUndoStack
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
 from .. import theme
+from .beautify import BeautifyStyle
 from .commands import AddItemsCommand, CropCommand, RemoveItemsCommand, StateCommand
 from .crop import MIN_CROP, CropMask, crop_handle_at, move_crop, new_crop, resize_crop
 from .factory import create_item
@@ -116,6 +117,12 @@ class Canvas(QGraphicsView):
 
     def crop_rect(self) -> QRectF:
         return QRectF(self._crop_rect)
+
+    def frame_rect(self) -> QRectF:
+        """What an export covers: the crop, plus Beautify's padding when it's on."""
+        style = self._mask.beautify
+        pad = style.padding if style is not None else 0
+        return self._crop_rect.adjusted(-pad, -pad, pad, pad)
 
     def zoom(self) -> float:
         return self.transform().m11() or 1.0
@@ -244,6 +251,15 @@ class Canvas(QGraphicsView):
         self._mask.set_crop(rect)
         self._update_scene_rect()
 
+    def set_beautify(self, style: BeautifyStyle | None) -> None:
+        """Preview Beautify around the snip (never exported: render_image hides the mask). If you
+        could see the whole snip, you still can; a zoomed-in view stays as it is."""
+        whole = self.mapToScene(self.viewport().rect()).boundingRect().contains(self.frame_rect())
+        self._mask.set_beautify(style)
+        self._update_scene_rect()
+        if whole and not self._mask.editing:
+            self.fit_image()
+
     def reset_crop(self) -> None:
         if self._crop_rect != self._image_rect:
             self.undo_stack.push(CropCommand(self, self._crop_rect, self._image_rect))
@@ -289,7 +305,7 @@ class Canvas(QGraphicsView):
             self._mask.set_crop(self._image_rect)
 
     def _update_scene_rect(self) -> None:
-        base = self._image_rect if self._mask.editing else self._crop_rect
+        base = self._image_rect if self._mask.editing else self.frame_rect()
         self._scene.setSceneRect(base.adjusted(-SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN))
 
     def commit_text(self) -> None:
@@ -342,7 +358,7 @@ class Canvas(QGraphicsView):
 
     # ------------------------------------------------------------------ view
     def fit_image(self) -> None:
-        self.fit_rect(self._image_rect if self._mask.editing else self._crop_rect)
+        self.fit_rect(self._image_rect if self._mask.editing else self.frame_rect())
 
     def fit_rect(self, rect: QRectF) -> None:
         self.fitInView(rect.adjusted(-24, -24, 24, 24), Qt.KeepAspectRatio)

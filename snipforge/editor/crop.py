@@ -5,18 +5,23 @@ is dimmed, and the crop edges have handles: drag them in to cut, drag them back
 out to restore. Once applied, everything outside the crop is hidden (not just
 dimmed) and exports use only the kept area. The original pixels are never
 discarded, so re-entering Crop can always bring them back.
+
+With Beautify on (and not cropping), the mask also shows its backdrop, rounded
+corners and shadow around the kept area, exactly as exports will.
 """
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QGraphicsItem
 
 from .. import theme
+from .beautify import BeautifyStyle, backdrop_image
 
 HANDLE_PX = 10
 MIN_CROP = 8.0
 HIDE_MARGIN = 5000.0  # how far past the image the "cut" fill extends (covers stray annotations)
+BACKDROP_CACHE_PX = 2400  # the Beautify preview is drawn from an image at most this big
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +89,8 @@ class CropMask(QGraphicsItem):
         self._pattern = None  # callable -> (QBrush, origin in viewport pixels); the canvas's dot grid
         self.crop = QRectF(image_rect)
         self.editing = False
+        self.beautify: BeautifyStyle | None = None
+        self._backdrop: tuple[tuple, QPixmap] | None = None  # (key, pixmap): drawn once, not every frame
         self.setZValue(1000)
         self.setAcceptedMouseButtons(Qt.NoButton)
 
@@ -103,25 +110,49 @@ class CropMask(QGraphicsItem):
         self.editing = editing
         self.update()
 
+    def set_beautify(self, style: BeautifyStyle | None) -> None:
+        self.beautify = style
+        if style is None:
+            self._backdrop = None
+        self.update()
+
     def boundingRect(self) -> QRectF:
         return self._image.adjusted(-HIDE_MARGIN, -HIDE_MARGIN, HIDE_MARGIN, HIDE_MARGIN)
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         if self.editing:
             self._paint_editing(p, p.worldTransform().m11() or 1.0)
+        elif self.beautify is not None:
+            self._paint_beautify(p, self.beautify)
         elif self.crop != self._image:
             self._paint_cut(p)
 
-    def _outside(self, outer: QRectF) -> QPainterPath:
+    def _outside(self, outer: QRectF, hole_rect: QRectF | None = None) -> QPainterPath:
         path = QPainterPath()
         path.addRect(outer)
         hole = QPainterPath()
-        hole.addRect(self.crop)
+        hole.addRect(hole_rect if hole_rect is not None else self.crop)
         return path.subtracted(hole)
 
-    def _paint_cut(self, p: QPainter) -> None:
+    def _paint_beautify(self, p: QPainter, style: BeautifyStyle) -> None:
+        pad = style.padding
+        backdrop = self.crop.adjusted(-pad, -pad, pad, pad)
+        self._fill_cut(p, self._outside(self.boundingRect(), backdrop))  # past the backdrop isn't exported
+        pixmap = self._backdrop_pixmap(style, backdrop)
+        p.drawPixmap(backdrop, pixmap, QRectF(pixmap.rect()))  # clear over the snip, so it shows through
+
+    def _backdrop_pixmap(self, style: BeautifyStyle, backdrop: QRectF) -> QPixmap:
+        """Painting the gradient and shadow every frame made drawing lag on big snips."""
+        scale = min(1.0, BACKDROP_CACHE_PX / max(backdrop.width(), backdrop.height()))
+        width, height = round(self.crop.width()), round(self.crop.height())
+        key = (width, height, style, scale)
+        if self._backdrop is None or self._backdrop[0] != key:
+            self._backdrop = (key, QPixmap.fromImage(backdrop_image(width, height, style, scale)))
+        return self._backdrop[1]
+
+    def _fill_cut(self, p: QPainter, outside: QPainterPath) -> None:
+        """The canvas's dots on screen, so a cut area blends in; plain background otherwise."""
         p.setPen(Qt.NoPen)
-        outside = self._outside(self.boundingRect())
         if self._pattern is not None and p.device() is not None and not isinstance(p.device(), QImage):
             brush, origin = self._pattern()  # the same dots as the canvas, so the cut blends in
             device_path = p.worldTransform().map(outside)
@@ -133,6 +164,10 @@ class CropMask(QGraphicsItem):
         else:
             p.setBrush(self._background)
             p.drawPath(outside)
+
+    def _paint_cut(self, p: QPainter) -> None:
+        self._fill_cut(p, self._outside(self.boundingRect()))
+        p.setPen(Qt.NoPen)
         for grow, alpha in ((6, 30), (3, 50), (1, 90)):  # soft edge so the kept area reads as a page
             ring = QPainterPath()
             ring.addRect(self.crop.adjusted(-grow, -grow + 2, grow, grow + 2))
