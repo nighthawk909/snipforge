@@ -14,6 +14,7 @@ from .capture import CaptureSession
 from .editor.window import EditorWindow
 from .home import HomeWindow
 from .hotkey import HotkeyListener
+from .indexer import TextIndexer
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
 from .single_instance import InstanceServer, send_to_running
@@ -48,6 +49,7 @@ class SnipForgeApp:
     def __init__(self, app: QApplication, library: Library | None = None) -> None:
         self._app = app
         self.library = library or Library()
+        self.indexer = TextIndexer(self.library)  # reads the words in snips so Library search finds them
         self._session: CaptureSession | None = None
         self._windows: list = []  # editors and pins kept alive until closed
         self._home: HomeWindow | None = None
@@ -63,6 +65,7 @@ class SnipForgeApp:
         self._rehook.start()
         self._build_tray()
         app.aboutToQuit.connect(self._hotkey.stop)
+        app.aboutToQuit.connect(self.indexer.close)
 
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
@@ -128,7 +131,7 @@ class SnipForgeApp:
     # ------------------------------------------------------------------ windows
     def show_home(self) -> None:
         if self._home is None:
-            self._home = HomeWindow(self.library, self.capture, self.open_entry)
+            self._home = HomeWindow(self.library, self.capture, self.open_entry, indexer=self.indexer)
         self._home.refresh()
         self._home.showNormal()
         self._bring_to_front(self._home)
@@ -150,6 +153,8 @@ class SnipForgeApp:
         except OSError as exc:
             log.warning("Couldn't add snip to library: %s", exc)
             entry = None
+        if entry is not None:
+            self.indexer.index(entry)
         self._open_editor(image, entry, None)
         if self._home is not None and self._home.isVisible():
             self._home.refresh()

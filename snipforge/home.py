@@ -4,7 +4,6 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
-import zlib
 
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QKeySequence, QPainter, QShortcut
@@ -29,6 +28,7 @@ from .icons import icon
 from .library import DOCUMENT, Library
 from .library_search import PERIODS, Item, group_by_date, select, tag_counts, top_apps
 from .library_view import SnipGrid
+from .theme.tokens import to_qcolor
 from .widgets import Segmented
 
 log = logging.getLogger(__name__)
@@ -36,10 +36,6 @@ VIEWS = {"all": ("All captures", "grid"), "favorites": ("Favorites", "star"), "e
 PERIOD_LABELS = {"any": "Any time", "today": "Today", "week": "This week", "month": "This month"}
 TAG_COLORS = ("#2F7BF6", "#2FA85A", "#F28C28", "#8E5BE8", "#E5372D", "#0E7C86")
 SIDEBAR_WIDTH = 236
-
-
-def tag_color(tag: str) -> str:
-    return TAG_COLORS[zlib.crc32(tag.encode("utf-8")) % len(TAG_COLORS)]
 
 
 class NavItem(QAbstractButton):
@@ -60,35 +56,45 @@ class NavItem(QAbstractButton):
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt API
         return QSize(SIDEBAR_WIDTH - 24, 34)
 
+    @staticmethod
+    def _colors(t) -> dict:
+        """On a branded (colored) sidebar, draw with the header band's colors."""
+        h, pal = t.header, t.palette
+        if h.branded:
+            return {"text": h.text, "text2": h.text2, "hover": h.hover, "select": h.button_border,
+                    "bar": h.primary_bg, "icon_on": h.text}
+        return {"text": pal.text, "text2": pal.text3, "hover": pal.hover, "select": pal.select,
+                "bar": t.accent.fill, "icon_on": t.accent.text}
+
     def paintEvent(self, _e) -> None:  # noqa: N802 - Qt API
         t = theme.current()
-        pal = t.palette
+        c = self._colors(t)
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect())
         if self.isChecked() or self.underMouse():
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(pal.select if self.isChecked() else pal.hover))
+            p.setBrush(to_qcolor(c["select"] if self.isChecked() else c["hover"]))
             p.drawRoundedRect(r, 6, 6)
         if self.isChecked():
-            p.setBrush(QColor(t.accent.fill))
+            p.setBrush(to_qcolor(c["bar"]))
             p.drawRoundedRect(QRectF(0, r.height() / 2 - 8, 3, 16), 1.5, 1.5)
         if self._dot:
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(self._dot))
             p.drawEllipse(QRectF(15, r.height() / 2 - 5, 10, 10))
         elif self._icon_name:
-            color = t.accent.text if self.isChecked() else pal.text2
+            color = c["icon_on"] if self.isChecked() else c["text2"]
             icon(self._icon_name, color, color, color).paint(p, 12, int(r.height() / 2 - 9), 18, 18)
         font = self.font()
         font.setBold(self.isChecked())
         p.setFont(font)
-        p.setPen(QColor(pal.text))
+        p.setPen(to_qcolor(c["text"]))
         p.drawText(r.adjusted(40, 0, -40, 0), Qt.AlignLeft | Qt.AlignVCenter, self.text())
         if self._count:
             font.setBold(False)
             p.setFont(font)
-            p.setPen(QColor(pal.text3))
+            p.setPen(to_qcolor(c["text2"]))
             p.drawText(r.adjusted(0, 0, -10, 0), Qt.AlignRight | Qt.AlignVCenter, self._count)
         if self.hasFocus():
             p.setPen(QColor(t.accent.fill))
@@ -249,7 +255,7 @@ class HomeWindow(QMainWindow):
 
     def _retheme(self, _theme=None) -> None:
         self._search_icon.setIcon(icon("search"))
-        on = theme.current().accent.on
+        on = theme.current().header.primary_text
         self._new.setIcon(icon("plus", on, on, on))
         self.update()
 
@@ -296,8 +302,8 @@ class HomeWindow(QMainWindow):
         self._tags_label.setVisible(bool(tags))
         if self._tag is not None and self._tag not in dict(tags):
             self._tag = None
-        for tag, count in tags[:12]:
-            nav = NavItem(tag, dot=tag_color(tag))
+        for n, (tag, count) in enumerate(tags[:12]):
+            nav = NavItem(tag, dot=TAG_COLORS[n % len(TAG_COLORS)])  # by position, so neighbors differ
             nav.set_count(count)
             nav.setChecked(tag == self._tag)
             nav.clicked.connect(lambda _=False, t=tag: self.show_tag(t))

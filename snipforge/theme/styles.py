@@ -179,6 +179,16 @@ QWidget#Segmented {{ background: {p.surface2}; border: 1px solid {p.border}; bor
 #Segmented QToolButton:checked {{ background: {p.surface}; color: {p.text}; font-weight: 600;
     border: 1px solid {p.border}; }}
 
+QWidget#Sidebar {{ background: {h.bg if h.branded else p.bg}; border-right: 1px solid {h.border}; }}
+#Sidebar QLabel[sfRole="section"] {{ color: {h.text2}; }}
+#Sidebar QPushButton[variant="primary"] {{ background: {h.primary_bg}; color: {h.primary_text};
+    border-color: {h.primary_bg}; }}
+QListView#SnipGrid {{ background: transparent; }}
+QToolButton#Chip {{ background: {p.surface}; color: {p.text2}; border: 1px solid {p.border}; border-radius: 14px;
+    padding: 4px 12px; }}
+QToolButton#Chip:hover {{ border-color: {p.text3}; }}
+QToolButton#Chip:checked {{ background: {a.soft}; color: {a.text}; border-color: {a.fill}; font-weight: 600; }}
+
 QWidget#Tray {{ background: {p.surface}; border-top: 1px solid {p.border}; }}
 QStatusBar#TrayStatus {{ background: transparent; border: none; color: {p.text2}; }}
 QScrollArea#TrayThumbs, QScrollArea#TrayThumbs > QWidget > QWidget {{ background: transparent; border: none; }}
