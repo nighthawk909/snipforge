@@ -28,8 +28,8 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__, autostart, prefs, project, theme
+from .editor import beautify
 from .icons import icon
-from .settings import app_settings
 from .theme.tokens import DARK, LIGHT
 from .widgets import NavItem, Segmented, SettingRow, ToggleSwitch, stack
 
@@ -153,6 +153,7 @@ class SettingsWindow(QMainWindow):
         self.setCentralWidget(root)
         self.show_section("general")
         theme.on_change(self._retheme)
+        beautify.switch().changed.connect(self._show_beautify)  # e.g. the editor's bottom-bar switch
 
     # ------------------------------------------------------------------ navigation
     def _build_nav(self) -> QWidget:
@@ -219,7 +220,7 @@ class SettingsWindow(QMainWindow):
         for switch, value in ((self.startup, autostart.is_enabled()), (self.copy_on_capture, prefs.copy_on_capture()),
                               (self.key_win_shift_s, win_shift_s), (self.key_print_screen, print_screen),
                               (self.magnifier, prefs.magnifier()),
-                              (self.beautify, app_settings().value("beautify", False, bool))):
+                              (self.beautify, beautify.enabled())):
             switch.blockSignals(True)
             switch.setChecked(value)
             switch.blockSignals(False)
@@ -316,13 +317,19 @@ class SettingsWindow(QMainWindow):
         self.format = Segmented([("png", "PNG"), ("jpg", "JPG")], value=prefs.export_format())
         self.format.changed.connect(prefs.set_export_format)
         self.beautify = ToggleSwitch("Beautify when copying, saving or dragging")
-        self.beautify.setChecked(app_settings().value("beautify", False, bool))
-        self.beautify.toggled.connect(lambda on: app_settings().setValue("beautify", on))
+        self.beautify.setChecked(beautify.enabled())
+        self.beautify.toggled.connect(beautify.set_enabled)
         return stack(
             self.folder_row,
             SettingRow("File format", "PNG keeps every pixel sharp. JPG makes smaller files for photos.", self.format),
             SettingRow("Beautify when copying, saving or dragging",
-                       "Backdrop, rounded corners and a shadow. Also in the editor's bottom bar.", self.beautify))
+                       "Backdrop, rounded corners and a shadow, shown in the editor as you mark up. "
+                       "Also in the editor's bottom bar.", self.beautify))
+
+    def _show_beautify(self, on: bool) -> None:
+        self.beautify.blockSignals(True)
+        self.beautify.setChecked(on)
+        self.beautify.blockSignals(False)
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Save folder", str(prefs.export_dir()))

@@ -208,7 +208,8 @@ class Tray(QWidget):
         self.status.setMinimumWidth(240)
         row.addWidget(self.status, 3)
         beautify_label = QLabel("Beautify")
-        beautify_label.setToolTip("Backdrop, rounded corners and a shadow when you copy, save or drag")
+        beautify_label.setToolTip("A backdrop, rounded corners and a shadow, shown around your snip here and added "
+                                  "when you copy, save, drag, pin or share")
         row.addWidget(beautify_label)
         self.beautify = ToggleSwitch("Beautify when copying, saving or dragging")
         self.beautify.toggled.connect(lambda on: None if self._loading else self.beautify_changed.emit(on))
