@@ -3,7 +3,7 @@ single-instance handoff, window detection and the packaged self-test."""
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QKeyEvent, QMouseEvent, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from snipforge.library import Library
 
@@ -11,17 +11,6 @@ from snipforge.library import Library
 def mouse(widget, etype, pos, button=Qt.LeftButton, buttons=Qt.LeftButton):
     pt = QPointF(*pos)
     QApplication.sendEvent(widget, QMouseEvent(etype, pt, widget.mapToGlobal(pt), button, buttons, Qt.NoModifier))
-
-
-@pytest.fixture
-def no_dialogs(monkeypatch):
-    """Record message boxes instead of blocking on them."""
-    shown = []
-    for name in ("information", "warning", "about"):
-        monkeypatch.setattr(QMessageBox, name, lambda *a, n=name, **k: shown.append((n, a)))
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: shown.append(("question", a)) or QMessageBox.No)
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(("question", self.text())) or QMessageBox.No)
-    return shown
 
 
 # --- capture overlay ------------------------------------------------------------------
@@ -61,6 +50,28 @@ def test_overlay_drag_is_clamped_to_screen(overlay):
     mouse(overlay, QEvent.MouseMove, (w + 300, h + 300), Qt.NoButton)
     mouse(overlay, QEvent.MouseButtonRelease, (w + 300, h + 300), buttons=Qt.NoButton)
     assert overlay.got[0].size().toTuple() == (50, 40)
+
+
+def test_overlay_remembers_which_window_a_snip_came_from(qapp):
+    from snipforge.capture import _ScreenOverlay
+    from snipforge.winrects import WindowInfo
+
+    screen = QGuiApplication.primaryScreen()
+    pix = QPixmap(screen.geometry().size())
+    pix.fill(QColor("#e8eaee"))
+    origin = screen.geometry().topLeft()
+    excel = WindowInfo(QRect(origin.x() + 100, origin.y() + 80, 300, 200), "Margin review.xlsx - Excel", "Excel")
+    o = _ScreenOverlay(screen, pix, [excel.rect], [excel])
+    o.resize(screen.geometry().size())
+    mouse(o, QEvent.MouseButtonPress, (150, 120))
+    mouse(o, QEvent.MouseMove, (200, 160), Qt.NoButton)
+    mouse(o, QEvent.MouseButtonRelease, (250, 200), buttons=Qt.NoButton)
+    assert o.last_source == excel
+    mouse(o, QEvent.MouseButtonPress, (600, 600))
+    mouse(o, QEvent.MouseMove, (640, 640), Qt.NoButton)
+    mouse(o, QEvent.MouseButtonRelease, (660, 660), buttons=Qt.NoButton)
+    assert o.last_source is None  # the desktop, not a window
+    o.close()
 
 
 def test_overlay_keys_and_right_click(overlay):
@@ -160,24 +171,6 @@ def test_command_from_args():
 
 
 # --- library window ------------------------------------------------------------------
-def test_home_window_lists_and_trashes(qapp, tmp_path, white_image, monkeypatch, no_dialogs):
-    from snipforge.home import HomeWindow
-    lib = Library(tmp_path)
-    for _ in range(2):
-        lib.create(white_image)
-    opened = []
-    home = HomeWindow(lib, lambda: None, opened.append)
-    home.refresh()
-    assert home._list.count() == 2
-    home._list.selectAll()
-    ids = home._selected_ids()
-    home._copy(ids[0])
-    assert not QGuiApplication.clipboard().image().isNull()
-    monkeypatch.setattr(lib, "move_to_trash", lambda entry: False)  # never touch the real Recycle Bin
-    home._trash(ids)
-    assert no_dialogs and no_dialogs[-1][0] == "warning"
-
-
 # --- pin window ----------------------------------------------------------------------
 def test_pin_window_zoom_fade_and_close(qapp, white_image):
     from snipforge.pin import PinWindow

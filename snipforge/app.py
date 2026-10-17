@@ -140,12 +140,13 @@ class SnipForgeApp:
         QTimer.singleShot(CAPTURE_DELAY_MS, self._session.start)
 
     def _on_captured(self, image: QImage | None) -> None:
+        source = self._session.source if self._session is not None else None
         self._session = None
         if image is None:
             return
         QGuiApplication.clipboard().setImage(image)  # like Win+Shift+S: the raw snip is on the clipboard too
         try:
-            entry = self.library.create(image)
+            entry = self.library.create(image, source=source)
         except OSError as exc:
             log.warning("Couldn't add snip to library: %s", exc)
             entry = None

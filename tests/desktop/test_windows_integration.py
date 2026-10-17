@@ -110,3 +110,34 @@ def test_title_bar_follows_the_theme(window):
         ctypes.byref(value), ctypes.sizeof(value))
     assert result == 0 and value.value == 1
     assert titlebar.style_title_bar(hwnd, False, "#F3F3F5", "#1B1B1F") is True
+
+
+def test_text_recognition_works_on_the_indexer_thread(qapp, tmp_path):
+    """Library search reads snips with the real Windows OCR, off the UI thread."""
+    from PySide6.QtGui import QFont, QPainter
+
+    from snipforge import ocr
+    from snipforge.indexer import TextIndexer
+    from snipforge.library import Library
+
+    try:
+        ocr.recognize(QImage(40, 20, QImage.Format_ARGB32))
+    except ocr.OcrUnavailable as exc:
+        pytest.skip(str(exc))
+    image = QImage(640, 90, QImage.Format_ARGB32)
+    image.fill(QColor("white"))
+    p = QPainter(image)
+    p.setFont(QFont("Segoe UI", 20))
+    p.setPen(QColor("black"))
+    p.drawText(16, 58, "Quarterly margin review")
+    p.end()
+    lib = Library(tmp_path)
+    entry = lib.create(image)
+    indexer = TextIndexer(lib)
+    assert indexer.index(entry)
+    deadline = time.time() + 20
+    while not lib.meta(entry).indexed and time.time() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.05)
+    indexer.close()
+    assert "margin" in lib.meta(entry).text.lower()
