@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import ocr, redact, theme
+from .. import ocr, prefs, redact, theme
 from ..dragout import DragOutButton
 from ..icons import icon
 from ..library import Entry, Library
@@ -51,8 +51,8 @@ TOOLS = [
     None,
     ("crop", "Crop (C)"),
 ]
-EXPORT_DIR = Path.home() / "Pictures" / "SnipForge"
 AUTOSAVE_MS = 700
+JPG_QUALITY = 92  # text in screenshots blurs at Qt's default of 75
 
 
 def load_tool_styles(settings: QSettings) -> dict[str, Style]:
@@ -332,15 +332,27 @@ class EditorWindow(QMainWindow):
         QGuiApplication.clipboard().setImage(self.final_image())
         self.statusBar().showMessage("Copied to clipboard", 2500)
 
+    @staticmethod
+    def _new_export_path() -> Path:
+        """In the Save folder chosen in Settings (Pictures\\SnipForge by default), PNG or JPG."""
+        folder = prefs.export_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / dt.datetime.now().strftime(f"snip-%Y%m%d-%H%M%S.{prefs.export_format()}")
+
     def save(self) -> None:
         if self._export_path is None:
-            EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-            self._export_path = EXPORT_DIR / dt.datetime.now().strftime("snip-%Y%m%d-%H%M%S.png")
+            try:
+                self._export_path = self._new_export_path()
+            except OSError as exc:
+                QMessageBox.warning(self, "SnipForge", f"Couldn't use the save folder: {exc}")
+                return
         self._write(self._export_path)
 
     def save_as(self) -> None:
-        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-        start = self._export_path or EXPORT_DIR / dt.datetime.now().strftime("snip-%Y%m%d-%H%M%S.png")
+        try:
+            start = self._export_path or self._new_export_path()
+        except OSError:
+            start = Path.home() / "Pictures"
         path, _ = QFileDialog.getSaveFileName(self, "Save snip", str(start),
                                               "PNG (*.png);;JPEG (*.jpg *.jpeg);;Bitmap (*.bmp)")
         if path:
@@ -348,11 +360,19 @@ class EditorWindow(QMainWindow):
             self._write(self._export_path)
 
     def _write(self, path: Path) -> None:
-        if self.final_image().save(str(path)):
+        jpg = path.suffix.lower() in (".jpg", ".jpeg")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            ok = self.final_image().save(str(path), "JPG" if jpg else None, JPG_QUALITY if jpg else -1)
+        except OSError:
+            ok = False
+        if ok:
             self.statusBar().showMessage(f"Saved {path}", 4000)
-        else:
-            QMessageBox.warning(self, "SnipForge", f"Couldn't save to {path}. Check the folder exists "
-                                "and you have permission to write there.")
+            return
+        if path == self._export_path:
+            self._export_path = None  # try the Save folder from Settings again next time
+        QMessageBox.warning(self, "SnipForge", f"Couldn't save to {path}. Check the folder exists "
+                            "and you have permission to write there, or choose another in Settings > Saving.")
 
     def pin(self) -> None:
         if self._on_pin:

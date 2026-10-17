@@ -228,6 +228,7 @@ class Tray(QWidget):
         while self._thumbs.count() > 1:  # keep the trailing stretch
             widget = self._thumbs.takeAt(0).widget()
             if widget:
+                widget.hide()
                 widget.deleteLater()
         self._label.setVisible(bool(entries))
         for entry in entries[:RECENT_COUNT]:

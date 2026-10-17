@@ -47,6 +47,8 @@ class UpdateFlow(QObject):
         self._progress: QProgressDialog | None = None
         self._whats_new: Release | None = None
         self._dialog_open = False
+        # True while Settings > Updates is on screen: it shows the same state, so no tray dialogs.
+        self.ui_shows_updates = lambda: False
         self.controller.state_changed.connect(self._on_state)
         tray.messageClicked.connect(self._show_whats_new)
 
@@ -74,6 +76,11 @@ class UpdateFlow(QObject):
         previous, self._previous = self._previous, state.kind
         if state.kind != "downloading":
             self._close_progress()
+        if self.ui_shows_updates() and state.kind != "installing" and not self._installing:
+            if state.kind == "error":
+                log.info("Update problem: %s", state.message)
+            self._manual = False
+            return
         handler = getattr(self, f"_on_{state.kind}", None)
         if handler is not None:
             handler(state, previous)

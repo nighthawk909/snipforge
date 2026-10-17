@@ -13,7 +13,7 @@ from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
-from . import theme
+from . import prefs, theme
 
 DIM = QColor(0, 0, 0, 120)
 DRAG_THRESHOLD = 4
@@ -50,6 +50,7 @@ class _ScreenOverlay(QWidget):
         self._sources = [(local, info) for r, info in zip(window_rects, sources or [], strict=False)
                          if (local := self._map(origin, r)) is not None]
         self.last_source = None  # the window the latest selection came from, if any
+        self._magnifier = prefs.magnifier()
         self._press: QPoint | None = None
         self._current: QPoint | None = None
         self._dragging = False
@@ -118,7 +119,8 @@ class _ScreenOverlay(QWidget):
         if not self._dragging and self._press is None:
             self._paint_hint(p)
         if self._cursor is not None:
-            self._paint_magnifier(p, self._cursor)
+            if self._magnifier:
+                self._paint_magnifier(p, self._cursor)
 
     def _outside(self, sel: QRect) -> list[QRect]:
         r = self.rect()

@@ -153,7 +153,8 @@ def test_windows_share_and_fallback(window, fakes, monkeypatch):
 
 
 def test_show_in_folder_saves_first(window, fakes, monkeypatch, tmp_path):
-    from snipforge.editor import window as window_module
-    monkeypatch.setattr(window_module, "EXPORT_DIR", tmp_path / "exports")
+    from snipforge import prefs
+    monkeypatch.setattr(prefs, "export_dir", lambda: tmp_path / "exports")
     controller(window).show_in_folder()
     assert window.export_path.exists() and fakes["popen"][0][0] == "explorer"
+    assert window.export_path.parent == tmp_path / "exports"

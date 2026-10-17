@@ -110,7 +110,8 @@ QCheckBox::indicator:hover {{ border-color: {p.text2}; }}
 QCheckBox::indicator:checked {{ background: {a.fill}; border-color: {a.fill}; {check} }}
 QRadioButton::indicator {{
     width: 16px; height: 16px; border: 1px solid {p.text3}; border-radius: 9px; background: {p.surface}; }}
-QRadioButton::indicator:checked {{ border: 5px solid {a.fill}; background: {a.on}; }}
+QRadioButton::indicator:checked {{
+    width: 8px; height: 8px; border: 5px solid {a.fill}; border-radius: 9px; background: {a.on}; }}
 
 QMenu {{ background: {p.surface}; color: {p.text}; border: 1px solid {p.border}; border-radius: 8px; padding: 4px; }}
 QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: 4px; background: transparent; }}
@@ -188,6 +189,14 @@ QToolButton#Chip {{ background: {p.surface}; color: {p.text2}; border: 1px solid
     padding: 4px 12px; }}
 QToolButton#Chip:hover {{ border-color: {p.text3}; }}
 QToolButton#Chip:checked {{ background: {a.soft}; color: {a.text}; border-color: {a.fill}; font-weight: 600; }}
+
+QWidget#SettingsNav {{ background: {p.bg}; border-right: 1px solid {p.border}; }}
+QWidget#SettingsBody, QScrollArea#SettingsScroll {{ background: {p.bg}; border: none; }}
+QFrame#SettingCard {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 8px; }}
+QLabel#SettingTitle {{ font-weight: 600; }}
+QLabel#StatusBadge {{ background: {a.soft}; border-radius: 22px; }}
+QPushButton#AccentChoice {{ text-align: left; padding: 8px 12px; }}
+QPushButton#AccentChoice:checked {{ background: {a.soft}; border-color: {a.fill}; color: {a.text}; font-weight: 600; }}
 
 QWidget#Tray {{ background: {p.surface}; border-top: 1px solid {p.border}; }}
 QStatusBar#TrayStatus {{ background: transparent; border: none; color: {p.text2}; }}
