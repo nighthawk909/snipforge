@@ -4,7 +4,7 @@ Free, open-source screenshot and markup tool for Windows: a lightweight alternat
 Press **Win+Shift+S** (or Print Screen), drag over anything, and the snip opens straight in an
 editor with arrows, callouts, stamps, blur and more.
 
-![SnipForge editor](docs/editor-preview.png)
+![The SnipForge editor: a snip marked up with a box, an arrow, step numbers, a blur and a callout](docs/screenshots/editor-light.png)
 
 ## Install
 
@@ -68,6 +68,17 @@ location ([docs/IT-REVIEW.md](docs/IT-REVIEW.md)).
 
 **Extras.** Grab text (OCR, offline) · Redact (finds emails and phone/card numbers and blurs them) ·
 Pin a snip on top of other windows · Beautify (backdrop, rounded corners, shadow).
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Editor in dark mode](docs/screenshots/editor-dark.png) | ![Library with search, favorites and tags](docs/screenshots/library-light.png) |
+| **Editor, dark.** Tools on the left, quick styles and properties on the right, recent snips along the bottom. | **Library.** Every snip by day, searchable by the words inside it, with favorites, tags and app filters. |
+| ![Settings, Updates page](docs/screenshots/settings-updates.png) | ![Settings, Appearance page](docs/screenshots/settings-appearance.png) |
+| **Settings > Updates.** Choose how updates install, the release channel, any version (or go back to one), and stay on the version you choose. | **Settings > Appearance.** Match Windows, light or dark, and the accent color. |
+
+Screenshots are rendered from the app with sample content: `QT_QPA_PLATFORM=windows python scripts/make_screenshots.py`.
 
 ## Privacy
 
