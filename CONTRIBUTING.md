@@ -26,8 +26,9 @@ python -m ruff check .   # lint
    installer build whose packaged app runs a self-test.
 5. **Merge** (squash). release-please opens or updates a **release PR** with the version bump and
    CHANGELOG entry, and CI is started on it automatically.
-6. **Release** by merging the release PR. That tags `vX.Y.Z`, creates the GitHub release, builds
-   the installer, and attaches the installer, portable zip, checksums and SBOM.
+6. **Release** by merging the release PR. That tags `vX.Y.Z`, creates a draft GitHub release, builds
+   the installer, attaches the installer, portable zip, checksums and SBOM, and then publishes the
+   release, so download links never point at a release that doesn't have its installer yet.
 
 ## Building locally
 

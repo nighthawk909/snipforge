@@ -27,9 +27,14 @@ Releases as a per-user installer. These rules make agent-driven changes safe to 
 ## Releases
 
 - Never edit version numbers or `CHANGELOG.md` by hand; release-please does both in its release PR.
-- Merging the release PR publishes the release and the build attaches the installer. Check the
-  Release workflow run and confirm the assets (setup.exe, portable zip, SHA256SUMS.txt,
-  sbom.cdx.json) are on the release.
+- Merging the release PR creates the tag and a draft release; the Release workflow builds, attaches
+  the installer and only then publishes it. Check the Release workflow run and confirm the release
+  is published with its assets (setup.exe, portable zip, SHA256SUMS.txt, sbom.cdx.json). If the
+  run fails the release stays a draft and the previous one stays "Latest": use "Re-run failed jobs"
+  on that run (reuses a finished build), or run the Release workflow by hand with the tag.
+- Keep `draft` and `force-tag-creation` together in `release-please-config.json`. GitHub only
+  creates a draft's tag when it's published; without it the build can't check out the tag, and
+  release-please can't find the previous release, so its next release PR lists the whole history.
 - Ask the maintainer before merging a release PR or changing repo visibility, branch protection or
   secrets.
 
