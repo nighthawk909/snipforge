@@ -89,7 +89,7 @@ Things the prototype found out about Qt 6.12 that the design depends on:
 - `QAudioBufferInput` ignores audio timestamps and plays buffers end to end. So the mixer must
   deliver one unbroken stream that starts at 0.0 s, with silence filled in. It does.
 - Qt's encoder for H.264 is Windows' own **software** H.264 encoder ("H264 Encoder MFT",
-  Constrained Baseline profile, a keyframe about every second). Qt's FFmpeg has no NVIDIA/Intel/AMD
+  Constrained Baseline profile, no B-frames; keyframes between about 1 s apart on a busy screen and 3 s on a still one). Qt's FFmpeg has no NVIDIA/Intel/AMD
   hardware encoders, and Qt doesn't ask Media Foundation for its hardware ones. Fine at 1080p30;
   the reason for the 1080p cap.
 - **Correction (found after the prototype, while building step 1):** Qt 6.12 offers no H.264 in
