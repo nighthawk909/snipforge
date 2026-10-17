@@ -85,7 +85,7 @@ def _tone(first: int, count: int, hz: float, fmt):
 
 
 def make_test_clip(path: Path, seconds: float = 1.0, size: tuple[int, int] = (320, 240), fps: int = 30,
-                   tone_hz: float = 440.0) -> Path:
+                   tone_hz: float = 440.0, container: str = "mp4") -> Path:
     """Encode `seconds` of numbered frames and a tone to `path` (MP4: H.264 + AAC).
 
     The file is checked to start like an MP4. In about 1 test run in 65, one clip came out as
@@ -93,18 +93,19 @@ def make_test_clip(path: Path, seconds: float = 1.0, size: tuple[int, int] = (32
     outside the test runner; that clip is recorded once more, with a warning in the log. The
     recorder step investigates this with a stress test (docs/VIDEO-PLAN.md, Risks)."""
     path = Path(path).resolve()  # Qt puts a relative name in the Videos folder
-    _record(path, seconds, size, fps, tone_hz)
-    if not _starts_like_mp4(path):
+    _record(path, seconds, size, fps, tone_hz, container)
+    if container == "mp4" and not _starts_like_mp4(path):
         log.warning("A test clip didn't come out as MP4 (it starts %r); recording it again", _head(path))
         path.unlink(missing_ok=True)
-        _record(path, seconds, size, fps, tone_hz)
+        _record(path, seconds, size, fps, tone_hz, container)
         if not _starts_like_mp4(path):
             raise ClipError(f"The test clip isn't an MP4 file (it starts {_head(path)!r})")
     return path
 
 
-def _record(path: Path, seconds: float, size: tuple[int, int], fps: int, tone_hz: float) -> None:
-    _ClipRecording(path, seconds, size, fps, tone_hz).run()
+def _record(path: Path, seconds: float, size: tuple[int, int], fps: int, tone_hz: float,
+            container: str = "mp4") -> None:
+    _ClipRecording(path, seconds, size, fps, tone_hz, container).run()
 
 
 def _head(path: Path) -> bytes:
@@ -121,7 +122,8 @@ class _ClipRecording:
     stopped and the recorder stopped, so nothing outlives it (Qt's connections to these methods
     would otherwise keep the recorder, and its open file, alive)."""
 
-    def __init__(self, path: Path, seconds: float, size: tuple[int, int], fps: int, tone_hz: float) -> None:
+    def __init__(self, path: Path, seconds: float, size: tuple[int, int], fps: int, tone_hz: float,
+                 container: str = "mp4") -> None:
         from PySide6 import QtMultimedia as M
 
         self.M = M
@@ -143,7 +145,9 @@ class _ClipRecording:
         self.session.setVideoFrameInput(self.video)
         self.session.setAudioBufferInput(self.sound)
         self.session.setRecorder(self.recorder)
-        media = M.QMediaFormat(M.QMediaFormat.FileFormat.MPEG4)
+        # "mkv" makes Qt's Matroska, with its quirks, to test reading those (MPEG-4 Part 2, not H.264)
+        media = M.QMediaFormat({"mp4": M.QMediaFormat.FileFormat.MPEG4,
+                                "mkv": M.QMediaFormat.FileFormat.Matroska}[container])
         media.setVideoCodec(M.QMediaFormat.VideoCodec.H264)
         media.setAudioCodec(M.QMediaFormat.AudioCodec.AAC)
         self.recorder.setMediaFormat(media)

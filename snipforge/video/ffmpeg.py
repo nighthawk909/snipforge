@@ -13,6 +13,7 @@ records are read (MP4, Matroska, AVI), so a strange file never reaches FFmpeg's 
 from __future__ import annotations
 
 import ctypes
+import errno
 import os
 import sys
 from ctypes import POINTER, Structure, byref, c_char_p, c_int, c_int64, c_uint, c_uint32, c_void_p
@@ -20,11 +21,17 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-TESTED = {"avformat": 63, "avcodec": 63, "avutil": 61}  # FFmpeg 9.0, in Qt 6.12
-WINDOWS_NAMES = {"avutil": "avutil-61.dll", "avcodec": "avcodec-63.dll", "avformat": "avformat-63.dll"}
+TESTED = {"avformat": 63, "avcodec": 63, "avutil": 61, "swscale": 10}  # FFmpeg 9.0, in Qt 6.12
+WINDOWS_NAMES = {"avutil": "avutil-61.dll", "avcodec": "avcodec-63.dll", "avformat": "avformat-63.dll",
+                 "swscale": "swscale-10.dll"}
 AV_NOPTS_VALUE = -0x8000000000000000
 AV_TIME_BASE = 1_000_000
 AVMEDIA_TYPE_VIDEO, AVMEDIA_TYPE_AUDIO = 0, 1
+AVERROR_EOF = -0x20464F45  # FFERRTAG('E', 'O', 'F', ' ')
+AVERROR_INVALIDDATA = -0x41444E49  # FFERRTAG('I', 'N', 'D', 'A')
+AVERROR_EAGAIN = -errno.EAGAIN  # AVERROR(EAGAIN): 11 on Windows, 35 on macOS
+AVSEEK_FLAG_BACKWARD = 1
+AV_DISPOSITION_ATTACHED_PIC = 0x400  # a cover picture, not video
 FORMATS = b"mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi"  # the containers SnipForge reads
 
 
@@ -60,7 +67,24 @@ class AVCodecParameters(Structure):
 class AVStream(Structure):
     _fields_ = [("av_class", c_void_p), ("index", c_int), ("id", c_int), ("codecpar", POINTER(AVCodecParameters)),
                 ("priv_data", c_void_p), ("time_base", AVRational), ("start_time", c_int64),
-                ("duration", c_int64), ("nb_frames", c_int64)]
+                ("duration", c_int64), ("nb_frames", c_int64), ("disposition", c_int)]
+
+
+class AVPacket(Structure):  # allocated by av_packet_alloc, never by us
+    _fields_ = [("buf", c_void_p), ("pts", c_int64), ("dts", c_int64), ("data", c_void_p), ("size", c_int),
+                ("stream_index", c_int), ("flags", c_int), ("side_data", c_void_p), ("side_data_elems", c_int),
+                ("duration", c_int64), ("pos", c_int64)]
+
+
+class AVFrame(Structure):  # allocated by av_frame_alloc, never by us
+    _fields_ = [("data", c_void_p * 8), ("linesize", c_int * 8), ("extended_data", c_void_p), ("width", c_int),
+                ("height", c_int), ("nb_samples", c_int), ("format", c_int), ("pict_type", c_int),
+                ("sample_aspect_ratio", AVRational), ("pts", c_int64), ("pkt_dts", c_int64),
+                ("time_base", AVRational), ("quality", c_int), ("opaque", c_void_p), ("repeat_pict", c_int),
+                ("sample_rate", c_int), ("buf", c_void_p * 8), ("extended_buf", c_void_p), ("nb_extended_buf", c_int),
+                ("side_data", c_void_p), ("nb_side_data", c_int), ("flags", c_int), ("color_range", c_int),
+                ("color_primaries", c_int), ("color_trc", c_int), ("colorspace", c_int), ("chroma_location", c_int),
+                ("best_effort_timestamp", c_int64)]
 
 
 class AVInputFormat(Structure):
@@ -150,16 +174,47 @@ def _libs() -> dict[str, ctypes.CDLL]:
 
 
 def _declare(libs: dict[str, ctypes.CDLL]) -> None:
-    fmt, codec, util = libs["avformat"], libs["avcodec"], libs["avutil"]
+    fmt, codec, util, sws = libs["avformat"], libs["avcodec"], libs["avutil"], libs["swscale"]
+    ctx_p, pkt_p, frame_p = POINTER(AVFormatContext), POINTER(AVPacket), POINTER(AVFrame)
     for lib, name, restype, argtypes in [
-        (fmt, "avformat_open_input", c_int, [POINTER(POINTER(AVFormatContext)), c_char_p, c_void_p, c_void_p]),
-        (fmt, "avformat_find_stream_info", c_int, [POINTER(AVFormatContext), c_void_p]),
-        (fmt, "avformat_close_input", None, [POINTER(POINTER(AVFormatContext))]),
+        (fmt, "avformat_open_input", c_int, [POINTER(ctx_p), c_char_p, c_void_p, c_void_p]),
+        (fmt, "avformat_find_stream_info", c_int, [ctx_p, c_void_p]),
+        (fmt, "avformat_close_input", None, [POINTER(ctx_p)]),
+        (fmt, "avformat_alloc_output_context2", c_int, [POINTER(ctx_p), c_void_p, c_char_p, c_char_p]),
+        (fmt, "avformat_free_context", None, [ctx_p]),
+        (fmt, "avformat_new_stream", POINTER(AVStream), [ctx_p, c_void_p]),
+        (fmt, "avformat_write_header", c_int, [ctx_p, c_void_p]),
+        (fmt, "av_write_trailer", c_int, [ctx_p]),
+        (fmt, "av_read_frame", c_int, [ctx_p, pkt_p]),
+        (fmt, "av_interleaved_write_frame", c_int, [ctx_p, pkt_p]),
+        (fmt, "av_seek_frame", c_int, [ctx_p, c_int, c_int64, c_int]),
+        (fmt, "avio_open2", c_int, [POINTER(c_void_p), c_char_p, c_int, c_void_p, POINTER(c_void_p)]),
+        (fmt, "avio_closep", c_int, [POINTER(c_void_p)]),
         (codec, "avcodec_get_name", c_char_p, [c_int]),
         (codec, "avcodec_license", c_char_p, []),
+        (codec, "avcodec_parameters_copy", c_int, [POINTER(AVCodecParameters), POINTER(AVCodecParameters)]),
+        (codec, "avcodec_find_decoder", c_void_p, [c_int]),
+        (codec, "avcodec_alloc_context3", c_void_p, [c_void_p]),
+        (codec, "avcodec_parameters_to_context", c_int, [c_void_p, POINTER(AVCodecParameters)]),
+        (codec, "avcodec_open2", c_int, [c_void_p, c_void_p, c_void_p]),
+        (codec, "avcodec_send_packet", c_int, [c_void_p, pkt_p]),
+        (codec, "avcodec_receive_frame", c_int, [c_void_p, frame_p]),
+        (codec, "avcodec_free_context", None, [POINTER(c_void_p)]),
+        (codec, "av_packet_alloc", pkt_p, []),
+        (codec, "av_packet_free", None, [POINTER(pkt_p)]),
+        (codec, "av_packet_unref", None, [pkt_p]),
+        (codec, "av_packet_rescale_ts", None, [pkt_p, AVRational, AVRational]),
         (util, "av_dict_set", c_int, [POINTER(c_void_p), c_char_p, c_char_p, c_int]),
         (util, "av_dict_free", None, [POINTER(c_void_p)]),
         (util, "av_strerror", c_int, [c_int, c_char_p, ctypes.c_size_t]),
+        (util, "av_frame_alloc", frame_p, []),
+        (util, "av_frame_free", None, [POINTER(frame_p)]),
+        (util, "av_frame_unref", None, [frame_p]),
+        (util, "av_get_pix_fmt", c_int, [c_char_p]),
+        (sws, "sws_getContext", c_void_p, [c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_void_p, c_void_p,
+                                           c_void_p]),
+        (sws, "sws_scale", c_int, [c_void_p, c_void_p, c_void_p, c_int, c_int, c_void_p, c_void_p]),
+        (sws, "sws_freeContext", None, [c_void_p]),
     ]:
         fn = getattr(lib, name)
         fn.restype, fn.argtypes = restype, argtypes
@@ -187,13 +242,20 @@ def license_text() -> str:
     return _libs()["avcodec"].avcodec_license().decode()
 
 
-def _message(code: int) -> str:
+def libs() -> dict[str, ctypes.CDLL]:
+    """The loaded libraries, for the other video modules (raises FFmpegUnavailable)."""
+    return _libs()
+
+
+def message(code: int) -> str:
+    """FFmpeg's description of an error code."""
     buf = ctypes.create_string_buffer(256)
     _libs()["avutil"].av_strerror(code, buf, len(buf))
     return buf.value.decode(errors="replace") or f"error {code}"
 
 
-def _seconds(value: int, base: AVRational) -> float | None:
+def seconds(value: int, base: AVRational) -> float | None:
+    """A timestamp in seconds, or None when the file doesn't say."""
     if value == AV_NOPTS_VALUE or not base.den:
         return None
     return value * base.num / base.den
@@ -223,16 +285,31 @@ def open_input(path: str | os.PathLike) -> ctypes._Pointer:
     finally:
         libs["avutil"].av_dict_free(byref(options))
     if code < 0:
-        raise FFmpegError(f"Couldn't open {Path(name).name}: {_message(code)}")
+        raise FFmpegError(f"Couldn't open {Path(name).name}: {message(code)}")
     code = libs["avformat"].avformat_find_stream_info(ctx, None)
     if code < 0:
         close_input(ctx)
-        raise FFmpegError(f"Couldn't read {Path(name).name}: {_message(code)}")
+        raise FFmpegError(f"Couldn't read {Path(name).name}: {message(code)}")
     return ctx
 
 
 def close_input(ctx) -> None:
     _libs()["avformat"].avformat_close_input(byref(ctx))
+
+
+def streams(ctx) -> list[AVStream]:
+    fc = ctx.contents
+    return [fc.streams[i].contents for i in range(fc.nb_streams)]
+
+
+def kind(stream: AVStream) -> int:
+    return stream.codecpar.contents.codec_type
+
+
+def video_stream(ctx) -> AVStream | None:
+    """The file's video (not a cover picture), if it has any."""
+    return next((st for st in streams(ctx) if kind(st) == AVMEDIA_TYPE_VIDEO
+                 and not st.disposition & AV_DISPOSITION_ATTACHED_PIC), None)
 
 
 def probe(path: str | os.PathLike) -> MediaInfo:
@@ -251,9 +328,9 @@ def probe(path: str | os.PathLike) -> MediaInfo:
                 width=par.width if kind == "video" else 0, height=par.height if kind == "video" else 0,
                 sample_rate=par.sample_rate if kind == "audio" else 0,
                 channels=par.ch_layout.nb_channels if kind == "audio" else 0,
-                start=_seconds(st.start_time, st.time_base), duration=_seconds(st.duration, st.time_base),
+                start=seconds(st.start_time, st.time_base), duration=seconds(st.duration, st.time_base),
                 frames=max(0, st.nb_frames)))
         fmt = fc.iformat.contents.name.decode() if fc.iformat else ""
-        return MediaInfo(fmt, _seconds(fc.duration, AVRational(1, AV_TIME_BASE)), tuple(streams))
+        return MediaInfo(fmt, seconds(fc.duration, AVRational(1, AV_TIME_BASE)), tuple(streams))
     finally:
         close_input(ctx)

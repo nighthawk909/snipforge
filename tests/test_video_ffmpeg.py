@@ -79,13 +79,13 @@ def test_names_outside_ascii_work(test_clip, tmp_path):
 
 
 def test_only_the_tested_ffmpeg_version_is_used():
-    assert ffmpeg.check_versions({"avformat": 63, "avcodec": 63, "avutil": 61}) is None
+    assert ffmpeg.check_versions({"avformat": 63, "avcodec": 63, "avutil": 61, "swscale": 10}) is None
     with pytest.raises(ffmpeg.FFmpegUnavailable, match="avformat 64"):
-        ffmpeg.check_versions({"avformat": 64, "avcodec": 63, "avutil": 61})
+        ffmpeg.check_versions({"avformat": 64, "avcodec": 63, "avutil": 61, "swscale": 10})
 
 
 def test_the_libraries_are_the_ones_qt_ships():
     versions = ffmpeg.versions()
 
-    assert versions == {"avformat": 63, "avcodec": 63, "avutil": 61}
+    assert versions == {"avformat": 63, "avcodec": 63, "avutil": 61, "swscale": 10}
     assert ffmpeg.license_text().startswith("LGPL")
