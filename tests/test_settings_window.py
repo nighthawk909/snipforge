@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QMessageBox, QPushButton
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton, QScrollArea
 
 from snipforge import autostart, prefs
 from snipforge.settings import app_settings
@@ -250,8 +250,6 @@ def test_version_buttons_follow_the_engine_state(make):
 
 @pytest.mark.parametrize("height", [760, 520])
 def test_every_page_opens_at_the_top_and_short_pages_dont_scroll(make, height):
-    from PySide6.QtWidgets import QApplication, QScrollArea
-
     from snipforge.settings_window import SECTIONS
     controller = FakeController()
     controller.releases = [release("0.8.0", days=7), release("0.7.0", days=3), release("0.6.0")]
@@ -269,11 +267,28 @@ def test_every_page_opens_at_the_top_and_short_pages_dont_scroll(make, height):
             w.show_section(key)
             QApplication.processEvents()
             assert bar.value() == 0, (previous, key)
-            if height == 760 and key != "updates":  # short pages fit the default window
+            if key == "updates":
+                assert bar.maximum() > 0  # the long page really scrolls, so the reset is tested
+            elif height == 760:  # short pages fit the default window
                 assert bar.maximum() == 0, (key, bar.maximum())
-    w.hide()  # reopening the window (e.g. the tray's About) starts at the top too
+    w.show_section("updates")
+    QApplication.processEvents()
     bar.setValue(bar.maximum())
-    w.show_section("about")
+    assert bar.value() > 0
+    w.hide()  # reopening the window from the tray starts at the top too
+    w.show_section("updates")
     w.show()
     QApplication.processEvents()
     assert bar.value() == 0
+
+
+def test_changing_page_never_puts_the_keyboard_in_the_find_box(make):
+    w = make()
+    w.show()
+    w.activateWindow()
+    QApplication.processEvents()
+    w.startup.setFocus()  # e.g. you clicked a switch on General
+    QApplication.processEvents()
+    w.show_section("capture")
+    QApplication.processEvents()
+    assert QApplication.focusWidget() is not w._find

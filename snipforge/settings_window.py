@@ -12,6 +12,7 @@ from PySide6.QtCore import QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QApplication,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -192,9 +193,13 @@ class SettingsWindow(QMainWindow):
 
     def show_section(self, key: str) -> None:
         label, _icon, blurb, _words = SECTIONS[key]
+        focused = QApplication.focusWidget()
+        if focused is not None and not self._pages[key].isAncestorOf(focused) and any(
+                page.isAncestorOf(focused) for page in self._pages.values()):
+            focused.clearFocus()  # hiding its page would hand the keyboard to the Find box
         for k, page in self._pages.items():
             page.setVisible(k == key)
-        self._scroll.verticalScrollBar().setValue(0)  # every page opens at its top
+        self._scroll.verticalScrollBar().setValue(0)  # every page opens at its top, even the same one
         self._title.setText(label)
         self._blurb.setText(blurb)
         for k, item in self._nav.items():
