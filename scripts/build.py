@@ -33,6 +33,8 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 INIT_FILE = ROOT / "snipforge" / "__init__.py"
 LATEST_INSTALLER = "SnipForge-setup.exe"
+# About 36 MB today, screen recording's libraries included. Raise it on purpose, never by accident.
+INSTALLER_BUDGET_MB = 40
 VERSION_RE = re.compile(r"\d+\.\d+\.\d+(?:-preview\.\d+)?")
 VERSION_LINE_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
 ISCC_CANDIDATES = [
@@ -164,6 +166,16 @@ def build_installer(app_dir: Path, version: str, signer: codesign.Signer | None 
     return DIST / f"SnipForge-{version}-setup.exe"
 
 
+def check_size_budget(installer: Path, budget_mb: float = INSTALLER_BUDGET_MB) -> float:
+    """Print the installer's size and stop the build if it has outgrown its budget."""
+    size_mb = installer.stat().st_size / 1_000_000
+    print(f"{installer.name}: {size_mb:.1f} MB (budget {budget_mb:g} MB)")
+    if size_mb > budget_mb:
+        sys.exit(f"{installer.name} is {size_mb:.1f} MB, over its {budget_mb:g} MB budget. Check what "
+                 "packaging/snipforge.spec bundles; raise INSTALLER_BUDGET_MB only on purpose.")
+    return size_mb
+
+
 def add_latest_alias(installer: Path) -> Path:
     """A version-less copy for the permanent .../releases/latest/download/SnipForge-setup.exe link."""
     alias = installer.with_name(LATEST_INSTALLER)
@@ -193,6 +205,7 @@ def build_all(version: str, installer: bool, signer: codesign.Signer | None = No
     signed = [app]
     if installer:
         setup = build_installer(app_dir, version, signer)
+        check_size_budget(setup)
         signed.append(setup)
         outputs = [*outputs, setup]
     if signer:
