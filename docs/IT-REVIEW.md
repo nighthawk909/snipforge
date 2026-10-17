@@ -57,12 +57,16 @@ the exported image.
 | Share → Teams | The Teams desktop app (`msteams:` link with the chosen recipients) | Opens the chat; the user pastes and sends |
 
 Update traffic is https only, and redirects can't downgrade to http. GitHub downloads must come from
-`github.com` or GitHub's file storage hosts, and a feed's installers must sit in the feed's own folder
-(or under its https address). Every installer is checked against its SHA-256 before it's saved, and
+`github.com` or GitHub's file storage hosts (the server and hosts named in `snipforge/project.py`),
+and a feed's installers must sit in the feed's own folder (or under its https address). Every installer is checked against its SHA-256 before it's saved, and
 again right before it runs. Release notes are shown as plain text, never as HTML.
 
 GitHub allows 60 anonymous requests an hour per public IP address. If many PCs share one address
 (an office behind NAT), some checks may be refused and retried later; a feed avoids this.
+
+SnipForge never signs in to GitHub. A copy of SnipForge built from a private or internal repository
+(see [PORTING.md](PORTING.md)) can't read its own releases; **Check for updates** then explains that
+and asks people to have IT set the `UpdateFeed` policy, and daily checks fail quietly.
 
 ## Controlling updates
 

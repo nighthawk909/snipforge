@@ -42,6 +42,9 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      # gh talks to github.com unless told otherwise; on GitHub Enterprise it needs this server.
+      - name: Point gh at this server
+        run: echo "GH_HOST=${GITHUB_SERVER_URL#https://}" >> "$GITHUB_ENV"
       # Workflows on a bot-opened release PR wait for approval ("action_required"). Approve them so
       # CI runs as a normal PR check, which the "Protect main" ruleset requires before merging.
       - name: Approve CI on the release PR
@@ -49,6 +52,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_ENTERPRISE_TOKEN: ${{ github.token }}
           # Raw JSON, parsed below: step env is evaluated even when the step is skipped, and
           # `pr` is empty on most runs, so fromJSON() here would fail the workflow.
           PR_JSON: ${{ steps.release.outputs.pr }}
@@ -102,12 +106,15 @@ jobs:
     env:
       TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
     steps:
+      # gh talks to github.com unless told otherwise; on GitHub Enterprise it needs this server.
+      - name: Point gh at this server
+        run: echo "GH_HOST=${GITHUB_SERVER_URL#https://}" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: snipforge-windows
           path: dist
       # SnipForge-setup.exe is the same installer without the version in its name, so
-      # https://github.com/<repo>/releases/latest/download/SnipForge-setup.exe always serves the
+      # <server>/<repo>/releases/latest/download/SnipForge-setup.exe always serves the
       # newest stable release. The in-app updater looks for the versioned name. scripts/build.py
       # makes the copy; tags built before it existed (re-run by hand) get it here.
       - name: Version-less installer for the permanent download link
@@ -130,6 +137,7 @@ jobs:
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_ENTERPRISE_TOKEN: ${{ github.token }}
         run: |
           gh release upload "$TAG" dist/SnipForge-*-setup.exe dist/SnipForge-setup.exe \
             dist/SnipForge-*-portable.zip dist/SHA256SUMS.txt dist/sbom.cdx.json \
@@ -140,6 +148,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_ENTERPRISE_TOKEN: ${{ github.token }}
         run: |
           draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
           if [ "$draft" != "true" ]; then

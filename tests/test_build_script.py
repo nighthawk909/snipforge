@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from snipforge import project
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -59,7 +61,7 @@ def test_numeric_version_for_windows_file_versions(version, numeric):
 
 def test_stamp_version_rewrites_and_can_be_restored(tmp_path):
     init = tmp_path / "__init__.py"
-    original = b'__version__ = "0.5.0"  # x-release-please-version\r\nREPO = "nighthawk909/snipforge"\r\n'
+    original = b'__version__ = "0.5.0"  # x-release-please-version\r\nOTHER = "kept"\r\n'
     init.write_bytes(original)
 
     saved = build.stamp_version("0.6.0-preview.1", init)
@@ -76,3 +78,13 @@ def test_stamp_version_rejects_unexpected_versions(tmp_path, bad):
     with pytest.raises(SystemExit):
         build.stamp_version(bad, init)
     assert init.read_text(encoding="utf-8") == '__version__ = "0.5.0"\n'
+
+
+def test_installer_links_to_the_repository_the_app_names(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(build, "run", commands.append)
+    monkeypatch.setattr(build, "find_iscc", lambda: Path("ISCC.exe"))
+
+    build.build_installer(tmp_path / "SnipForge", "0.6.0")
+
+    assert f"/DRepoUrl={project.REPO_URL}" in commands[0]

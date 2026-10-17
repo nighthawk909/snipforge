@@ -6,8 +6,9 @@ installer (Inno Setup). Used by CI and locally.
     python scripts/build.py --installer --set-version 0.6.0-preview.1   # a preview build
 
 The installer is also copied to SnipForge-setup.exe, which the release attaches so
-https://github.com/nighthawk909/snipforge/releases/latest/download/SnipForge-setup.exe always
-serves the newest stable installer. The in-app updater uses the versioned file.
+<repository>/releases/latest/download/SnipForge-setup.exe always serves the newest stable
+installer. The in-app updater uses the versioned file. The installer's links point at the
+repository snipforge/project.py names.
 """
 from __future__ import annotations
 
@@ -21,6 +22,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from snipforge import project  # noqa: E402 - standard library only; names the repository
+
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 INIT_FILE = ROOT / "snipforge" / "__init__.py"
@@ -128,7 +132,8 @@ def find_iscc() -> Path:
 
 def build_installer(app_dir: Path, version: str) -> Path:
     run([str(find_iscc()), f"/DAppVersion={version}", f"/DFileVersion={numeric_version(version)}",
-         f"/DSourceDir={app_dir}", f"/O{DIST}", str(ROOT / "packaging" / "installer.iss")])
+         f"/DSourceDir={app_dir}", f"/DRepoUrl={project.REPO_URL}", f"/O{DIST}",
+         str(ROOT / "packaging" / "installer.iss")])
     return DIST / f"SnipForge-{version}-setup.exe"
 
 

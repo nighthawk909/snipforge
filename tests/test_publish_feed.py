@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from snipforge import project
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -20,8 +22,9 @@ def _load(name):
 
 pf = _load("publish_feed")
 
-API = "https://api.github.com/repos/nighthawk909/snipforge/releases/"
-DL = "https://github.com/nighthawk909/snipforge/releases/download/"
+API_ROOT = f"{project.API_URL}/repos/"
+API = f"{API_ROOT}{project.REPO}/releases/"
+DL = f"{project.RELEASES_URL}/download/"
 
 
 def sha(data: bytes) -> str:
@@ -299,14 +302,16 @@ def gh_release(tag="v0.6.0-preview.1", prerelease=True, assets=None, body="### F
 
 class FakeGitHub:
     def __init__(self, release, files):
-        self.release, self.files, self.urls = release, files, []
+        self.release, self.files, self.urls, self.api_roots, self.hosts = release, files, [], [], []
 
-    def fetch_json(self, url):
+    def fetch_json(self, url, api_root):
         self.urls.append(url)
+        self.api_roots.append(api_root)
         return self.release
 
-    def download(self, url, dest):
+    def download(self, url, dest, hosts):
         self.urls.append(url)
+        self.hosts.append(hosts)
         dest.write_bytes(self.files[url.rsplit("/", 1)[1]])
 
 
@@ -399,6 +404,33 @@ def test_repo_option_is_validated(tmp_path, monkeypatch):
     assert fake.urls == []
 
 
+def test_github_enterprise_server_and_repository(tmp_path, monkeypatch):
+    ghe = "https://ghe.example.test/fixture-org/snipforge/releases/download/"
+    release = gh_release("v0.6.0", prerelease=False)
+    for item in release["assets"]:
+        item["browser_download_url"] = item["browser_download_url"].replace(DL, ghe)
+    fake = fake_github(monkeypatch, release)
+    assert pf.main(["--github", "latest", "--server-url", "https://ghe.example.test", "--repo", "fixture-org/snipforge",
+                    "--target", str(tmp_path / "feed")]) == 0
+    assert fake.urls[0] == "https://ghe.example.test/api/v3/repos/fixture-org/snipforge/releases/latest"
+    assert fake.api_roots == ["https://ghe.example.test/api/v3/repos/"]
+    assert fake.hosts[0] == project.download_hosts("https://ghe.example.test")
+    assert all(url.startswith(ghe) for url in fake.urls[1:])
+
+
+def test_defaults_come_from_the_app(tmp_path, monkeypatch):
+    fake = fake_github(monkeypatch, gh_release("v0.6.0", prerelease=False))
+    assert pf.main(["--github", "latest", "--target", str(tmp_path / "feed")]) == 0
+    assert fake.api_roots == [API_ROOT] and fake.hosts[0] == project.DOWNLOAD_HOSTS
+
+
+def test_server_url_option_is_validated(tmp_path, monkeypatch, capsys):
+    fake = fake_github(monkeypatch, gh_release())
+    assert pf.main(["--github", "latest", "--server-url", "http://ghe.example.test",
+                    "--target", str(tmp_path / "feed")]) == 1
+    assert fake.urls == [] and "https://" in capsys.readouterr().err
+
+
 def test_dist_and_github_are_mutually_exclusive(tmp_path):
     with pytest.raises(SystemExit):
         pf.main(["--target", str(tmp_path)])
@@ -442,7 +474,7 @@ def test_fetch_json_reads_the_api(monkeypatch):
         return FakeResponse(b'{"tag_name": "v0.6.0"}')
 
     monkeypatch.setattr(pf.urllib.request, "urlopen", urlopen)
-    assert pf.fetch_json(API + "latest") == {"tag_name": "v0.6.0"}
+    assert pf.fetch_json(API + "latest", API_ROOT) == {"tag_name": "v0.6.0"}
     assert seen[0].get_header("User-agent") == "snipforge-publish-feed"
 
 
@@ -452,27 +484,40 @@ def test_fetch_json_reports_missing_release(monkeypatch):
 
     monkeypatch.setattr(pf.urllib.request, "urlopen", urlopen)
     with pytest.raises(pf.FeedError, match="no published release"):
-        pf.fetch_json(API + "tags/v9.9.9")
+        pf.fetch_json(API + "tags/v9.9.9", API_ROOT)
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_fetch_json_suggests_dist_for_a_private_repository(monkeypatch, status):
+    """This script doesn't sign in, so a private repository's releases are downloaded with gh first."""
+    def urlopen(request, timeout):
+        raise pf.urllib.error.HTTPError(request.full_url, status, "Nope", {}, None)
+
+    monkeypatch.setattr(pf.urllib.request, "urlopen", urlopen)
+    with pytest.raises(pf.FeedError, match="gh release download.*--dist"):
+        pf.fetch_json(API + "latest", API_ROOT)
 
 
 def test_fetch_json_only_talks_to_the_github_api():
     with pytest.raises(pf.FeedError):
-        pf.fetch_json("file:///C:/Windows/win.ini")
+        pf.fetch_json("file:///C:/Windows/win.ini", API_ROOT)
+    with pytest.raises(pf.FeedError):
+        pf.fetch_json("https://api.github.com.evil.example/repos/x", "https://api.github.com/repos/")
 
 
 def test_download_streams_to_disk(tmp_path, monkeypatch):
     monkeypatch.setattr(pf.urllib.request, "urlopen", lambda request, timeout: FakeResponse(b"bytes" * 1000))
-    pf.download(DL + "v0.6.0/SHA256SUMS.txt", tmp_path / "out")
+    pf.download(DL + "v0.6.0/SHA256SUMS.txt", tmp_path / "out", project.DOWNLOAD_HOSTS)
     assert (tmp_path / "out").read_bytes() == b"bytes" * 1000
 
 
 def test_download_refuses_untrusted_links_and_redirects(tmp_path, monkeypatch):
     with pytest.raises(pf.FeedError):
-        pf.download("http://github.com/nighthawk909/snipforge/x.exe", tmp_path / "a")
+        pf.download(DL.replace("https://", "http://") + "x.exe", tmp_path / "a", project.DOWNLOAD_HOSTS)
     monkeypatch.setattr(pf.urllib.request, "urlopen",
                         lambda request, timeout: FakeResponse(b"x", final_url="https://evil.example/x"))
     with pytest.raises(pf.FeedError, match="unexpected host"):
-        pf.download(DL + "v0.6.0/x.exe", tmp_path / "b")
+        pf.download(DL + "v0.6.0/x.exe", tmp_path / "b", project.DOWNLOAD_HOSTS)
     assert not (tmp_path / "b").exists()
 
 
@@ -482,7 +527,7 @@ def test_download_network_failure_is_a_feed_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pf.urllib.request, "urlopen", urlopen)
     with pytest.raises(pf.FeedError, match="proxy said no"):
-        pf.download(DL + "v0.6.0/x.exe", tmp_path / "c")
+        pf.download(DL + "v0.6.0/x.exe", tmp_path / "c", project.DOWNLOAD_HOSTS)
 
 
 # ------------------------------------------------------------------ real-world folders (OneDrive, shares, Notepad)

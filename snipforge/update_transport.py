@@ -17,6 +17,10 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequ
 from . import __version__
 
 CANCELED = "Canceled"
+# HTTP refusals worth telling apart: sources turn the first two into advice (see update_sources.py).
+NEEDS_SIGN_IN = "The server wants a sign-in before it shares this, and SnipForge doesn't sign in."
+NOT_FOUND = "The server has nothing at that address."
+RATE_LIMITED = "The server is limiting requests right now. Try again later."
 CHUNK = 1 << 20
 
 Done = Callable[[bytes | None, str, str], None]
@@ -78,16 +82,25 @@ class NetworkTransport(QObject):
             done(None, CANCELED if transfer.cancelled else "The connection timed out.", final)
         elif error != QNetworkReply.NoError:
             status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
-            if status in (403, 429):
-                done(None, "The server is limiting requests right now. Try again later.", final)
-            else:
-                done(None, reply.errorString(), final)
+            done(None, _refusal(reply, status) or reply.errorString(), final)
         else:
             data = bytes(reply.readAll())
             if len(data) > max_bytes:
                 done(None, "The download was larger than expected, so it was stopped.", final)
             else:
                 done(data, "", final)
+
+
+def _refusal(reply, status) -> str | None:
+    """GitHub answers 403 both when it's rate limiting (with these headers) and when it refuses access."""
+    limited = reply.hasRawHeader("Retry-After") or bytes(reply.rawHeader("X-RateLimit-Remaining")).strip() == b"0"
+    if status == 429 or (status == 403 and limited):
+        return RATE_LIMITED
+    if status in (401, 403):
+        return NEEDS_SIGN_IN
+    if status == 404:
+        return NOT_FOUND
+    return None
 
 
 class _NoTransfer:

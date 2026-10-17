@@ -7,7 +7,10 @@
 #define AppName "SnipForge"
 #define AppExe "SnipForge.exe"
 #define AppUserModelID "SnipForge.SnipForge"
-#define RepoUrl "https://github.com/nighthawk909/snipforge"
+; scripts/build.py passes RepoUrl from snipforge/project.py; this default is for builds by hand.
+#ifndef RepoUrl
+  #define RepoUrl "https://github.com/nighthawk909/snipforge"
+#endif
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif

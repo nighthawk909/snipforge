@@ -8,6 +8,10 @@ There are three ways to get SnipForge onto PCs, from simplest to most managed:
 | [2. Company mirror](#2-company-mirror-sharepoint-or-a-network-share) | Teams that want installers on SharePoint or a file share, or to pilot previews | The mirror folder, set by IT policy |
 | [3. Software Center](#3-software-center) | IT-managed, all-users installs | IT packages each release |
 
+Running SnipForge from your organization's own copy of this repository (for example on GitHub
+Enterprise)? A private copy's download link and page need a sign-in and the app can't check it for
+updates, so the company mirror becomes the way updates arrive. See [PORTING.md](PORTING.md).
+
 ## 1. Download link
 
 This link always downloads the newest stable installer:

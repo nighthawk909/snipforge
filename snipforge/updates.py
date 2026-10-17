@@ -1,4 +1,5 @@
 """Release data shared by every update source: versions, GitHub release parsing and checksums.
+Where the GitHub releases live comes from snipforge/project.py.
 
 SnipForge checks for updates once a day unless updates are set to Manual or turned off by policy
 (see snipforge/update_policy.py and docs/IT-REVIEW.md). Network access lives in update_sources.py.
@@ -12,13 +13,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import REPO, __version__
+from . import __version__, project
 from .update_platform import PLATFORM, installer_version
 
-RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
-TRUSTED_PREFIX = f"https://github.com/{REPO}/"
-# Release downloads start at github.com and redirect to GitHub's asset storage.
-DOWNLOAD_HOSTS = {"github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"}
+RELEASES_PAGE = f"{project.RELEASES_URL}/latest"
+# Release downloads start at the GitHub server and may redirect to its file storage.
+DOWNLOAD_HOSTS = project.DOWNLOAD_HOSTS
 NOTES_MAX = 1200
 SHA256_RE = re.compile(r"[0-9a-fA-F]{64}")
 _VERSION_RE = re.compile(r"^\s*v?(\d+(?:\.\d+)*)(?:[-.]?([A-Za-z][0-9A-Za-z.-]*))?")
@@ -74,9 +74,9 @@ def is_newer(latest: str, current: str = __version__) -> bool:
     return new is not None and cur is not None and new > cur
 
 
-def trusted_download(url: str) -> bool:
+def trusted_download(url: str, hosts=DOWNLOAD_HOSTS) -> bool:
     parsed = urlparse(url or "")
-    return parsed.scheme == "https" and parsed.hostname in DOWNLOAD_HOSTS
+    return parsed.scheme == "https" and parsed.hostname in hosts
 
 
 def trim_notes(text: str) -> str:
@@ -90,7 +90,7 @@ def trim_notes(text: str) -> str:
 @dataclass(frozen=True)
 class Release:
     version: str                 # "0.5.0" or "0.6.0-beta.1"
-    page: str                    # release page on github.com ("" for a feed)
+    page: str                    # release page on the GitHub server ("" for a feed)
     notes: str                   # release notes, plain text, trimmed; never render as HTML
     installer_name: str | None   # "SnipForge-0.5.0-setup.exe"
     installer_url: str | None    # https URL, or a file path inside a folder feed
@@ -114,12 +114,14 @@ def parse_time(text) -> dt.datetime | None:
     return when if when.tzinfo else when.replace(tzinfo=dt.UTC)
 
 
-def parse_release(data: dict, repo: str = REPO, platform: str = PLATFORM) -> Release:
+def parse_release(data: dict, repo: str = project.REPO, platform: str = PLATFORM, *,
+                  server_url: str = project.SERVER_URL) -> Release:
     """Validate one GitHub release object. Raises ValueError if it's unusable."""
     version = normalize_version(str(data["tag_name"]))
     if not version:
         raise ValueError("GitHub returned an unrecognised version")
-    trusted = f"https://github.com/{repo}/"
+    trusted = f"{project.repo_url(server_url, repo)}/"
+    hosts = project.download_hosts(server_url)
     page = str(data.get("html_url") or "")
     if not page.startswith(trusted):  # never open a link we didn't expect
         page = f"{trusted}releases/latest"
@@ -127,7 +129,7 @@ def parse_release(data: dict, repo: str = REPO, platform: str = PLATFORM) -> Rel
     assets_prefix = f"{trusted}releases/download/"
     for asset in data.get("assets") or []:
         name, url = str(asset.get("name", "")), str(asset.get("browser_download_url", ""))
-        if not url.startswith(assets_prefix) or not trusted_download(url):
+        if not url.startswith(assets_prefix) or not trusted_download(url, hosts):
             continue
         asset_version = installer_version(name, platform)
         if asset_version is not None and version_key(asset_version) == version_key(version):
@@ -138,7 +140,8 @@ def parse_release(data: dict, repo: str = REPO, platform: str = PLATFORM) -> Rel
                    prerelease=bool(data.get("prerelease")), published=parse_time(data.get("published_at")))
 
 
-def parse_releases(data, repo: str = REPO, platform: str = PLATFORM) -> list[Release]:
+def parse_releases(data, repo: str = project.REPO, platform: str = PLATFORM, *,
+                   server_url: str = project.SERVER_URL) -> list[Release]:
     """A GitHub /releases list, newest first. Drafts and unrecognisable releases are left out."""
     if not isinstance(data, list):
         raise ValueError("GitHub didn't return a list of releases")
@@ -147,7 +150,7 @@ def parse_releases(data, repo: str = REPO, platform: str = PLATFORM) -> list[Rel
         if not isinstance(item, dict) or item.get("draft"):
             continue
         try:
-            release = parse_release(item, repo, platform)
+            release = parse_release(item, repo, platform, server_url=server_url)
         except (ValueError, KeyError, TypeError, AttributeError):
             continue
         found.setdefault(version_key(release.version), release)
