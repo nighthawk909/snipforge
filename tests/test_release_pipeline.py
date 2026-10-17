@@ -76,8 +76,8 @@ def find_bash():
     return None
 
 
-def step_lines(name):
-    lines = RELEASE_YML.read_text(encoding="utf-8").splitlines()
+def step_lines(name, workflow=RELEASE_YML):
+    lines = workflow.read_text(encoding="utf-8").splitlines()
     start = lines.index(f"      - name: {name}")
     # The step ends at the next step, or at the end of its job (a line indented 6 or fewer).
     end = next((i for i in range(start + 1, len(lines))
@@ -85,9 +85,9 @@ def step_lines(name):
     return lines[start:end]
 
 
-def step_script(name):
-    """The `run: |` block of the release.yml step called `name`, dedented."""
-    lines = step_lines(name)
+def step_script(name, workflow=RELEASE_YML):
+    """The `run: |` block of the workflow step called `name`, dedented."""
+    lines = step_lines(name, workflow)
     run = next(i for i in range(len(lines)) if lines[i].strip() == "run: |")
     indent = len(lines[run]) - len(lines[run].lstrip()) + 2
     body = []

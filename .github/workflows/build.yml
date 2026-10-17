@@ -4,6 +4,12 @@ name: Build
 # permanent download link) and the portable zip, proves the packaged app works (--self-test), and
 # writes checksums and an SBOM, uploaded as the "snipforge-windows" artifact.
 # Read-only: publishing is a separate job in release.yml (stable) and preview.yml (prereleases).
+#
+# Code signing (docs/CODE-SIGNING.md): callers that pass `sign: true` also grant `id-token: write`,
+# which lets this job sign in to Azure. Only release.yml, sign-test.yml and preview.yml's build of a
+# commit that's already on main do; CI and previews of other branches never get the token. A signed
+# build checks, before checking anything out, that the run is from main and the commit is on main,
+# so no unreviewed code runs where it could sign. Permissions come from the caller (none set here).
 on:
   workflow_call:
     inputs:
@@ -17,6 +23,15 @@ on:
         type: string
         required: false
         default: ""
+      sign:
+        description: "Sign with Azure Artifact Signing when the repository has it set up (the caller must grant id-token: write)"
+        type: boolean
+        required: false
+        default: false
+    outputs:
+      signed:
+        description: "'true' when the build was code-signed"
+        value: ${{ jobs.build.outputs.signed }}
   workflow_dispatch:
     inputs:
       version:
@@ -25,18 +40,41 @@ on:
         required: false
         default: ""
 
-permissions:
-  contents: read
-
 jobs:
   build:
     name: Build and self-test
     runs-on: windows-latest
     timeout-minutes: 40
+    outputs:
+      signed: ${{ steps.signing.outputs.enabled }}
     steps:
+      # Runs before any of the code being built: a signed build must come from main's reviewed code.
+      - name: Check the commit is on main
+        id: source
+        if: ${{ inputs.sign }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ENTERPRISE_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref || github.ref }}
+        run: |
+          export GH_HOST="${GITHUB_SERVER_URL#https://}"
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Signed builds run only from main; this run is from $GITHUB_REF."
+            exit 1
+          fi
+          ref="${REF#refs/heads/}"
+          ref="${ref#refs/tags/}"
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$ref" --jq .sha)
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...main" --jq .status)
+          case "$status" in
+            ahead|identical) echo "sha=$sha" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::$REF ($sha) isn't on main ($status), so it can't be signed. Merge it first, or build it unsigned."
+               exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ steps.source.outputs.sha || inputs.ref || github.ref }}  # exactly the commit checked above
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -50,12 +88,65 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+      # Unsigned (with a warning) while none of the variables are set, unless packaging/SIGNING_REQUIRED
+      # says signing is required; half a setup always fails the build.
+      - name: Code signing setup
+        id: signing
+        if: ${{ inputs.sign }}
+        shell: bash
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        run: |
+          required=(ARTIFACT_SIGNING_ENDPOINT ARTIFACT_SIGNING_ACCOUNT ARTIFACT_SIGNING_PROFILE AZURE_CLIENT_ID AZURE_TENANT_ID)
+          missing=()
+          for name in "${required[@]}"; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -eq "${#required[@]}" ]; then
+            if [ -f packaging/SIGNING_REQUIRED ]; then
+              echo "::error::Releases must be signed (packaging/SIGNING_REQUIRED), but the code signing repository variables are missing (docs/CODE-SIGNING.md)."
+              exit 1
+            fi
+            echo "::warning::This build isn't code-signed: code signing isn't set up for this repository yet (docs/CODE-SIGNING.md)."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Code signing is only partly set up. Add these repository variables: ${missing[*]} (docs/CODE-SIGNING.md)."
+            exit 1
+          fi
+          python scripts/codesign.py setup --dest "$RUNNER_TEMP/codesign" --endpoint "$ARTIFACT_SIGNING_ENDPOINT" \
+            --account "$ARTIFACT_SIGNING_ACCOUNT" --profile "$ARTIFACT_SIGNING_PROFILE" --github-env
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+      # OpenID Connect: GitHub vouches for this run and Azure trusts it, so no password is stored.
+      # The app's only role is signing, so it can't see subscriptions, and signing doesn't need one.
+      - name: Sign in to Azure for code signing
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      # Fetch the signing token now: it fails fast if Azure isn't set up right, and the cached token
+      # outlasts the build, unlike the short-lived GitHub token the sign-in used.
+      - name: Get the signing token
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        run: az account get-access-token --resource https://codesigning.azure.net --output none
       - name: Build
         env:
           SET_VERSION: ${{ inputs.version }}
+          SIGN: ${{ steps.signing.outputs.enabled == 'true' }}
         run: |
           $preview = if ($env:SET_VERSION) { @('--set-version', $env:SET_VERSION) } else { @() }
-          python scripts/build.py --installer @preview
+          $sign = if ($env:SIGN -eq 'true') { @('--sign') } else { @() }
+          python scripts/build.py --installer @preview @sign
+      - name: Sign out of Azure
+        if: ${{ always() && steps.signing.outputs.enabled == 'true' }}
+        run: az account clear
       - name: Self-test the packaged app
         shell: pwsh
         timeout-minutes: 5
@@ -71,6 +162,18 @@ jobs:
             $reported = (Get-Content $report -Raw | ConvertFrom-Json).version
             if ($reported -ne $env:SET_VERSION) { throw "Packaged app reports $reported, expected $env:SET_VERSION" }
           }
+      - name: Check signatures
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        shell: pwsh
+        run: |
+          $files = @('dist\SnipForge\SnipForge.exe') + (Get-ChildItem dist\SnipForge-*-setup.exe, dist\SnipForge-setup.exe).FullName
+          foreach ($file in $files) {
+            $sig = Get-AuthenticodeSignature $file
+            if ($sig.Status -ne 'Valid') { throw "$file isn't validly signed: $($sig.Status) $($sig.StatusMessage)" }
+            if (-not $sig.TimeStamperCertificate) { throw "$file has no timestamp, so its signature would expire with the certificate" }
+            "$(Split-Path $file -Leaf): signed by $($sig.SignerCertificate.Subject)"
+          }
+          "Signed by: $((Get-AuthenticodeSignature $files[0]).SignerCertificate.Subject)" >> $env:GITHUB_STEP_SUMMARY
       - name: SBOM (runtime dependencies only)
         shell: pwsh
         run: |

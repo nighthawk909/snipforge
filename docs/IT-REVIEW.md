@@ -132,12 +132,18 @@ Copy each `sha256` from the release's `SHA256SUMS.txt`. Entries that don't follo
   containing only the runtime dependencies in `requirements.txt`.
 - **Dependencies** are pinned (`requirements.txt`) and updated through Dependabot pull requests that
   must pass CI. GitHub Actions are pinned to full commit SHAs. Workflows run with read-only
-  permissions except the release-publishing job.
+  permissions except the release-publishing job, and the jobs that code-sign a commit already on
+  `main` (releases and previews of it), which can request an OpenID Connect token to sign in to
+  Azure. CI and builds of unmerged branches can't.
 - **Build provenance** and **code scanning (CodeQL)** turn on automatically once the repository is
   public. With them, release files can be verified with
   `gh attestation verify SnipForge-<version>-setup.exe --repo nighthawk909/snipforge`.
 - **Code signing**: releases aren't Authenticode-signed yet, so SmartScreen may warn on first run.
-  Options: allow-list by SHA-256 hash, or build from source internally (`python scripts/build.py --installer`).
+  The release pipeline signs `SnipForge.exe`, the installer and its uninstaller with Azure Artifact
+  Signing once the maintainer's signing account is set up ([CODE-SIGNING.md](CODE-SIGNING.md));
+  signatures are timestamped and verified before release. Until then: allow-list by SHA-256 hash,
+  sign with your own certificate, or build from source internally (`python scripts/build.py --installer`).
+  Deploying through Software Center avoids the SmartScreen prompt either way.
 
 ## Verifying a download
 

@@ -33,6 +33,7 @@ jobs:
     outputs:
       sha: ${{ steps.check.outputs.sha }}
       tag: ${{ steps.check.outputs.tag }}
+      on_main: ${{ steps.check.outputs.on_main }}
     steps:
       # gh talks to github.com unless told otherwise; on GitHub Enterprise it needs this server.
       - name: Point gh at this server
@@ -46,6 +47,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_ENTERPRISE_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
+          REF: ${{ inputs.ref }}
         run: |
           # The workflow file comes from the branch it's run on; only main's reviewed copy publishes.
           # (Choose what to build with the "ref" input instead.)
@@ -77,19 +79,43 @@ jobs:
             echo "::error::Couldn't check whether $tag exists: $found"
             exit 1
           fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          sha=$(git rev-parse HEAD)
+          # Only a commit that's already on main is built where it can be code-signed.
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...main" --jq .status)
+          case "$status" in
+            ahead|identical) on_main=true ;;
+            *) on_main=false
+               echo "::notice::$REF isn't on main yet, so this preview is built unsigned." ;;
+          esac
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "on_main=$on_main" >> "$GITHUB_OUTPUT"
 
+  # A branch that isn't on main yet builds unsigned, in a job that has no way to sign.
   build:
     needs: prepare
+    if: ${{ needs.prepare.outputs.on_main != 'true' }}
     uses: ./.github/workflows/build.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
       version: ${{ inputs.version }}
 
+  build-signed:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.on_main == 'true' }}
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      id-token: write  # code signing: build.yml checks the commit is on main again before checkout
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      version: ${{ inputs.version }}
+      sign: true
+
   publish:
     name: Publish prerelease
-    needs: [prepare, build]
+    needs: [prepare, build, build-signed]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.build.result == 'success' || needs.build-signed.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

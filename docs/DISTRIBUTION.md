@@ -44,7 +44,9 @@ Text you can paste into a post for coworkers:
 > No admin rights needed. If Windows says "Windows protected your PC", click **More info**, then
 > **Run anyway** (the installer isn't code-signed yet). Then press Win+Shift+S to snip.
 
-SnipForge then checks GitHub once a day and asks before installing a newer version.
+SnipForge then checks GitHub once a day and asks before installing a newer version. Updates it
+downloads itself don't show the SmartScreen prompt; only the first install from a browser can.
+Signing the installer is ready to switch on: see [CODE-SIGNING.md](CODE-SIGNING.md).
 
 ## 2. Company mirror: SharePoint or a network share
 

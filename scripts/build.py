@@ -4,6 +4,7 @@ installer (Inno Setup). Used by CI and locally.
     python scripts/build.py              # exe + portable zip
     python scripts/build.py --installer  # + SnipForge-<version>-setup.exe (needs Inno Setup 6)
     python scripts/build.py --installer --set-version 0.6.0-preview.1   # a preview build
+    python scripts/build.py --installer --sign   # signed with Azure Artifact Signing (docs/CODE-SIGNING.md)
 
 The installer is also copied to SnipForge-setup.exe, which the release attaches so
 <repository>/releases/latest/download/SnipForge-setup.exe always serves the newest stable
@@ -23,6 +24,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import codesign  # noqa: E402 - sibling script, not a package
+
 from snipforge import project  # noqa: E402 - standard library only; names the repository
 
 DIST = ROOT / "dist"
@@ -151,9 +155,11 @@ def find_iscc() -> Path:
     sys.exit("Inno Setup 6 (ISCC.exe) not found. Install it or set the ISCC environment variable.")
 
 
-def build_installer(app_dir: Path, version: str) -> Path:
+def build_installer(app_dir: Path, version: str, signer: codesign.Signer | None = None) -> Path:
+    # Inno Setup signs Setup.exe and the uninstaller it packs inside it with the same command.
+    signing = ["/DSign", f"/S{codesign.INNO_SIGN_TOOL}={signer.inno_command()}"] if signer else []
     run([str(find_iscc()), f"/DAppVersion={version}", f"/DFileVersion={numeric_version(version)}",
-         f"/DSourceDir={app_dir}", f"/DRepoUrl={project.REPO_URL}", f"/O{DIST}",
+         f"/DSourceDir={app_dir}", f"/DRepoUrl={project.REPO_URL}", f"/O{DIST}", *signing,
          str(ROOT / "packaging" / "installer.iss")])
     return DIST / f"SnipForge-{version}-setup.exe"
 
@@ -175,14 +181,23 @@ def write_checksums(files: list[Path], out_dir: Path = DIST) -> Path:
     return out
 
 
-def build_all(version: str, installer: bool) -> list[Path]:
-    print(f"Building SnipForge {version}")
+def build_all(version: str, installer: bool, signer: codesign.Signer | None = None) -> list[Path]:
+    print(f"Building SnipForge {version}" + (" (signed)" if signer else ""))
     shutil.rmtree(DIST, ignore_errors=True)
     app_dir = build_exe(version)
+    app = app_dir / "SnipForge.exe"
+    if signer:
+        signer.sign([app], run)  # before packaging, so the zip and the installer carry the signed app
     outputs = [build_zip(app_dir, version)]
+    signed = [app]
     if installer:
-        setup = build_installer(app_dir, version)
-        outputs = [*outputs, setup, add_latest_alias(setup)]
+        setup = build_installer(app_dir, version, signer)
+        signed.append(setup)
+        outputs = [*outputs, setup]
+    if signer:
+        signer.verify(signed, run)
+    if installer:
+        outputs.append(add_latest_alias(outputs[-1]))  # copied after signing, so it's signed too
     return outputs
 
 
@@ -191,10 +206,13 @@ def main() -> None:
     parser.add_argument("--installer", action="store_true", help="also build the Inno Setup installer")
     parser.add_argument("--set-version", metavar="VERSION",
                         help="build as this version, e.g. 0.6.0-preview.1 (snipforge/__init__.py is restored after)")
+    parser.add_argument("--sign", action="store_true",
+                        help="sign SnipForge.exe and the installer with Azure Artifact Signing (docs/CODE-SIGNING.md)")
     args = parser.parse_args()
+    signer = codesign.Signer.from_env() if args.sign else None  # before building: fail fast
     original_init = stamp_version(args.set_version) if args.set_version else None
     try:
-        outputs = build_all(read_version(), args.installer)
+        outputs = build_all(read_version(), args.installer, signer)
     finally:
         if original_init is not None:
             INIT_FILE.write_bytes(original_init)
