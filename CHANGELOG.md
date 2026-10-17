@@ -3,6 +3,24 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.9.0](https://github.com/nighthawk909/snipforge/compare/v0.8.0...v0.9.0) (2026-10-17)
+
+
+### Features
+
+* **capture:** a capture toolbar with Area, Window and Full screen modes ([#25](https://github.com/nighthawk909/snipforge/issues/25)) ([37bb815](https://github.com/nighthawk909/snipforge/commit/37bb81536102e13fb158b55a2c4a4f9d00c6408a))
+* **capture:** a delay before snipping, and the mouse pointer in your snips ([#28](https://github.com/nighthawk909/snipforge/issues/28)) ([da1e8ab](https://github.com/nighthawk909/snipforge/commit/da1e8abfe3ce5dbafb0ead025567dfe27ec0ff9d))
+* **capture:** Scrolling capture: a long page or list as one image ([#31](https://github.com/nighthawk909/snipforge/issues/31)) ([39e1dc2](https://github.com/nighthawk909/snipforge/commit/39e1dc2353a8f0a9f3b2f73922fc0dc77f556034))
+* **editor:** see Beautify's backdrop, rounded corners and shadow around your snip while you mark it up ([#30](https://github.com/nighthawk909/snipforge/issues/30)) ([a7764e1](https://github.com/nighthawk909/snipforge/commit/a7764e177c90ba05354d790a72c871fd386181a7))
+* **mac:** groundwork for SnipForge on Mac, with a test .dmg to try ([#32](https://github.com/nighthawk909/snipforge/issues/32)) ([92133a5](https://github.com/nighthawk909/snipforge/commit/92133a59c350ca773e3b5d64755297056d16962e))
+* **settings:** choose how snips start in Settings &gt; Capture: mode, delay and the mouse pointer ([#35](https://github.com/nighthawk909/snipforge/issues/35)) ([9e45aae](https://github.com/nighthawk909/snipforge/commit/9e45aae8418ad64dba6349e748a0295d490112c1))
+
+
+### Bug fixes
+
+* **editor:** every markup tool always shows in the tool rail, in two columns when the window is short ([#27](https://github.com/nighthawk909/snipforge/issues/27)) ([97e8e25](https://github.com/nighthawk909/snipforge/commit/97e8e259e2a5552d42df3a37e222c2b55506bc23))
+* **settings:** every Settings page opens at the top, and short pages like About no longer scroll ([#29](https://github.com/nighthawk909/snipforge/issues/29)) ([dc0cacd](https://github.com/nighthawk909/snipforge/commit/dc0cacdce83ed55df8ca6089bc12c8dbd994c5a9))
+
 ## [0.8.0](https://github.com/nighthawk909/snipforge/compare/v0.7.0...v0.8.0) (2026-10-17)
 
 
