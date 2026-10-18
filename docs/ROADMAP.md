@@ -55,8 +55,8 @@ aren't on the Mac yet step aside there ([CROSS-PLATFORM.md](CROSS-PLATFORM.md),
 ### Phase 5: ready for the office
 What IT asks about (speed, accessibility, a way to report problems, packaging for Intune and
 Software Center) and the SnagIt features people miss most. Built in this order:
-- [ ] Report a problem: a diagnostics bundle to attach to a bug report, shown before it's saved,
-  with no snips, titles or personal paths, and nothing sent anywhere
+- [x] Report a problem: a diagnostics bundle to attach to a bug report, shown before it's saved,
+  with no snips, titles or personal paths, and nothing sent anywhere (#99)
 - [ ] Capture presets: saved mode, delay, pointer, size, effects and destination, each with an
   optional shortcut of its own
 - [ ] Speed and footprint: startup, snip-to-editor, idle memory, a big Library and installer size

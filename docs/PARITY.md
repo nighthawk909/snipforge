@@ -27,6 +27,7 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | Report a problem (logs, versions, displays, last crash) | ✅ | 🟡 logs in `~/Library/Logs/SnipForge`, macOS version from `platform.mac_ver()` | |
 | **Capture** | The snip key (Win+Shift+S, Print Screen) | ✅ | ❌ | Phase 3: `RegisterEventHotKey` (e.g. ⌘⇧2) |
 | | Shortcuts of your own | ✅ | ❌ hidden | Phase 3: same API |
+| | Capture presets (toolbar, menu bar, Settings; effects; editor, copy or folder) | ✅ | 🟡 same code; a preset's own shortcut is hidden with the other shortcuts | Phase 3: shortcuts |
 | | Screen Recording permission check | n/a | 🟡 CI calls the check in the packaged app; the explanation and System Settings need a person | Phase 1 done |
 | | Area and Full screen | ✅ | 🟡 needs Screen Recording (asked for first) | A tester confirms |
 | | Window (click a window), and where a snip came from | ✅ | ❌ | Phase 2: `CGWindowListCopyWindowInfo` |

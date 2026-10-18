@@ -1,5 +1,6 @@
 """Shortcuts of your own: key combinations, set in Settings > Capture, that start a snip, repeat the
-last one, open the Library, or start (and stop) recording a video, from anywhere.
+last one, open the Library, start (and stop) recording a video, or snip with a capture preset
+(snipforge/presets.py), from anywhere.
 
 They're registered with Windows' RegisterHotKey, not the keyboard hook (snipforge/hotkey.py, which
 only ever acts on Win+Shift+S and Print Screen). RegisterHotKey never sees any other keystroke:
@@ -18,6 +19,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject
 from PySide6.QtGui import QKeySequence
 
 from . import prefs
+from .presets import ACTION_PREFIX
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ ACTIONS = {  # what a shortcut can do, in the order Settings lists them
 WM_HOTKEY = 0x0312
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x0001, 0x0002, 0x0004, 0x0008, 0x4000
 FIRST_ID = 0xB000  # our hotkey ids: an application may use 0x0000-0xBFFF
+FIRST_PRESET_ID = FIRST_ID + 0x100  # presets' shortcuts are numbered from here
 VK_NUMPAD0 = 0x60
 _NAVIGATION_KEYS = {
     Qt.Key_PageUp: 0x21, Qt.Key_PageDown: 0x22, Qt.Key_End: 0x23, Qt.Key_Home: 0x24, Qt.Key_Left: 0x25,
@@ -184,7 +187,7 @@ class GlobalShortcuts(QObject):
     While one is being edited in Settings they're all `suspend`ed, so pressing an existing
     combination records it in the field instead of running it."""
 
-    triggered = Signal(str)  # an action from ACTIONS
+    triggered = Signal(str)  # an action from ACTIONS, or a preset's ("preset:<id>")
 
     def __init__(self, api=None, parent=None) -> None:
         super().__init__(parent)
@@ -193,6 +196,9 @@ class GlobalShortcuts(QObject):
         self._live: set[str] = set()  # actions registered with Windows right now
         self._suspended = False
         self._filter: _HotkeyFilter | None = None
+        self._ids: dict[str, int] = {}  # presets' hotkey ids, given out as they're first used
+        self._next_id = FIRST_PRESET_ID  # never reused, so a late WM_HOTKEY can't reach another preset
+        self._titles: dict[str, str] = {}  # presets' names, for messages
         self.problems: dict[str, str] = {}  # saved shortcuts that couldn't be set (for Settings)
 
     @property
@@ -202,15 +208,28 @@ class GlobalShortcuts(QObject):
     def bindings(self) -> dict[str, str]:
         return dict(self._bound)
 
-    @staticmethod
-    def _id(action: str) -> int:
-        return FIRST_ID + list(ACTIONS).index(action)
+    def _id(self, action: str) -> int:
+        if action in ACTIONS:
+            return FIRST_ID + list(ACTIONS).index(action)
+        if action not in self._ids:
+            self._ids[action], self._next_id = self._next_id, self._next_id + 1
+        return self._ids[action]
 
-    def set(self, action: str, text: str) -> str | None:
-        """Make `text` (portable text; "" for none) the shortcut for `action`. Returns why it
-        couldn't be, in words for the person, or None. A refused combination leaves the old one."""
-        if action not in ACTIONS:
+    def title(self, action: str, capital: bool = False) -> str:
+        """What the action is called: "New snip", or "the preset Docs" ("The preset Docs" to
+        start a sentence)."""
+        if action in ACTIONS:
+            return ACTIONS[action]
+        return f"{'The' if capital else 'the'} preset {self._titles.get(action, '')}".rstrip()
+
+    def set(self, action: str, text: str, title: str | None = None) -> str | None:
+        """Make `text` (portable text; "" for none) the shortcut for `action` (one of ACTIONS, or a
+        preset's "preset:<id>", named `title`). Returns why it couldn't be, in words for the person,
+        or None. A refused combination leaves the old one."""
+        if action not in ACTIONS and not (action.startswith(ACTION_PREFIX) and len(action) > len(ACTION_PREFIX)):
             raise ValueError(f"unknown shortcut action {action!r}")
+        if title is not None:
+            self._titles[action] = title
         canonical = normalize(text)
         if text and not canonical:
             return KEY_PROBLEM
@@ -226,7 +245,7 @@ class GlobalShortcuts(QObject):
             return "Shortcuts of your own aren't available on this computer yet."
         other = next((a for a, bound in self._bound.items() if bound == canonical and a != action), None)
         if other is not None:
-            return f"{label(canonical)} is already the shortcut for {ACTIONS[other]}."
+            return f"{label(canonical)} is already the shortcut for {self.title(other)}."
         if self._bound.get(action) == canonical:
             return None
         old = self._bound.get(action)
@@ -248,6 +267,28 @@ class GlobalShortcuts(QObject):
             if text and (problem := self.set(action, text)):
                 self.problems[action] = problem
         return dict(self.problems)
+
+    def apply_presets(self, presets) -> dict[str, str]:
+        """Give each capture preset (snipforge.presets.Preset) its shortcut, and let go of those of
+        presets that are gone. Returns {action: why it couldn't be} for any that couldn't."""
+        wanted = {p.action: p for p in presets}
+        for action in [a for a in (*self._bound, *self.problems) if a.startswith(ACTION_PREFIX)]:
+            if action not in wanted:
+                self.forget(action)
+        problems = {}
+        for action, preset in wanted.items():
+            problem = self.set(action, preset.shortcut, title=preset.name)
+            if problem:
+                problems[action] = self.problems[action] = problem
+        return problems
+
+    def forget(self, action: str) -> None:
+        """A preset that's been deleted: its shortcut goes, and so does anything said about it."""
+        self._unregister(action)
+        self._bound.pop(action, None)
+        self.problems.pop(action, None)
+        self._titles.pop(action, None)
+        self._ids.pop(action, None)
 
     def suspend(self) -> None:
         """Let go of every combination for now (while one is being edited)."""
