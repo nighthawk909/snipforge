@@ -69,10 +69,10 @@ def _resize(editor, width: int, height: int) -> None:
 
 
 def test_the_fewest_columns_that_fit(make_editor):
-    editor = make_editor(1440, 880)
+    editor = make_editor(1440, 1000)
     rail = editor.tool_rail
     widths = {}
-    for height, columns in ((880, 1), (600, 2), (470, 3), (600, 2), (880, 1)):  # shrinking, then growing
+    for height, columns in ((1000, 1), (600, 2), (470, 3), (600, 2), (1000, 1)):  # shrinking, then growing
         _resize(editor, 1440, height)
         assert rail.columns() == columns, height
         assert len({r.x() for r in _button_rects(editor).values()}) == columns
@@ -83,7 +83,7 @@ def test_the_fewest_columns_that_fit(make_editor):
 
 
 def test_one_column_from_exactly_its_height(make_editor):
-    editor = make_editor(1440, 880)
+    editor = make_editor(1440, 1000)
     rail = editor.tool_rail
     one_column = rail.sizeHint().height()
     _resize(editor, 1440, editor.height() - (rail.height() - one_column))

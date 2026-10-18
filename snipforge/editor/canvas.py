@@ -373,6 +373,12 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
             if hidden and not draft:
                 self._edge_item.setVisible(False)
 
+    def content_image(self) -> QImage:
+        """The snip with its smart erases filled in, without other markup: what Grab text and
+        Redact read, so text you erased isn't found again."""
+        from .erase import EraseItem, bake
+        return bake(self.base_image, [i for i in self.annotations() if isinstance(i, EraseItem)])
+
     def _render_rect(self, rect) -> QImage:
         """The snip and its markup inside `rect` (scene pixels), without crop shading or handles."""
         out = QImage(rect.size(), QImage.Format_ARGB32_Premultiplied)

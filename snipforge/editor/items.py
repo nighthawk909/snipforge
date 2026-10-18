@@ -296,13 +296,25 @@ class EffectItem(BoxItem):
         area = self.scene_rect().toAlignedRect().intersected(self._base.rect())
         if area.isEmpty():
             return
-        key = (area.x(), area.y(), area.width(), area.height(), self.mode, self.style.width)
+        erases = self._erases_under(area)
+        key = (area.x(), area.y(), area.width(), area.height(), self.mode, self.style.width,
+               tuple((e.area().getRect(), e.zValue()) for e in erases))
         if self._cache is None or self._cache[0] != key:
-            self._cache = (key, self._render(area))
+            self._cache = (key, self._render(area, erases))
         p.drawImage(self.mapRectFromScene(QRectF(area)), self._cache[1])
 
-    def _render(self, area) -> QImage:
-        sub = self._base.copy(area)
+    def _erases_under(self, area) -> list:
+        """Smart erases overlapping this redaction: it blurs the snip as erased, so what an erase
+        removed never comes back through a blur on top of it."""
+        scene = self.scene()
+        if scene is None:
+            return []
+        return [i for i in scene.items() if getattr(i, "kind", "") == "erase" and i.isVisible()
+                and i.sceneBoundingRect().intersects(QRectF(area))]
+
+    def _render(self, area, erases=()) -> QImage:
+        from .erase import bake  # here, not at the top: erase.py builds on this module
+        sub = bake(self._base, erases).copy(area) if erases else self._base.copy(area)
         strength = self.style.width
         if self.mode == "pixelate":
             block = int(4 + strength * 2.5)

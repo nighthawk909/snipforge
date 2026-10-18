@@ -35,7 +35,7 @@ TITLES = {
     "select": "Select", "arrow": "Arrow", "line": "Line", "rect": "Rectangle", "ellipse": "Ellipse",
     "pen": "Pen", "highlight": "Highlighter", "text": "Text", "callout": "Callout", "stamp": "Stamp",
     "step": "Step number", "pixelate": "Pixelate", "blur": "Blur", "spotlight": "Spotlight", "crop": "Crop",
-    "magnify": "Magnify", "cutout": "Cut out",
+    "magnify": "Magnify", "cutout": "Cut out", "erase": "Smart erase",
 }
 HINTS = {
     "select": "Click any markup to change it. Drag to move, Ctrl+click to add to the selection, "
@@ -50,6 +50,7 @@ HINTS = {
     "step": "Click to drop the next number.",
     "blur": "Drag over anything private. Redact in the toolbar finds emails, phone and card numbers for you.",
     "pixelate": "Drag over anything private.",
+    "erase": "Drag over something to remove it. The area is filled in from what's around it.",
 }
 SHAPE_LABELS = {"rounded": "Rounded box", "rect": "Box", "ellipse": "Ellipse", "pill": "Pill"}
 SWITCHES = ("tail", "fill", "dash", "shadow")

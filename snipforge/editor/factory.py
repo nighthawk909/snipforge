@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
 
+from .erase import EraseItem
 from .items import (
     Annotation,
     ArrowItem,
@@ -39,6 +40,7 @@ def create_item(state: dict, base_image: QImage, image_rect: QRectF) -> Annotati
         "callout": lambda: CalloutItem(style),
         "stamp": lambda: StampItem(style),
         "magnify": lambda: MagnifyItem(style, base_image),
+        "erase": lambda: EraseItem(style, base_image),
     }
     if kind not in builders:
         raise ValueError(f"Unknown annotation kind: {kind!r}")

@@ -54,7 +54,7 @@ TOOLS = [
     None,
     # Groups that fill whole rows of 3 keep the rail's 3-column layout short enough for a 1080p screen
     # at 200% scaling (tests/test_tool_rail.py).
-    ("blur", "Blur (B)"), ("pixelate", "Pixelate (X)"),
+    ("blur", "Blur (B)"), ("pixelate", "Pixelate (X)"), ("erase", "Smart erase: fill an area from around it (W)"),
     None,
     ("crop", "Crop (C)"), ("cutout", "Cut out: remove a strip and join the rest (U)"),
 ]
@@ -482,7 +482,7 @@ class EditorWindow(QMainWindow):
     # ------------------------------------------------------------------ OCR
     def _ocr_source(self) -> tuple[QImage, float, float]:
         crop = self.canvas.crop_rect().toAlignedRect()
-        return self.canvas.base_image.copy(crop), crop.x(), crop.y()
+        return self.canvas.content_image().copy(crop), crop.x(), crop.y()
 
     def _run_ocr(self):
         image, _, _ = self._ocr_source()

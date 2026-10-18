@@ -24,6 +24,7 @@ TOOL_KEYS = {
     Qt.Key_E: "ellipse", Qt.Key_P: "pen", Qt.Key_H: "highlight", Qt.Key_T: "text",
     Qt.Key_K: "callout", Qt.Key_I: "stamp", Qt.Key_N: "step", Qt.Key_X: "pixelate",
     Qt.Key_B: "blur", Qt.Key_S: "spotlight", Qt.Key_M: "magnify", Qt.Key_C: "crop", Qt.Key_U: "cutout",
+    Qt.Key_W: "erase",
 }
 NUDGE_KEYS = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
 TEXT_TOOLS = {"text", "callout"}

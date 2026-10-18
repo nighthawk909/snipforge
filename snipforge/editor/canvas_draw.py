@@ -9,6 +9,7 @@ from .app_stamp import fitted
 from .commands import AddItemsCommand, StateCommand
 from .crop import crop_handle_at
 from .edges import DEPTH as EDGE_DEPTH
+from .erase import EraseItem
 from .items import (
     Annotation,
     ArrowItem,
@@ -110,6 +111,8 @@ class DrawMixin:
             item = (RectItem if tool == "rect" else EllipseItem)(style)
         elif tool in ("pixelate", "blur"):
             item = EffectItem(style, self.base_image, tool)
+        elif tool == "erase":
+            item = EraseItem(style, self.base_image)
         elif tool == "spotlight":
             item = SpotlightItem(style, self._image_rect)
         elif tool == "callout":
