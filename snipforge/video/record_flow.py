@@ -139,10 +139,10 @@ class RecordFlow(QObject):
                         **(self.camera.share() if choices.webcam else {}))
 
     def _state(self, state: str, settings: Settings) -> None:
+        # The camera stays on until the recording has finished: stopping it while the recorder was
+        # finishing its file aborted SnipForge (Windows refused a camera call mid-stop, 0x8001010d).
         if state == "recording":
             self._show_bar(settings)
-        elif state == "finishing":
-            self.camera.close()  # the camera's light off as soon as the recording stops
 
     def _show_bar(self, settings: Settings) -> None:
         if self.bar is None and self.state != "ended":

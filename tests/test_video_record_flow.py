@@ -469,12 +469,3 @@ def test_the_recording_follows_the_bubble_while_it_is_dragged(tmp_path, qapp):
     QTest.qWait(150)
 
     assert (300, 250, 192, 192) in moves
-
-
-def test_the_camera_light_goes_off_as_soon_as_recording_stops(tmp_path, qapp):
-    flow, made, *_ = camera_flow(tmp_path, RecordingChoices(webcam=True, countdown=0))
-    record_with(flow, flow.panel.choices)
-
-    made["recorders"][0].state_changed.emit("finishing")
-
-    assert made["webcams"][0].calls[-1] == "stop"
