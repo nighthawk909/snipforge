@@ -47,7 +47,8 @@ SECTIONS = {
                    f"theme dark light accent color match {wording.os_name().lower()}"),
     "updates": ("Updates", "refresh", "Choose how SnipForge stays up to date.",
                 "update version channel preview stable rollback install automatic"),
-    "about": ("About", "info", "Version, license and links.", "about version license privacy"),
+    "about": ("About", "info", "Version, license and links.",
+              "about version license privacy report a problem bug crash log diagnostics help"),
 }
 FORMAT_LABELS = {"webp": "WebP"}  # how Settings names a save format (the rest in capitals)
 
@@ -566,12 +567,17 @@ class SettingsWindow(QMainWindow):
         lrow = QHBoxLayout(links)
         lrow.setContentsMargins(0, 0, 0, 0)
         for label, url in (("Source code", project.REPO_URL),
-                           ("Release notes", project.RELEASES_URL),
-                           ("Report a problem", f"{project.REPO_URL}/issues")):
+                           ("Release notes", project.RELEASES_URL)):
             button = QPushButton(label)
             button.setProperty("variant", "ghost")
             button.clicked.connect(lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
             lrow.addWidget(button)
+        report = QPushButton("Report a problem")
+        report.setProperty("variant", "ghost")
+        report.setToolTip("Save the details that help fix a problem (logs, versions, displays), to attach to a "
+                          "bug report. You see everything in it first.")
+        report.clicked.connect(self._report_problem)
+        lrow.addWidget(report)
         notices = QPushButton("Third-party notices")
         notices.setProperty("variant", "ghost")
         notices.clicked.connect(self._open_notices)
@@ -584,6 +590,11 @@ class SettingsWindow(QMainWindow):
         privacy.setContentsMargins(0, 12, 0, 0)
         return stack(SettingRow(f"SnipForge {__version__}", "Open-source screenshot and markup tool · MIT License"),
                      links, privacy)
+
+    def _report_problem(self) -> None:
+        from . import report_dialog
+
+        report_dialog.open_report(library_root=self._library_root)
 
     @staticmethod
     def _open_notices() -> None:

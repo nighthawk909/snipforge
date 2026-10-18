@@ -110,6 +110,13 @@ location ([docs/IT-REVIEW.md](docs/IT-REVIEW.md)).
 **Extras.** Grab text (OCR, offline) · Redact (finds emails and phone/card numbers and blurs them) ·
 Pin a snip on top of other windows · Beautify (backdrop, rounded corners, shadow).
 
+**Report a problem.** In the tray menu, About and Settings › About: SnipForge puts together the
+details that help fix a bug (recent logs, the versions of SnipForge, Windows and Qt, your displays
+and their scaling, your settings with anything private left out, and the last crash, if there was
+one), shows you all of it, and saves it as a zip to attach to a bug report. It never includes your
+snips, window titles or your name, and nothing is sent anywhere. If SnipForge ever closes
+unexpectedly, it says so the next time it starts.
+
 ## Screenshots
 
 | | |
@@ -131,7 +138,9 @@ default, or only when you click Check now) and the **Share** actions you use. Ev
 verified against its published checksum before it installs. Text recognition for Library search
 runs offline. Screen recordings are made and saved on your PC; the microphone, computer sound and
 camera are opened only when you record (and, while you get ready, to show their levels and your
-bubble). See [docs/IT-REVIEW.md](docs/IT-REVIEW.md) for a full security and IT review guide.
+bubble). SnipForge keeps a log on your PC for **Report a problem**; it's never sent anywhere, and
+the report you save leaves out your name, snips and window titles. See
+[docs/IT-REVIEW.md](docs/IT-REVIEW.md) for a full security and IT review guide.
 
 ## Build from source
 

@@ -46,6 +46,9 @@ def on_a_mac(monkeypatch):
     return pretend
 
 
+# Log and crash files (snipforge.logs) go to a throwaway folder too, also from processes tests start.
+os.environ["SNIPFORGE_LOG_FOLDER"] = tempfile.mkdtemp(prefix="snipforge-test-logs-")
+
 # Keep tests away from the real app's settings (registry): use a throwaway INI file instead.
 _SETTINGS_DIR = tempfile.mkdtemp(prefix="snipforge-test-settings-")
 QSettings.setDefaultFormat(QSettings.IniFormat)

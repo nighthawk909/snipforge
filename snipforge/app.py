@@ -5,13 +5,14 @@ import ctypes
 import logging
 import sys
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import __version__, prefs, project, screen_access, theme, wording
+from . import __version__, logs, prefs, project, screen_access, theme, wording
 from .capture import CaptureSession, on_screen
 from .editor.window import EditorWindow
 from .home import HomeWindow
@@ -34,6 +35,9 @@ log = logging.getLogger(__name__)
 CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing the screen
 REHOOK_MS = 5 * 60 * 1000  # reinstall the keyboard hook in case Windows dropped it
 PRIVACY_POLL_MS = 500  # how often the GUI thread looks for the private-title sweep's result
+CRASH_NOTICE_MS = 10_000  # how long the "closed unexpectedly" notice is up, and clicking it opens the report
+CRASH_NOTICE_DELAY_MS = 3_000  # after start, so the notification area is there (it isn't at once at sign-in)
+LOG_TICK_MS = 30_000  # how often the log session tidies up (snipforge.logs.LogSession.tick)
 APP_ID = "SnipForge.SnipForge"
 
 
@@ -64,6 +68,7 @@ class SnipForgeApp:
         self._windows: list = []  # editors and pins kept alive until closed
         self._home: HomeWindow | None = None
         self._settings: SettingsWindow | None = None
+        self._crash_notice_until = 0.0  # clicking the tray's notice before then opens Report a problem
         self._icon = build_icon()
         app.setWindowIcon(self._icon)
         app.setQuitOnLastWindowClosed(False)
@@ -129,6 +134,8 @@ class SnipForgeApp:
     def _build_tray(self) -> None:
         self._tray = QSystemTrayIcon(self._icon)
         self._update_tray_tip()
+        # Before UpdateFlow's own: a click on its "updated" notice is seen while that notice is still up.
+        self._tray.messageClicked.connect(self._message_clicked)
         self._updates = UpdateFlow(self._tray)
         self._updates.ui_shows_updates = self._settings_shows_updates
         menu = QMenu()
@@ -144,6 +151,7 @@ class SnipForgeApp:
         menu.addAction("Settings…", self.show_settings)
         menu.addSeparator()
         menu.addAction("Check for updates…", self.check_updates)
+        menu.addAction("Report a problem…", self.report_problem)
         menu.addAction("About SnipForge", self.about)
         menu.addAction("Quit", self._app.quit)
         self._menu = menu
@@ -194,7 +202,38 @@ class SnipForgeApp:
         self._bring_to_front(self._settings)
 
     def about(self) -> None:
-        QMessageBox.about(None, "About SnipForge", about_text())
+        box = QMessageBox(QMessageBox.NoIcon, "About SnipForge", about_text())
+        box.setTextFormat(Qt.RichText)
+        box.setIconPixmap(self._icon.pixmap(64, 64))
+        report = box.addButton("Report a problem…", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Ok)
+        box.exec()
+        if box.clickedButton() is report:
+            self.report_problem()
+
+    def report_problem(self) -> None:
+        """Report a problem: the details for a bug report, shown before they're saved anywhere."""
+        from . import report_dialog
+
+        self._crash_notice_until = 0.0
+        report_dialog.open_report(library_root=self.library.root)
+
+    def notice_crash(self, wait: bool = True) -> None:
+        """The last run ended in a crash: say so, and offer the report that has its details. Not
+        over the "SnipForge was updated" notice: it gets one turn later, or none (the report keeps
+        the crash either way)."""
+        if self._updates.showing_whats_new:
+            if wait:
+                QTimer.singleShot(CRASH_NOTICE_MS + 1000, lambda: self.notice_crash(wait=False))
+            return
+        self._crash_notice_until = time.monotonic() + CRASH_NOTICE_MS / 1000
+        self._tray.showMessage("SnipForge", "SnipForge closed unexpectedly last time. Click here to save the "
+                               "details for a bug report (or choose Report a problem in SnipForge's menu later).",
+                               QSystemTrayIcon.Warning, CRASH_NOTICE_MS)
+
+    def _message_clicked(self) -> None:
+        if time.monotonic() < self._crash_notice_until and not self._updates.showing_whats_new:
+            self.report_problem()
 
     def handle_command(self, command: str) -> None:
         if command == "snip":
@@ -461,9 +500,18 @@ def main() -> int:
     server = InstanceServer()
     if not server.listening and send_to_running(command):
         return 0  # lost a start-up race with another launch; let that one handle it
+    logging_session = logs.setup()  # only the copy that keeps running writes the log
+    if logging_session is not None:
+        app.aboutToQuit.connect(logging_session.close)
+        app.commitDataRequest.connect(lambda _manager: logging_session.ending())  # signing out, shutting down
+        tidy = QTimer(app, interval=LOG_TICK_MS)
+        tidy.timeout.connect(logging_session.tick)
+        tidy.start()
     theme.install(app)
     forge = SnipForgeApp(app)
     server.command.connect(forge.handle_command)
+    if logging_session is not None and logging_session.crashed_last_time:
+        QTimer.singleShot(CRASH_NOTICE_DELAY_MS, forge.notice_crash)
     if command != "background":
         QTimer.singleShot(0, lambda: forge.handle_command(command))
     return app.exec()
