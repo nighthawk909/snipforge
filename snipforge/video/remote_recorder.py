@@ -151,6 +151,7 @@ class RemoteRecorder(QObject):
     def _send(self, kind: str) -> None:
         if self.channel is not None and self.state not in OVER:
             self.channel.send(kind)
+            self.channel.flush()  # a stop sent as SnipForge quits must leave before it does
 
     # --- the channel -----------------------------------------------------------------------------
 
