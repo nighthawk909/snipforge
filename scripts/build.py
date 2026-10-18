@@ -33,8 +33,9 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 INIT_FILE = ROOT / "snipforge" / "__init__.py"
 LATEST_INSTALLER = "SnipForge-setup.exe"
-# About 36 MB today, screen recording's libraries included. Raise it on purpose, never by accident.
-INSTALLER_BUDGET_MB = 40
+# About 36 MB today, screen recording's libraries included (docs/PERFORMANCE.md). Raise it on
+# purpose, never by accident.
+INSTALLER_BUDGET_MB = 38
 VERSION_RE = re.compile(r"\d+\.\d+\.\d+(?:-preview\.\d+)?")
 VERSION_LINE_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
 ISCC_CANDIDATES = [

@@ -5,7 +5,6 @@ Library search leaves snips unread (macOS has the Vision framework, see docs/MAC
 """
 from __future__ import annotations
 
-import asyncio
 import sys
 from dataclasses import dataclass
 
@@ -92,6 +91,8 @@ def recognize(image: QImage) -> OcrResult:
     if sys.platform != "win32":
         raise OcrUnavailable("Text recognition isn't available on this computer yet: SnipForge uses the "
                              "OCR engine built into Windows.")
+    import asyncio  # here, not at the top: it adds a tenth of a second to every start
+
     scaled, scale = _upscale_small(image)
     raw = asyncio.run(_recognize_async(_png_bytes(scaled)))
     lines = []

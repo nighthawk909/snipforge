@@ -310,9 +310,56 @@ def _recorder_process() -> str:
     return f"the recorder process answered (version {ping(timeout_ms=60_000)})"
 
 
+def _startup_imports() -> str:
+    """Importing SnipForge loaded only what it needs: the editor, recording, text recognition and
+    the like load when they're first used (docs/PERFORMANCE.md). First, before other checks load
+    them. (The test suite checks a whole start-up, windows and all; this checks the frozen app's.)"""
+    from . import perf
+
+    heavy = perf.heavy_modules()
+    if heavy:
+        raise RuntimeError(f"loaded at start: {', '.join(sorted(heavy))}")
+    budget = perf.module_budget()
+    if budget is not None and len(sys.modules) > budget:
+        raise RuntimeError(f"{len(sys.modules)} modules at start (budget {budget})")
+    return f"{len(sys.modules)} modules at start (budget {budget or 'none here'}), none of the heavy ones"
+
+
+SPEED_SNIPS = 500  # enough to show a slow Library, few enough for a CI machine's antivirus
+
+
+def _speed() -> str:
+    """A snip's editor, and the Library window over SPEED_SNIPS snips, open within their budgets."""
+    from . import perf
+
+    editor = perf.open_editor_s()
+    library = perf.big_library(SPEED_SNIPS)
+    measured = {"snip_to_editor_s": editor, "library_open_s": library["open_s"],
+                "library_refresh_s": library["refresh_s"]}
+    problems = perf.over_budget(measured, perf.library_budgets(library["plain_read_s"]))
+    if problems:
+        raise RuntimeError("; ".join(problems) + f" (the plain read took {library['plain_read_s']} s here; "
+                           f"opening: {library.get('window_s')} s window, {library.get('refresh_on_show_s')} s "
+                           f"reading, {library.get('first_paint_s')} s painting)")
+    parts = ", ".join(f"{part} {library[part]}" for part in ("plain_read_s", "scan_s", "window_s",
+                                                              "refresh_on_show_s", "first_paint_s") if part in library)
+    return ", ".join(f"{name} {value}" for name, value in measured.items()) + f" ({parts})"
+
+
+def _tls() -> str:
+    """Updates download over https through Qt's network stack: it has a TLS back-end to do it with
+    (Python's own TLS isn't packaged; see packaging/snipforge.spec)."""
+    from PySide6.QtNetwork import QSslSocket
+
+    if not QSslSocket.supportsSsl():
+        raise RuntimeError(f"no TLS back-end (available: {QSslSocket.availableBackends()})")
+    return f"https via {QSslSocket.activeBackend()} (available: {', '.join(QSslSocket.availableBackends())})"
+
+
 def run(report_path: str) -> int:
     windows, mac = sys.platform == "win32", sys.platform == "darwin"
     results: dict = {}
+    _check(results, "startup_imports", _startup_imports)
     _check(results, "theme", _theme)
     _check(results, "app_folders", _app_folders)
     _check(results, "fonts", _fonts, required=mac)
@@ -329,6 +376,8 @@ def run(report_path: str) -> int:
     _check(results, "video", _video)
     _check(results, "video_editor", _video_editor)
     _check(results, "recorder_process", _recorder_process, required=windows)
+    _check(results, "tls", _tls)
+    _check(results, "speed", _speed)
     passed = all(r["ok"] for r in results.values() if r["required"])
     report = {"version": __version__, "platform": sys.platform, "passed": passed, "checks": results}
     try:
