@@ -1,15 +1,20 @@
 """Keyboard and mouse handling for the canvas, with hit testing and hover.
 
 Gestures, with any tool active:
-  * click an annotation           -> select it (Shift/Ctrl+click adds or removes)
-  * drag a selected annotation     -> move the selection
-  * drag a handle                  -> resize / reshape
+  * click an annotation           -> select it (Shift/Ctrl+click adds or removes); with Text or
+                                     Callout, clicking text or a callout edits it
+  * drag an annotation             -> move it (with the rest of the selection, if it's selected);
+                                     Blur, Magnify and the like draw over unselected markup instead
+  * Alt+drag over an annotation    -> draw over it with the current tool
+  * drag a handle                  -> resize / reshape (also while typing in a callout)
   * drag anywhere else             -> draw with the current tool
 The Select tool adds rubber-band selection and never draws.
 """
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import QApplication
 
 from .commands import StateCommand
 from .crop import MIN_CROP, crop_handle_at, move_crop, new_crop, resize_crop
@@ -40,6 +45,8 @@ class InputMixin:
 
     # ------------------------------------------------------------------ keyboard
     def keyPressEvent(self, e) -> None:
+        if e.key() == Qt.Key_Alt:
+            self._refresh_hover(e.modifiers())  # Alt switches between moving markup and drawing over it
         if self._just_picked and e.isAutoRepeat() and e.key() in (Qt.Key_Return, Qt.Key_Enter):
             return  # Enter held down after a keyboard pick mustn't go on to edit the selection
         if self.picking() and e.key() == Qt.Key_Escape:
@@ -95,6 +102,8 @@ class InputMixin:
         super().keyPressEvent(e)
 
     def keyReleaseEvent(self, e) -> None:
+        if e.key() == Qt.Key_Alt:
+            self._refresh_hover(e.modifiers())
         if e.key() == Qt.Key_Space and not e.isAutoRepeat() and self._panning:
             self._panning = False
             self._apply_drag_mode()
@@ -148,11 +157,17 @@ class InputMixin:
             return
         editing = self.editing_text_item()
         if editing is not None:
-            if self._annotation_at(view_pos) is editing.owner():
-                super().mousePressEvent(e)  # place the text cursor
+            on_handle = bool(self._overlay.handle_at(pos, self.zoom()) or self._area_handle_at(view_pos, pos))
+            owner = editing.owner()
+            if not on_handle and self._annotation_at(view_pos) is owner:
+                if editing.sceneBoundingRect().contains(pos):
+                    super().mousePressEvent(e)  # place the text cursor
+                else:  # a callout's padding: a click keeps you typing, a drag finishes and moves it
+                    self._drag = {"type": "pending", "hit": owner, "origin": pos, "view_origin": view_pos,
+                                  "toggle": False, "edit": False, "typing": True}
                 return
-            self.commit_text()
-            if self.tool != "select":
+            self.commit_text()  # a handle (go on to resize), or anywhere else
+            if self.tool != "select" and not on_handle:
                 return  # this click only finishes the text
         if self.tool == "crop":
             self._drag = self._begin_crop_drag(pos)
@@ -173,17 +188,14 @@ class InputMixin:
             self._press_states = {i: i.get_state() for i in self.annotations()}
             super().mousePressEvent(e)
             return
-        hit = self._annotation_at(view_pos)
+        draw_over = bool(e.modifiers() & Qt.AltModifier)  # Alt: draw over markup instead of moving it
+        hit = None if draw_over else self._annotation_at(view_pos)
         toggle = bool(e.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier))
         if hit is not None:
-            if self.tool in TEXT_TOOLS and hasattr(hit, "start_text_editing") and not toggle:
-                self._select([hit])
-                self.setFocus()
-                hit.start_text_editing()
-                return
-            # Decide on release (click = select) or on first move (drag = move or draw).
+            edit = self.tool in TEXT_TOOLS and hasattr(hit, "start_text_editing") and not toggle
+            # Decide on release (click = select, or edit the text) or on first move (drag = move).
             self._drag = {"type": "pending", "hit": hit, "origin": pos, "view_origin": view_pos,
-                          "toggle": toggle}
+                          "toggle": toggle, "edit": edit}
             return
         if self.tool == "text":
             self._new_text(pos)
@@ -247,7 +259,7 @@ class InputMixin:
                 self.mousePressEvent(e)
             return
         view_pos = e.position().toPoint()
-        hit = self._annotation_at(view_pos)
+        hit = None if e.modifiers() & Qt.AltModifier else self._annotation_at(view_pos)
         editing = self.editing_text_item()
         if editing is not None and hit is editing.owner():
             super().mouseDoubleClickEvent(e)  # double-click inside text selects a word
@@ -273,7 +285,14 @@ class InputMixin:
             return
         kind = drag["type"]
         if kind == "pending":
-            self._click_select(drag["hit"], drag["toggle"])
+            if drag.get("typing"):
+                pass  # a click in a callout's padding while typing: keep typing
+            elif drag["edit"] and drag["hit"].scene() is self._scene:
+                self._select([drag["hit"]])
+                self.setFocus()
+                drag["hit"].start_text_editing()
+            else:
+                self._click_select(drag["hit"], drag["toggle"])
         elif kind == "handle":
             item, after = drag["item"], drag["item"].get_state()
             if after != drag["before"]:
@@ -310,7 +329,15 @@ class InputMixin:
                 return item
         return None
 
-    def _update_hover(self, view_pos, scene_pos: QPointF) -> None:
+    def _refresh_hover(self, modifiers) -> None:
+        """Hover and cursor for where the pointer is now, with these keys held."""
+        if self._drag is not None or self.picking() or self.editing_text_item() is not None:
+            return
+        view_pos = self.viewport().mapFromGlobal(QCursor.pos())
+        if self.viewport().rect().contains(view_pos):
+            self._update_hover(view_pos, self.mapToScene(view_pos), modifiers)
+
+    def _update_hover(self, view_pos, scene_pos: QPointF, modifiers=None) -> None:
         if self.tool == "cutout":
             self._overlay.set_hover(None)
             vertical = self.cutout_options["direction"] == "vertical"
@@ -328,17 +355,17 @@ class InputMixin:
                 self.viewport().setCursor(Qt.CrossCursor)
             return
         handle = self._overlay.handle_at(scene_pos, self.zoom()) or self._area_handle_at(view_pos, scene_pos)
-        hit = None if handle else self._annotation_at(view_pos)
+        modifiers = QApplication.keyboardModifiers() if modifiers is None else modifiers
+        draw_over = self.tool != "select" and bool(modifiers & Qt.AltModifier)
+        hit = None if handle or draw_over else self._annotation_at(view_pos)
         self._overlay.set_hover(hit)
         if handle:
             cursor = CURSORS[handle]
         elif hit is not None:
             if self.tool in TEXT_TOOLS and hasattr(hit, "start_text_editing"):
                 cursor = Qt.IBeamCursor
-            elif hit.isSelected() or self.tool == "select":
-                cursor = Qt.SizeAllCursor
             else:
-                cursor = Qt.PointingHandCursor
+                cursor = Qt.SizeAllCursor if self.drag_moves(hit) else Qt.PointingHandCursor
         else:
             cursor = Qt.ArrowCursor if self.tool == "select" else Qt.CrossCursor
         self.viewport().setCursor(cursor)

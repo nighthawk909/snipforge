@@ -162,6 +162,9 @@ class UpdateController(QObject):
             return MANAGED_MESSAGE
         if self._install_mode == "all-users":
             return "SnipForge on this PC is installed for all users, so your IT team updates it."
+        if self._install_mode == "by-hand":
+            return (f"On a Mac, install updates by hand for now: download SnipForge-{release.version}.dmg from the "
+                    "release page, then drag SnipForge to Applications to replace this one.")
         if self._install_mode != "per-user":
             return "This copy of SnipForge runs from source code, so it can't update itself."
         if not (release.installer_name and release.installer_url):

@@ -30,6 +30,8 @@ MAX_NOTES = 6
 NOTE_SECTIONS = ("Features", "Bug fixes", "Performance")
 LATEST_ALIAS = "SnipForge-setup.exe"
 INSTALLER = "SnipForge-{version}-setup.exe"
+MAC_ALIAS = "SnipForge.dmg"  # the version-less copy behind the permanent Mac download link
+MAC_INSTALLER = "SnipForge-{version}.dmg"
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September",
           "October", "November", "December")
 
@@ -50,6 +52,10 @@ class Release:
     @property
     def installer(self) -> str:
         return INSTALLER.format(version=self.version)
+
+    @property
+    def mac_installer(self) -> str:
+        return MAC_INSTALLER.format(version=self.version)
 
     @property
     def ready(self) -> bool:
@@ -184,6 +190,18 @@ def preview_card(release: Release, installer_url: str, release_url: str) -> str:
             f' &nbsp; <a href="{html.escape(release_url)}">What\'s in it</a></p></div>\n      ')
 
 
+def mac_download(release: Release, base: str, permanent: bool, repo_url: str) -> str:
+    """The line under the Windows button: the Mac .dmg when the release has one."""
+    parity = f'<a href="{html.escape(repo_url)}/blob/main/docs/PARITY.md">what works on a Mac</a>'
+    if release.mac_installer not in release.assets:
+        return f"On a Mac? A Mac version is on the way: see {parity} so far."
+    url = (f"{base}/latest/download/{MAC_ALIAS}" if permanent and MAC_ALIAS in release.assets
+           else f"{base}/download/{release.tag}/{release.mac_installer}")
+    size = round(release.assets[release.mac_installer] / 1_048_576)
+    return (f'On a Mac? <a id="download-mac" href="{html.escape(url)}">Download for Mac</a> ({size} MB), '
+            f'macOS 14 or later · {parity} · <a href="#mac">the first launch</a>')
+
+
 def render(template: str, releases: object, repo: str, server_url: str = project.SERVER_URL) -> str:
     try:
         repo_url = project.repo_url(server_url, repo)
@@ -203,6 +221,7 @@ def render(template: str, releases: object, repo: str, server_url: str = project
 
     page = set_download_link(point_at_repository(template, repo_url), download)
     page = replace_marker(page, "download-note", html.escape(note))
+    page = replace_marker(page, "mac-download", mac_download(stable, base, permanent, repo_url))
     page = replace_marker(page, "whats-new", whats_new(stable, f"{base}/tag/{stable.tag}"))
     card = (preview_card(preview, f"{base}/download/{preview.tag}/{preview.installer}", f"{base}/tag/{preview.tag}")
             if preview else "")

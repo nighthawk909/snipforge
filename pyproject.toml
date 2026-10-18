@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "snipforge"
-version = "0.11.0"
-description = "Open-source SnagIt-style screenshot and markup tool for Windows"
+version = "0.12.0"
+description = "Open-source SnagIt-style screenshot and markup tool for Windows and macOS"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "nighthawk909" }]
@@ -22,6 +22,7 @@ dependencies = [
     "winrt-Windows.Foundation>=2.0; sys_platform == 'win32'",
     "winrt-Windows.Foundation.Collections>=2.0; sys_platform == 'win32'",
     "winrt-Windows.Globalization>=2.0; sys_platform == 'win32'",
+    "pyobjc-framework-Quartz>=12; sys_platform == 'darwin'",
 ]
 
 [project.urls]

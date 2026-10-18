@@ -342,15 +342,6 @@ def test_drag_on_selected_item_moves_it(canvas):
     assert arrow.pos() == QPointF(0, 0)
 
 
-def test_drag_starting_on_unselected_item_draws(canvas):
-    drag(canvas, "rect", (10, 10), (190, 90))
-    canvas.apply_style(fill=True)
-    canvas._scene.clearSelection()
-    canvas.set_tool("arrow")
-    gesture(canvas, (50, 50), (150, 50))
-    assert sorted(i.kind for i in canvas.annotations()) == ["arrow", "rect"]
-
-
 def test_shift_click_adds_to_selection(canvas):
     a = drag(canvas, "arrow", (10, 20), (100, 20))
     b = drag(canvas, "arrow", (10, 70), (100, 70))

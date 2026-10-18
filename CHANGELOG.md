@@ -3,6 +3,31 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.12.0](https://github.com/nighthawk909/snipforge/compare/v0.11.0...v0.12.0) (2026-10-18)
+
+
+### Features
+
+* **install:** every release includes the Mac version, with a Mac download on the page ([#80](https://github.com/nighthawk909/snipforge/issues/80)) ([9d83fde](https://github.com/nighthawk909/snipforge/commit/9d83fded6a924a259b0079ec9530fbc2e02966d3))
+
+
+### Bug fixes
+
+* **editor:** drag any markup to move it, and see what's selected on dark snips ([#94](https://github.com/nighthawk909/snipforge/issues/94)) ([48096ed](https://github.com/nighthawk909/snipforge/commit/48096ed3545c1755a8a7f1115d1e57ac4ef4e43c))
+* **editor:** the eyedropper works from the keyboard, and lenses and torn edges look exactly right ([#71](https://github.com/nighthawk909/snipforge/issues/71)) ([3eb8c38](https://github.com/nighthawk909/snipforge/commit/3eb8c383629cc77d1297af0f77569a0b5504441e))
+* **mac:** the Mac app builds again for Apple silicon and Intel Macs, with Pillow made universal ([#93](https://github.com/nighthawk909/snipforge/issues/93)) ([fba39c2](https://github.com/nighthawk909/snipforge/commit/fba39c23b788c69ae7834649de96a2b7a3d6fa7b))
+* **privacy:** the background title clean-up can't crash SnipForge as it quits ([#77](https://github.com/nighthawk909/snipforge/issues/77)) ([51b06a8](https://github.com/nighthawk909/snipforge/commit/51b06a83bb9c8ca0220e089e046e47aa1778738a))
+* **privacy:** very long private-window titles keep their marker, and Win+number-pad shortcuts work ([#70](https://github.com/nighthawk909/snipforge/issues/70)) ([59685be](https://github.com/nighthawk909/snipforge/commit/59685be84943a640adfcfc93e177bb751a2012e7))
+* **video:** recordings follow Windows to a new default sound device, so plugging in headphones doesn't lose the sound ([#74](https://github.com/nighthawk909/snipforge/issues/74)) ([03c89e4](https://github.com/nighthawk909/snipforge/commit/03c89e40bbe7abb945a063f7fdeedc65c572dadc))
+
+
+### Documentation
+
+* a roadmap with every phase ticked off, and Windows first, then the Mac port ([#91](https://github.com/nighthawk909/snipforge/issues/91)) ([ff2403a](https://github.com/nighthawk909/snipforge/commit/ff2403a5082eea6396251092970d54523361a985))
+* **video:** step 9 is done on Windows, with what's left for a person to check on real hardware ([#88](https://github.com/nighthawk909/snipforge/issues/88)) ([e8a74ab](https://github.com/nighthawk909/snipforge/commit/e8a74abb0581aceb9f133e594bd460b273846331))
+* Windows and Mac parity: the rules, a feature-by-feature tracker and a cross-platform skill ([#75](https://github.com/nighthawk909/snipforge/issues/75)) ([6adfed0](https://github.com/nighthawk909/snipforge/commit/6adfed0eb4043e6d34efaa4e222e337598ef63a2))
+* Windows Phase 5, ready for the office, on the roadmap ([#95](https://github.com/nighthawk909/snipforge/issues/95)) ([404a27a](https://github.com/nighthawk909/snipforge/commit/404a27ad46e1491d5b472a4d9054e2c3f91ce337))
+
 ## [0.11.0](https://github.com/nighthawk909/snipforge/compare/v0.10.0...v0.11.0) (2026-10-18)
 
 

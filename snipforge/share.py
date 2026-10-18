@@ -21,6 +21,8 @@ from pathlib import Path
 
 from PySide6.QtGui import QImage
 
+from .wording import keys
+
 if sys.platform == "win32":
     import winreg
 
@@ -89,6 +91,12 @@ def _reg_value(key, name: str) -> str:
         return str(winreg.QueryValueEx(key, name)[0])
     except OSError:
         return ""
+
+
+def windows_shell_available() -> bool:
+    """Whether Explorer's right-click commands (OneDrive, the Windows share sheet) and Outlook's
+    automation are here to use: Windows only (docs/MAC-PLAN.md has the Mac's share sheet)."""
+    return sys.platform == "win32"
 
 
 def onedrive_accounts() -> list[OneDriveAccount]:
@@ -248,7 +256,7 @@ def email_with_outlook(image_path: Path, subject: str, width: int) -> bool:
     False if it's only attached. Raises ShareError if classic Outlook couldn't be used at all."""
     if sys.platform != "win32":
         raise ShareError("Emailing straight from SnipForge isn't available on this computer yet, so the image "
-                         "was copied instead. Paste it into your email.")
+                         f"was copied instead. Paste it into your email ({keys('Ctrl+V')}).")
     try:
         import pywintypes
         import win32com.client

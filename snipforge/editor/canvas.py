@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QUndoStack
-from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
 from .. import theme
 from .beautify import BeautifyStyle
@@ -23,7 +23,7 @@ from .crop import MIN_CROP, CropMask
 from .edges import CutPreview, EdgeItem, Edges
 from .eyedropper import Loupe
 from .factory import create_item
-from .handles import HandleOverlay
+from .handles import HandleOverlay, OwnRubberBand
 from .image_ops import ImageGeometry
 from .items import Annotation, EffectItem
 from .style import DEFAULT_TOOL_STYLES, Style
@@ -72,6 +72,10 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         self._scene.addItem(self._mask)
         self._overlay = HandleOverlay(self._scene.sceneRect())
         self._scene.addItem(self._overlay)
+        band_style = OwnRubberBand(QApplication.style().name())  # the app's style (Fusion), not the desktop's
+        band_style.setParent(self)  # Qt doesn't own a widget's style; the canvas does
+        self.viewport().setStyle(band_style)  # QGraphicsView draws the band with its viewport's style
+        self.rubberBandChanged.connect(self._on_rubber_band)
         self._edges = Edges()  # border and torn sides: part of the snip, above all markup
         self._edge_item = EdgeItem(self._mask.fill_behind)
         self._scene.addItem(self._edge_item)
@@ -435,6 +439,11 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
             return
         self._overlay.set_selection(self.selected_annotations())
         self.selection_changed.emit()
+
+    def _on_rubber_band(self, rect, _start: QPointF, _end: QPointF) -> None:
+        """Qt's scene points trail the pointer by one move; its viewport rectangle is current."""
+        band = None if rect.isNull() else QRectF(self.mapToScene(rect.topLeft()), self.mapToScene(rect.bottomRight()))
+        self._overlay.set_band(band.normalized() if band is not None else None)
 
     def _on_undo_index(self, _index: int) -> None:
         self.stop_picking()  # the snip changed (undo, redo, a turn, a delete...): the eyedropper's picture is old

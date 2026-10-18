@@ -1,5 +1,7 @@
 """Tests for the Windows-facing pieces: capture overlay, tray app, library window, pin,
 single-instance handoff, window detection and the packaged self-test."""
+import sys
+
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QKeyEvent, QMouseEvent, QPixmap, QWheelEvent
@@ -296,6 +298,9 @@ def test_selftest_report(tmp_path, monkeypatch, qapp):
     data = json.loads(report.read_text(encoding="utf-8"))
     assert data["passed"] and data["checks"]["editor"]["ok"] and data["checks"]["icons"]["ok"]
     assert data["checks"]["theme"]["ok"] and "snipforge" in data["checks"]["theme"]["detail"]
+    assert data["checks"]["app_folders"]["ok"], data["checks"]["app_folders"]  # license texts and the cache
+    screen = data["checks"]["screen_access"]  # macOS's permission check; Windows needs none
+    assert screen["ok"] and screen["required"] is (sys.platform == "darwin"), screen
     assert data["checks"]["video"]["ok"] and data["checks"]["video"]["required"]  # the recorder's encoder
     editor = data["checks"]["video_editor"]  # the video editor and Pillow's GIF writer
     assert editor["ok"] and editor["required"] and "12 frames" in editor["detail"]
@@ -328,7 +333,7 @@ def test_selftest_on_a_mac_skips_the_windows_only_checks(tmp_path, monkeypatch, 
 
     on_a_mac(selftest)
     for name in ("_theme", "_editor", "_library", "_icons", "_windows", "_share", "_video", "_video_editor",
-                 "_recorder_process"):
+                 "_recorder_process", "_screen_access", "_fonts", "_app_folders"):
         monkeypatch.setattr(selftest, name, lambda: "ok")
     for name in ("_ocr", "_search_index", "_hotkey"):
         monkeypatch.setattr(selftest, name, windows_only)
@@ -339,5 +344,6 @@ def test_selftest_on_a_mac_skips_the_windows_only_checks(tmp_path, monkeypatch, 
     skipped = {name: check for name, check in data["checks"].items() if check["detail"].startswith("skipped")}
     assert sorted(skipped) == ["hotkey", "ocr", "search_index"]
     assert not any(check["required"] for check in skipped.values())
-    assert all(data["checks"][name]["required"] for name in ("theme", "editor", "library", "icons"))
+    assert all(data["checks"][name]["required"] for name in ("theme", "editor", "library", "icons", "screen_access",
+                                                             "fonts", "app_folders"))
     assert data["checks"]["video"]["ok"] and data["checks"]["video"]["required"]  # macOS CI encodes H.264 too

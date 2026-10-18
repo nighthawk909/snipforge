@@ -3,9 +3,10 @@ bottom, the selection's size, and the magnifier that shows exact pixels under th
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PySide6.QtGui import QColor, QImage, QPainter, QPen
 
 from . import theme
+from .fonts import mono_font, ui_font
 
 HINT_BOTTOM = 40  # gap between the hint and the bottom of the monitor
 MAG_SAMPLE = 15  # physical pixels sampled around the cursor
@@ -14,7 +15,7 @@ MAG_SIZE = 120
 
 def paint_hint(p: QPainter, size: QSize, text: str) -> None:
     """`text` in a dark pill near the bottom of a monitor of `size`."""
-    p.setFont(QFont("Segoe UI", 10))
+    p.setFont(ui_font(10))
     w = p.fontMetrics().horizontalAdvance(text) + 28
     box = QRectF((size.width() - w) / 2, size.height() - HINT_BOTTOM - 32, w, 32)
     p.setPen(Qt.NoPen)
@@ -26,7 +27,7 @@ def paint_hint(p: QPainter, size: QSize, text: str) -> None:
 
 def paint_size_label(p: QPainter, sel: QRect, text: str) -> None:
     """The selection's size, just above it (or just inside, at the top of the screen)."""
-    p.setFont(QFont("Segoe UI", 9))
+    p.setFont(ui_font(9))
     w = p.fontMetrics().horizontalAdvance(text) + 14
     h = p.fontMetrics().height() + 8
     y = sel.top() - h - 6 if sel.top() > h + 10 else sel.top() + 6
@@ -63,5 +64,5 @@ def paint_magnifier(p: QPainter, image: QImage, dpr: float, pos: QPoint, size: Q
     p.setBrush(QColor(20, 20, 20, 235))
     p.drawRect(label)
     p.setPen(QColor("#f0f0f0"))
-    p.setFont(QFont("Consolas", 8))
+    p.setFont(mono_font(8))
     p.drawText(label, Qt.AlignCenter, f"{px},{py}  {color.name().upper() if color.isValid() else ''}")

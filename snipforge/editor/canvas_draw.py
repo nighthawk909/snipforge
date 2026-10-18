@@ -16,6 +16,7 @@ from .items import (
     BoxItem,
     EffectItem,
     EllipseItem,
+    HidesContent,
     LineItem,
     RectItem,
     SpotlightItem,
@@ -32,6 +33,9 @@ DEFAULT_CALLOUT = (190.0, 64.0)
 TEXT_STAMP_STYLE = Style(color="#1c1c1e", fill=True, font_size=12, shadow=False)  # small, dark and readable
 STAMP_INSET = 10.0
 MIN_STAMP_FONT, MAX_STAMP_FONT = 8, 28  # it grows with the snip: about 1 point per 100 px across
+# Tools made to go over things: a drag on markup draws with them unless that markup is selected.
+DRAW_OVER_TOOLS = {"highlight", "pixelate", "blur", "spotlight", "magnify", "erase"}
+UNDERLAY_Z = -100  # highlighter strokes and spotlights sit at or below this, under other markup
 
 
 class DrawMixin:
@@ -78,21 +82,36 @@ class DrawMixin:
             return {"type": "crop_move", "origin": pos, "origin_rect": rect}
         return {"type": "crop_new", "origin": pos, "origin_rect": rect}
 
+    def drag_moves(self, hit: Annotation) -> bool:
+        """Whether a drag starting on `hit` moves it (rather than drawing over it). Selected markup always
+        moves, and so does anything with the Step tool. Otherwise a drag draws with the tools made to go
+        over things, and over highlights and blur, erase and spotlight areas, which read as part of the
+        snip; everything else moves."""
+        if hit.isSelected() or self.tool in ("select", "step"):
+            return True
+        underlay = hit.zValue() <= UNDERLAY_Z or isinstance(hit, (HidesContent, SpotlightItem))
+        return self.tool not in DRAW_OVER_TOOLS and not underlay
+
     def _resolve_pending(self, drag: dict) -> dict | None:
-        """A press on an annotation turned into a drag: move it if selected, otherwise draw."""
+        """A press on an annotation turned into a drag: move it, with the rest of the selection if it's
+        part of one (Shift/Ctrl adds it to the selection first), or draw over it (see drag_moves)."""
         hit = drag["hit"]
-        if hit.isSelected() or self.tool == "step":
-            if not hit.isSelected():
+        if drag.get("typing"):
+            self.commit_text()  # dragging a callout you're typing in: finish the text, then move it
+        if not self.drag_moves(hit):
+            self._drag = None
+            if self.tool == "text":
+                self._new_text(drag["origin"])
+            else:
+                self._begin_create(drag["origin"])
+            return self._drag
+        if not hit.isSelected():
+            if drag["toggle"]:
+                hit.setSelected(True)
+            else:
                 self._select([hit])
-            moving = self.selected_annotations()
-            self._drag = {"type": "move", "origin": drag["origin"],
-                          "before": {i: i.get_state() for i in moving}}
-        elif self.tool == "text":
-            self._drag = None
-            self._new_text(drag["origin"])
-        else:
-            self._drag = None
-            self._begin_create(drag["origin"])
+        moving = self.selected_annotations()
+        self._drag = {"type": "move", "origin": drag["origin"], "before": {i: i.get_state() for i in moving}}
         return self._drag
 
     def _click_select(self, hit: Annotation, toggle: bool) -> None:
