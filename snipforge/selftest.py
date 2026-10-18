@@ -214,6 +214,29 @@ def _video() -> str:
     return f"{info.duration:.2f} s clip: h264 {video.width}x{video.height} + aac {audio.sample_rate} Hz"
 
 
+def _video_editor() -> str:
+    """The video editor made it into the build: it opens a clip, and Pillow (only its core and GIF
+    writer are bundled) turns the clip into a GIF that reads back with the right number of frames."""
+    from PIL import Image
+
+    from .video import clip, gif
+    from .video.editor_window import VideoEditorWindow
+
+    folder = Path(tempfile.mkdtemp(prefix="snipforge-selftest-"))
+    source = clip.make_test_clip(folder / "editor.mp4", seconds=1.0)
+    window = VideoEditorWindow(source)
+    try:
+        frames = len(window.timeline.frames)
+    finally:
+        window.close()
+        window.deleteLater()
+    with Image.open(gif.export_gif(source, folder / "editor.gif", fps=12, width=160)) as written:
+        gif_frames = written.n_frames
+    if gif_frames != 12:
+        raise RuntimeError(f"a 1 s GIF at 12 frames a second has {gif_frames} frames")
+    return f"editor opened a {frames}-frame clip; GIF of {gif_frames} frames"
+
+
 def run(report_path: str) -> int:
     windows = sys.platform == "win32"
     results: dict = {}
@@ -227,6 +250,7 @@ def run(report_path: str) -> int:
     _check(results, "hotkey", _hotkey if windows else _not_on_this_platform, required=windows)
     _check(results, "share", _share, required=False)
     _check(results, "video", _video)
+    _check(results, "video_editor", _video_editor)
     passed = all(r["ok"] for r in results.values() if r["required"])
     report = {"version": __version__, "platform": sys.platform, "passed": passed, "checks": results}
     try:

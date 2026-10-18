@@ -28,6 +28,7 @@ be checked in the source code; file references are given where useful.
 | Temporary copies for drag-out and sharing (auto-deleted after 24 hours) and downloaded updates (`updates` subfolder, removed once installed) | `%TEMP%\SnipForge` | Yes |
 | Startup entry (if enabled) | `HKCU` or, for all-users installs, `HKLM\...\CurrentVersion\Run` | Yes |
 | OneDrive shares | `<OneDrive>\SnipForge` (synced by the user's OneDrive client) | No |
+| Trimmed copies and GIFs made in the video editor, under a new name (`<video> (trimmed).mp4`, `<video>.gif`); the original recording is never changed. While one is being written it's a `.<name>.<random>.partial.mp4` (or `.gif`) file in the same folder, renamed when done and deleted if cancelled, failed or SnipForge quits first (only a crash or power cut can leave one behind) | Next to the original video | No (it's the user's work) |
 
 Note that a snip's original, uncropped capture is kept so crops can be undone; deleting a snip from
 the Library sends its whole folder to the Recycle Bin.
@@ -55,7 +56,12 @@ combination another app already registered is refused. None are set by default.
 come with Qt Multimedia, the part of Qt that encodes video for the coming screen recording feature
 (see `THIRD_PARTY_NOTICES.md`). They contain code for network protocols, but SnipForge only ever
 gives them local file paths, with FFmpeg's protocol whitelist set to `file`, so they can't go
-online. Today they're only used by the packaged self-test.
+online. The video editor (trim, GIF export, playback) uses them the same way, and limits Qt's own
+player to local files too (`QT_FFMPEG_PROTOCOL_WHITELIST=file`).
+
+**Pillow** (`_internal\PIL`). The Python imaging library, used only to write GIFs from the video
+editor. Only its core is bundled (no font, colour management, WebP or AVIF modules); it reads and
+writes local files only.
 
 **Explorer right-click commands** (`snipforge/share.py`). The Share menu invokes the same
 right-click commands a user would click by hand (OneDrive "Copy link"/"Share", Windows "Share") on

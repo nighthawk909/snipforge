@@ -297,6 +297,8 @@ def test_selftest_report(tmp_path, monkeypatch, qapp):
     assert data["passed"] and data["checks"]["editor"]["ok"] and data["checks"]["icons"]["ok"]
     assert data["checks"]["theme"]["ok"] and "snipforge" in data["checks"]["theme"]["detail"]
     assert data["checks"]["video"]["ok"] and data["checks"]["video"]["required"]  # the recorder's encoder
+    editor = data["checks"]["video_editor"]  # the video editor and Pillow's GIF writer
+    assert editor["ok"] and editor["required"] and "12 frames" in editor["detail"]
     assert qapp.styleSheet() == ""  # the check leaves the test app as it found it
 
 
@@ -322,7 +324,7 @@ def test_selftest_on_a_mac_skips_the_windows_only_checks(tmp_path, monkeypatch, 
         raise AssertionError("a Windows-only check ran on a Mac")
 
     on_a_mac(selftest)
-    for name in ("_theme", "_editor", "_library", "_icons", "_windows", "_share", "_video"):
+    for name in ("_theme", "_editor", "_library", "_icons", "_windows", "_share", "_video", "_video_editor"):
         monkeypatch.setattr(selftest, name, lambda: "ok")
     for name in ("_ocr", "_search_index", "_hotkey"):
         monkeypatch.setattr(selftest, name, windows_only)
