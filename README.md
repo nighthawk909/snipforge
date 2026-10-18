@@ -37,8 +37,9 @@ and the Library.
 
 **Mark up.** Every snip opens in the editor: tools on the left, the snip in the middle, and a
 properties panel on the right with **quick styles**, colors, sizes and effects for whatever you've
-selected. The **eyedropper** beside the colors picks any color from the snip, with a magnified view
-of the pixels under the pointer. Everything you add stays editable:
+selected. **Save this style** keeps the selected markup's look as one of your own quick styles for
+that tool (right-click one to delete it). The **eyedropper** beside the colors picks any color from
+the snip, with a magnified view of the pixels under the pointer. Everything you add stays editable:
 
 | Tool | Key | |
 |---|---|---|

@@ -33,6 +33,7 @@ from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
 from .panel import PropertiesPanel
+from .quick_tiles import TOOL_NAMES
 from .resize_dialog import ResizeDialog
 from .share_menu import ShareController
 from .style import Style
@@ -127,6 +128,8 @@ class EditorWindow(QMainWindow):
         self.panel.crop_action.connect(self._crop_action)
         self.panel.image_action.connect(self.image_action)
         self.panel.pick_color.connect(self._toggle_picking)
+        self.panel.style_saved.connect(
+            lambda kind: self.statusBar().showMessage(f"Saved as a quick style for {TOOL_NAMES.get(kind, kind)}", 3000))
         self.canvas.picking_changed.connect(self._show_picking)
         self.canvas.color_picked.connect(
             lambda color: self.statusBar().showMessage(f"Picked {color.upper()}", 3000))
