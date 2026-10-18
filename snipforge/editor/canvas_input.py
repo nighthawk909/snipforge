@@ -23,7 +23,7 @@ TOOL_KEYS = {
     Qt.Key_V: "select", Qt.Key_A: "arrow", Qt.Key_L: "line", Qt.Key_R: "rect",
     Qt.Key_E: "ellipse", Qt.Key_P: "pen", Qt.Key_H: "highlight", Qt.Key_T: "text",
     Qt.Key_K: "callout", Qt.Key_I: "stamp", Qt.Key_N: "step", Qt.Key_X: "pixelate",
-    Qt.Key_B: "blur", Qt.Key_S: "spotlight", Qt.Key_M: "magnify", Qt.Key_C: "crop",
+    Qt.Key_B: "blur", Qt.Key_S: "spotlight", Qt.Key_M: "magnify", Qt.Key_C: "crop", Qt.Key_U: "cutout",
 }
 NUDGE_KEYS = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
 TEXT_TOOLS = {"text", "callout"}
@@ -34,7 +34,7 @@ class InputMixin:
     live in DrawMixin (canvas_draw.py).
 
     A gesture in progress is `self._drag`, a dict whose "type" is one of: pending (pressed on an
-    annotation, not yet moved), create, handle, move, crop_handle, crop_move or crop_new. Uses the
+    annotation, not yet moved), create, handle, move, crop_handle, crop_move, crop_new or cut. Uses the
     canvas's `_scene`, `_mask`, `_overlay`, `_press_states`, `_panning`, `tool` and `undo_stack`."""
 
     # ------------------------------------------------------------------ keyboard
@@ -121,6 +121,8 @@ class InputMixin:
                 item.set_state(before)
         elif kind.startswith("crop"):
             self._mask.set_crop(drag["origin_rect"])
+        elif kind == "cut":
+            self._cut_preview.hide()
         self._overlay.update()
 
     # ------------------------------------------------------------------ mouse
@@ -149,6 +151,10 @@ class InputMixin:
                 return  # this click only finishes the text
         if self.tool == "crop":
             self._drag = self._begin_crop_drag(pos)
+            return
+        if self.tool == "cutout":
+            self._drag = {"type": "cut", "origin": pos}
+            self._cut_preview.show_strip(self._strip_rect(self._cut_strip(pos, pos)))
             return
         handle = self._overlay.handle_at(pos, self.zoom()) or self._area_handle_at(view_pos, pos)
         if handle:
@@ -218,6 +224,8 @@ class InputMixin:
             delta = pos - drag["origin"]
             for item, before in drag["before"].items():
                 item.setPos(QPointF(*before["pos"]) + delta)
+        elif kind == "cut":
+            self._cut_preview.show_strip(self._strip_rect(self._cut_strip(drag["origin"], pos)))
         else:
             self._update_create(drag, pos, shift)
         self._overlay.update()
@@ -270,6 +278,9 @@ class InputMixin:
                 self._mask.set_crop(drag["origin_rect"])
         elif kind == "move":
             self._commit_moves(drag["before"])
+        elif kind == "cut":
+            self._cut_preview.hide()
+            self._finish_cut(drag["origin"], self.mapToScene(e.position().toPoint()))
         else:
             self._finish_create(drag)
         self._overlay.update()
@@ -294,6 +305,11 @@ class InputMixin:
         return None
 
     def _update_hover(self, view_pos, scene_pos: QPointF) -> None:
+        if self.tool == "cutout":
+            self._overlay.set_hover(None)
+            vertical = self.cutout_options["direction"] == "vertical"
+            self.viewport().setCursor(Qt.SplitHCursor if vertical else Qt.SplitVCursor)
+            return
         if self.tool == "crop":
             self._overlay.set_hover(None)
             rect = self._mask.crop

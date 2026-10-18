@@ -120,6 +120,11 @@ _PATHS = {
     "zoom_out": (
         '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'
         '<line x1="8" y1="11" x2="14" y2="11"/>'),
+    "strip_vertical": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',  # Lucide columns-2
+    "strip_horizontal": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18"/>',  # Lucide rows-2
+    "cutout": (
+        '<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/>'
+        '<circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>'),
     "area": (
         '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>'
         '<path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>'),

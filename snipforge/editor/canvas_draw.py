@@ -29,6 +29,38 @@ DEFAULT_CALLOUT = (190.0, 64.0)
 class DrawMixin:
     """Gesture steps for the Canvas. InputMixin (canvas_input.py) calls them from mouse events."""
 
+    def set_cutout_options(self, **options) -> None:
+        """direction: "vertical" (take out columns) or "horizontal" (rows); seam: "straight" or "torn"."""
+        if options.get("direction") in ("vertical", "horizontal"):
+            self.cutout_options = {**self.cutout_options, "direction": options["direction"]}
+        if options.get("seam") in ("straight", "torn"):
+            self.cutout_options = {**self.cutout_options, "seam": options["seam"]}
+
+    def _cut_strip(self, a: QPointF, b: QPointF) -> tuple[str, int, int]:
+        """The strip between two points across the whole image: (axis, start, end) in pixels."""
+        width, height = self._image_rect.width(), self._image_rect.height()
+        if self.cutout_options["direction"] == "vertical":
+            lo, hi, length, axis = min(a.x(), b.x()), max(a.x(), b.x()), width, "x"
+        else:
+            lo, hi, length, axis = min(a.y(), b.y()), max(a.y(), b.y()), height, "y"
+        return axis, int(min(max(round(lo), 0), length)), int(min(max(round(hi), 0), length))
+
+    def _strip_rect(self, strip: tuple[str, int, int]) -> QRectF:
+        axis, start, end = strip
+        r = self._image_rect
+        if axis == "x":
+            return QRectF(start, r.top(), end - start, r.height())
+        return QRectF(r.left(), start, r.width(), end - start)
+
+    def _finish_cut(self, a: QPointF, b: QPointF) -> None:
+        axis, start, end = self._cut_strip(a, b)
+        if end - start < 2:
+            return  # a click, not a cut
+        try:
+            self.cut_out(axis, start, end, self.cutout_options["seam"])
+        except ValueError:
+            pass  # markup from a newer SnipForge: the Image buttons explain; a cut just doesn't happen
+
     def _begin_crop_drag(self, pos: QPointF) -> dict:
         rect = QRectF(self._mask.crop)
         handle = crop_handle_at(rect, pos, self.zoom())

@@ -20,6 +20,8 @@ from .canvas_view import MIN_ZOOM as MIN_ZOOM
 from .canvas_view import SCENE_MARGIN, ViewMixin
 from .commands import AddItemsCommand, CropCommand, RemoveItemsCommand, StateCommand
 from .crop import MIN_CROP, CropMask
+from .cutout import CutPreview
+from .edges import EdgeItem, Edges
 from .eyedropper import Loupe
 from .factory import create_item
 from .handles import HandleOverlay
@@ -70,6 +72,13 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         self._scene.addItem(self._mask)
         self._overlay = HandleOverlay(self._scene.sceneRect())
         self._scene.addItem(self._overlay)
+        self._edges = Edges()  # border and torn sides: part of the snip, above all markup
+        self._edge_item = EdgeItem(self._mask.fill_behind)
+        self._scene.addItem(self._edge_item)
+        self._edge_item.set_edges(self._crop_rect, self._edges)
+        self._cut_preview = CutPreview()  # the strip a Cut out drag will take away
+        self._scene.addItem(self._cut_preview)
+        self.cutout_options = {"direction": "vertical", "seam": "straight"}
 
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
@@ -239,6 +248,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
     def set_crop_rect(self, rect: QRectF) -> None:
         self._crop_rect = QRectF(rect)
         self._mask.set_crop(rect)
+        self._edge_item.set_edges(self._crop_rect, self._edges)  # edges are the export's edges
         self._update_scene_rect()
 
     def set_beautify(self, style: BeautifyStyle | None) -> None:
@@ -262,6 +272,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         self._scene.clearSelection()
         self._mask.set_crop(self._crop_rect)
         self._mask.set_editing(True)
+        self._edge_item.setVisible(False)  # the whole screenshot, plain, while cropping
         self._update_scene_rect()
         self.fit_rect(self._image_rect)  # show everything so cut areas can be brought back
 
@@ -272,6 +283,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
             self._drag = None  # Enter or a tool key mid-drag: keep the crop as it is now
         draft = QRectF(self._mask.crop)
         self._mask.set_editing(False)
+        self._edge_item.setVisible(True)
         if draft != self._crop_rect and draft.width() >= MIN_CROP and draft.height() >= MIN_CROP:
             self.undo_stack.push(CropCommand(self, self._crop_rect, draft))
         else:
@@ -285,6 +297,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         if self._drag is not None and self._drag["type"].startswith("crop"):
             self._drag = None
         self._mask.set_editing(False)
+        self._edge_item.setVisible(True)
         self._mask.set_crop(self._crop_rect)
         self._update_scene_rect()
         self.fit_image()
@@ -313,6 +326,8 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         doc = {"version": 1, "crop": [r.x(), r.y(), r.width(), r.height()], "items": states + self._unparsed}
         if not self._geometry.is_original(self.original_image):
             doc["image"] = self._geometry.to_dict()  # items and crop are on the turned/resized image
+        if not self._edges.is_plain():
+            doc["edges"] = self._edges.to_dict()
         return doc
 
     def load_document(self, doc: dict) -> None:
@@ -339,6 +354,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
             crop = None
         if crop is not None and not crop.isEmpty():
             self.set_crop_rect(crop)
+        self._apply_edges(Edges.from_dict(doc.get("edges")))
         self.undo_stack.clear()
 
     def render_image(self, commit: bool = True, use_draft: bool = True) -> QImage:

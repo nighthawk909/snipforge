@@ -7,7 +7,10 @@ from PySide6.QtGui import QPixmap
 
 from . import image_ops
 from .canvas_view import SCENE_MARGIN
-from .commands import ImageCommand
+from .commands import EdgesCommand, ImageCommand
+from .crop import MIN_CROP
+from .cutout import MIN_LEFT
+from .edges import Edges
 from .image_ops import ImageGeometry, Remap
 from .items import SpotlightItem
 
@@ -24,6 +27,33 @@ class ImageMixin:
     def rotate_image(self, clockwise: bool = True) -> None:
         geometry, remap = image_ops.rotate(self._geometry, clockwise)
         self._change_image("Rotate right" if clockwise else "Rotate left", geometry, remap)
+
+    def cut_out(self, axis: str, start: int, end: int, seam: str = "straight") -> None:
+        """Take out columns (axis "x") or rows ("y") `start` to `end` and join the rest; at least
+        a few pixels always stay. Raises ValueError for markup from a newer SnipForge."""
+        length = self._geometry.size()[0 if axis == "x" else 1]
+        start, end = max(0, start), min(end, length)
+        end = min(end, start + length - MIN_LEFT)
+        if end - start < 1:
+            return
+        geometry, remap = image_ops.cut(self._geometry, axis, start, end, seam)
+        self._change_image("Cut out", geometry, remap)
+
+    def edges(self) -> Edges:
+        return self._edges
+
+    def set_edges(self, edges: Edges) -> None:
+        """A border and torn sides for the snip, as one undo step (dragging the width is one)."""
+        if edges == self._edges:
+            return
+        old = self._edges
+        width_only = bool(old.border and edges.border) and Edges(old.border, edges.color, edges.torn) == old
+        key = ("edges", "width") if width_only else None
+        self.undo_stack.push(EdgesCommand(self, old, edges, merge_key=key))
+
+    def _apply_edges(self, edges: Edges) -> None:
+        self._edges = edges
+        self._edge_item.set_edges(self._crop_rect, edges)
 
     def flip_image(self, horizontal: bool = True) -> None:
         geometry, remap = image_ops.flip(self._geometry, horizontal)
@@ -43,8 +73,8 @@ class ImageMixin:
     def _full_size(self, width: int, height: int) -> tuple[int, int]:
         """The whole image's size when the crop becomes `width` x `height`."""
         crop = self._crop_rect
-        return (max(1, round(self._geometry.width * width / crop.width())),
-                max(1, round(self._geometry.height * height / crop.height())))
+        w, h = self._geometry.size()
+        return max(1, round(w * width / crop.width())), max(1, round(h * height / crop.height()))
 
     def resize_image(self, width: int, height: int) -> None:
         """Make the snip as you'd export it (the crop, if there is one) `width` x `height` pixels.
@@ -90,8 +120,14 @@ class ImageMixin:
         if not self.can_change_image():
             raise ValueError(NEWER_MARKUP)
         self._finish_gestures()
+        bounds = QRectF(0, 0, *geometry.size())
         if crop is None:
-            bounds = QRectF(0, 0, geometry.width, geometry.height)
-            crop = image_ops.snap(remap.transform.mapRect(self._crop_rect), bounds)
+            crop = image_ops.snap(remap.map_rect(self._crop_rect), bounds)
+        if crop.width() < MIN_CROP or crop.height() < MIN_CROP:  # cut away almost all of it
+            crop = bounds
+        edges = self._edges
+        if remap.sides:  # a torn bottom is a torn left once turned clockwise
+            edges = Edges(edges.border, edges.color, frozenset(remap.sides.get(s, s) for s in edges.torn))
         changes = [(item, item.get_state(), image_ops.mapped_state(item, remap)) for item in self.annotations()]
-        self.undo_stack.push(ImageCommand(self, text, (self._geometry, geometry), (self._crop_rect, crop), changes))
+        self.undo_stack.push(ImageCommand(self, text, (self._geometry, geometry), (self._crop_rect, crop), changes,
+                                          (self._edges, edges)))

@@ -55,6 +55,7 @@ the snip, with a magnified view of the pixels under the pointer. Everything you 
 | Spotlight | S | dim everything except one area |
 | Magnify | M | a circle or box lens showing part of the snip enlarged; move and resize the lens and what it shows |
 | Crop | C | drag edges in to cut, back out to restore; Enter applies |
+| Cut out | U | drag across a vertical or horizontal strip to take it out and join the rest, with a straight or torn seam |
 
 Undo/redo, duplicate (Ctrl+D), nudge with arrow keys, zoom with Ctrl+wheel.
 
@@ -62,7 +63,9 @@ Undo/redo, duplicate (Ctrl+D), nudge with arrow keys, zoom with Ctrl+wheel.
 right (Ctrl+Shift+R, Ctrl+R), flips it, and resizes it by pixels or percent with the aspect ratio
 kept. Your markup follows: shapes and blurs turn with the image, while text, callouts and stamps
 move with it and stay upright. Each change is one undo step, and the original capture is never
-lost, so resizing down and back up gives you the original pixels.
+lost, so resizing down and back up gives you the original pixels. The **Edges** section adds a
+border and tears the sides you pick; torn parts are transparent in a PNG, and Beautify's backdrop
+shows through them.
 
 **Share.** Copy (Ctrl+C), save (Ctrl+S), or use **Share**: a new Outlook email with the snip inline,
 open a Teams chat with the people you pick, get a OneDrive link, or the Windows share sheet.
