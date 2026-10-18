@@ -81,7 +81,7 @@ def load_tool_styles(settings: QSettings) -> dict[str, Style]:
 class EditorWindow(QMainWindow):
     def __init__(self, image: QImage, library: Library, entry: Entry | None, document: dict | None = None,
                  on_new_snip=None, on_open_entry=None, on_pin=None, autosave: bool = True,
-                 on_open_library=None, beautify_on: bool | None = None) -> None:
+                 on_open_library=None, beautify_on: bool | None = None, on_combine=None) -> None:
         """`beautify_on`: start with Beautify on or off (a capture preset's choice) instead of
         following the switch in Settings; the switch still changes it."""
         super().__init__()
@@ -90,6 +90,7 @@ class EditorWindow(QMainWindow):
         self._fitted = False
         self._on_new_snip, self._on_open_entry, self._on_pin = on_new_snip, on_open_entry, on_pin
         self._on_open_library = on_open_library
+        self._on_combine = on_combine  # (this snip's id, this window): put it together with others
         self._settings = app_settings()
         self._export_path: Path | None = None
         self._beautify = beautify.enabled() if beautify_on is None else beautify_on
@@ -209,6 +210,8 @@ class EditorWindow(QMainWindow):
         bar.grab_text.connect(self.grab_text)
         bar.redact.connect(self.auto_redact)
         bar.pin.connect(self.pin)
+        bar.combine.connect(self.combine)
+        bar.combine_button.setVisible(self._on_combine is not None and self._entry is not None)
         bar.save.connect(self.save)
         bar.copy.connect(self.copy_to_clipboard)
         bar.toggle_theme.connect(self._toggle_theme)
@@ -227,6 +230,7 @@ class EditorWindow(QMainWindow):
             self.addAction(act)
 
         add("Ctrl+C", self.copy_to_clipboard)
+        add("Ctrl+G", self.combine)
         add("Ctrl+X", self.cut)
         add("Ctrl+V", self.paste)
         add("Ctrl+S", self.save)
@@ -430,6 +434,15 @@ class EditorWindow(QMainWindow):
 
     def share_email(self) -> None:
         self._share.email()
+
+    def combine(self) -> None:
+        """Combine this snip with others: it's saved first, so the combined image shows it as it is now."""
+        if self._on_combine is None or self._entry is None:
+            return
+        self.canvas.commit_text()
+        self._autosave.stop()
+        self._save_to_library()
+        self._on_combine(self._entry.id, self)
 
     def final_image(self) -> QImage:
         image = self.canvas.render_image()

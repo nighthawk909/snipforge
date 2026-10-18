@@ -57,10 +57,13 @@ def _stamp(path, ns: bool):
 
 
 class HomeWindow(QMainWindow):
-    def __init__(self, library: Library, on_new_snip, on_open_entry, indexer=None, on_settings=None) -> None:
+    def __init__(self, library: Library, on_new_snip, on_open_entry, indexer=None, on_settings=None,
+                 on_combine=None) -> None:
+        """`on_combine(ids, window)`: combine these snips (offered when two or more are selected)."""
         super().__init__()
         self._library = library
         self._on_open_entry = on_open_entry
+        self._on_combine = on_combine
         self._on_settings = on_settings
         self._indexer = indexer
         self._items: list[Item] = []
@@ -197,7 +200,7 @@ class HomeWindow(QMainWindow):
         return main
 
     def _build_shortcuts(self) -> None:
-        for keys, slot in ((QKeySequence.Find, self._focus_search),
+        for keys, slot in ((QKeySequence.Find, self._focus_search), (QKeySequence("Ctrl+G"), self.combine),
                            (QKeySequence.Delete, lambda: self._trash(self.grid.selected_ids())),
                            (QKeySequence.Copy, self._copy_current)):
             QShortcut(keys, self, slot)
@@ -450,6 +453,9 @@ class HomeWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction(icon("image"), "Open" if len(ids) == 1 else f"Open {len(ids)} snips",
                        lambda: self._open_ids(ids))
+        snips = self._combinable(ids)
+        if self._on_combine is not None and len(snips) >= 2:
+            menu.addAction(icon("grid"), f"Combine {len(snips)} snips…", lambda: self.combine(snips))
         if len(ids) == 1:
             entry_id = ids[0]
             menu.addAction(icon("copy"), "Copy", lambda: self._copy(entry_id))
@@ -463,7 +469,22 @@ class HomeWindow(QMainWindow):
         trash_keys = wording.trash_shortcut()
         hint = f"\t{wording.keys(trash_keys)}" if trash_keys else ""
         menu.addAction(icon("trash"), f"Move to {wording.trash()}{hint}", lambda: self._trash(ids))
-        menu.exec(self.grid.viewport().mapToGlobal(pos))
+        self._show_menu(menu, self.grid.viewport().mapToGlobal(pos))
+
+    @staticmethod
+    def _show_menu(menu: QMenu, at) -> None:
+        menu.exec(at)
+
+    def _combinable(self, ids: list[str]) -> list[str]:
+        """The selected snips that can go into a combined image (not recordings), in Library order."""
+        recordings = {i.entry.id for i in self._items if i.entry.is_recording}
+        return [entry_id for entry_id in ids if entry_id and entry_id not in recordings]
+
+    def combine(self, ids: list[str] | None = None) -> None:
+        """Combine the selected snips (Ctrl+G, or the menu)."""
+        snips = self._combinable(ids if ids is not None else self.grid.selected_ids())
+        if self._on_combine is not None and len(snips) >= 2:
+            self._on_combine(snips, self)
 
     def _open_ids(self, ids: list[str | None]) -> None:
         for entry_id in ids:

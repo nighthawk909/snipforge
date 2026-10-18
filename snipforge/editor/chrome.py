@@ -45,6 +45,7 @@ class CommandBar(QWidget):
     grab_text = Signal()
     redact = Signal()
     pin = Signal()
+    combine = Signal()
     save = Signal()
     copy = Signal()
     toggle_theme = Signal()
@@ -87,6 +88,9 @@ class CommandBar(QWidget):
                                    self.redact))
         row.addWidget(self._button("Pin", "pin", f"Float this snip on top of other windows ({keys('Ctrl+P')})",
                                    self.pin))
+        self.combine_button = self._button("Combine", "grid", "Put this snip and others into one image: side by "
+                                           f"side, stacked, a grid or numbered steps ({keys('Ctrl+G')})", self.combine)
+        row.addWidget(self.combine_button)
         self.share_button = self._button("Share", "share", "Email, Teams, OneDrive link and more", None)
         row.addWidget(self.share_button)
         row.addWidget(self._button("Save", "save", "Save to your Save folder, as PNG, JPG, WebP or PDF (set in "
