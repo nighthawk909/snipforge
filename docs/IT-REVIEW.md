@@ -25,7 +25,7 @@ be checked in the source code; file references are given where useful.
 | Small theme images (check mark, arrows) regenerated at start | `%LOCALAPPDATA%\SnipForge\cache` | Yes |
 | Per snip in the library: `meta.json` with the app name and window title it came from, favorite, tags, and the words Windows OCR read in the finished snip (for Library search; read offline, cleared and re-read after each edit, so blurred or cropped text doesn't stay searchable) | `%USERPROFILE%\Pictures\SnipForge\Library\<snip>` | No (it's the user's work) |
 | Screen recordings: `recording.mp4` in a folder of its own per recording (H.264 video, AAC sound) | `%USERPROFILE%\Pictures\SnipForge\Library\<recording>` | No (it's the user's work) |
-| Recording choices: microphone and computer sound on or off, the microphone's device ID, pointer effects, countdown | `HKCU\Software\SnipForge\SnipForge\video` | Yes |
+| Recording choices: microphone and computer sound on or off, the microphone's device ID, pointer effects, countdown, the camera on or off and its device ID, and its bubble's shape, size and place on screen | `HKCU\Software\SnipForge\SnipForge\video` | Yes |
 | Theme packs (optional, read-only JSON colors; see [THEMES.md](THEMES.md)) | `themes\` next to `SnipForge.exe`, and `%LOCALAPPDATA%\SnipForge\themes` | Install folder: yes. User folder: no |
 | Temporary copies for drag-out and sharing (auto-deleted after 24 hours) and downloaded updates (`updates` subfolder, removed once installed) | `%TEMP%\SnipForge` | Yes |
 | Startup entry (if enabled) | `HKCU` or, for all-users installs, `HKLM\...\CurrentVersion\Run` | Yes |
@@ -59,6 +59,14 @@ sound only to show their levels; they're let go when Record or Cancel is clicked
 the recorder process has them open (Windows shows its microphone-in-use icon), and SnipForge's
 control bar (pause, stop, discard) stays on screen, kept out of the recording itself. Nothing is sent anywhere:
 the recording is saved in the Library folder (see Data on the PC).
+
+**Webcam** (optional, off until the user switches Camera on when getting ready to record). The
+camera is opened only while that switch is on, for the bubble that shows it and for the recording;
+Windows shows its camera light. Before opening it, SnipForge reads Windows' camera privacy setting
+(`...\CapabilityAccessManager\ConsentStore\webcam` under `HKLM` and `HKCU`, read only) so it can say
+"blocked by your privacy settings" rather than fail vaguely. SnipForge passes each picture to its
+recorder process through a block of shared memory named `SnipForge-camera-<random>` (in the user's
+session, freed when both processes let go); nothing is saved apart from the recording itself.
 
 **Startup entry** (optional). Written to the `Run` key so the hotkey works after sign-in.
 
