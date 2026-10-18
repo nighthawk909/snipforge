@@ -6,9 +6,10 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QCursor
 
+from .canvas_input import NUDGE_KEYS
 from .eyedropper import sample
 
-PICK_KEYS = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
+PICK_KEYS = NUDGE_KEYS  # the arrow keys
 
 
 class PickMixin:
@@ -45,6 +46,8 @@ class PickMixin:
         if self._pick_source is None:
             return
         self._pick_source = None
+        self._pick_point = None
+        self._pick_by_key = False
         self._loupe.hide()
         self.viewport().setCursor(Qt.ArrowCursor if self.tool == "select" else Qt.CrossCursor)
         self.picking_changed.emit(False)
@@ -66,8 +69,17 @@ class PickMixin:
         return inverse.map(e.position())
 
     def _refresh_loupe(self, *_args) -> None:
-        """Scrolling or zooming moves the snip under a still pointer."""
+        """Scrolling or zooming moves the snip under a still pointer (or the keys' point under the
+        loupe, which stays on the same pixel and in view)."""
         if not self.picking():
+            return
+        if self._pick_by_key and self._pick_point is not None:
+            if not self._refreshing:
+                self._refreshing = True  # ensureVisible scrolls, which calls this again
+                try:
+                    self._show_key_point(self._pick_point)
+                finally:
+                    self._refreshing = False
             return
         view_pos = self.viewport().mapFromGlobal(QCursor.pos())
         if self.viewport().rect().contains(view_pos):
@@ -84,6 +96,8 @@ class PickMixin:
     def _pick_key(self, e) -> bool:
         """Arrow keys move the pixel the loupe shows, Enter picks it. True if the key was used."""
         if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if e.isAutoRepeat():
+                return True  # a held Enter picks once
             if self._pick_point is None:
                 self._pick_move(0, 0)  # show where Enter would pick, first
             else:
@@ -105,7 +119,10 @@ class PickMixin:
             self._pick_point = QPointF(math.floor(middle.x()) + 0.5, math.floor(middle.y()) + 0.5)
         x = min(max(self._pick_point.x() + dx, crop.left() + 0.5), crop.right() - 0.5)
         y = min(max(self._pick_point.y() + dy, crop.top() + 0.5), crop.bottom() - 0.5)
-        point = QPointF(x, y)
+        self._pick_by_key = True
+        self._show_key_point(QPointF(x, y))
+
+    def _show_key_point(self, point: QPointF) -> None:
         self.ensureVisible(QRectF(point.x() - 0.5, point.y() - 0.5, 1, 1), 40, 40)
         self._pick_hover(self.mapFromScene(point), point)
 

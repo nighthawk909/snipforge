@@ -122,7 +122,7 @@ class CropMask(QGraphicsItem):
     def set_beautify(self, style: BeautifyStyle | None) -> None:
         self.beautify = style
         if style is None:
-            self._backdrop = None
+            self._backdrop = self._behind = None  # let the pictures go
         self.update()
 
     def boundingRect(self) -> QRectF:

@@ -239,9 +239,12 @@ class MagnifyItem(BoxItem):
         area = self._source.toAlignedRect().adjusted(-1, -1, 1, 1).intersected(self._base.rect())
         if area.isEmpty():
             return QImage(), QRectF()
-        hiding = self._redactions()
+        every = self._redactions()
+        hiding = [i for i in every if i.sceneBoundingRect().intersects(self._source)]
+        # Every redaction is in the key, not just those over the source: a blur draws from the erases
+        # under it, which may lie just outside. There are only ever a few.
         key = (area.getRect(), self._base.cacheKey(),
-               tuple((id(i), i.sceneBoundingRect().getRect(), i.zValue(), i.kind, i.style.width) for i in hiding))
+               tuple((id(i), i.sceneBoundingRect().getRect(), i.zValue(), i.kind, i.style.width) for i in every))
         if self._picture is None or self._picture[0] != key:
             picture = self._base.copy(area).convertToFormat(QImage.Format_ARGB32_Premultiplied)
             painter = QPainter(picture)
@@ -256,14 +259,13 @@ class MagnifyItem(BoxItem):
         return self._picture[1], self._source.translated(-area.x(), -area.y())
 
     def _redactions(self) -> list:
-        """Blurs, pixelations and smart erases over the source, bottom first."""
+        """Every blur, pixelation and smart erase in the snip, bottom first."""
         scene = self.scene()
         if scene is None:
             return []
         # scene.items() and not items(rect): the rect query comes back empty while the scene paints.
         return [item for item in sorted(scene.items(), key=lambda i: i.zValue())
-                if getattr(item, "hides_content", False) and item.isVisible()
-                and item.sceneBoundingRect().intersects(self._source)]
+                if getattr(item, "hides_content", False) and item.isVisible()]
 
     def _paint_connector(self, p: QPainter, source: QRectF, lens: QPainterPath, color: QColor) -> None:
         """A faint line from the source to the lens, so it's clear which area is enlarged."""

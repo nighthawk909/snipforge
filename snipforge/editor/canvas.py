@@ -96,6 +96,8 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         self._pick_source: QImage | None = None  # the snip as you see it, while the eyedropper is on
         self._just_picked = False
         self._pick_point: QPointF | None = None  # the pixel the loupe shows (the arrow keys move it)
+        self._pick_by_key = False  # the keys placed it (not the pointer), so zooming keeps it
+        self._refreshing = False
         self._loupe = Loupe(self.viewport())
 
         self._scene.selectionChanged.connect(self._on_selection_changed)

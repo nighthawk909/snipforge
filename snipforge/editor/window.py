@@ -327,11 +327,11 @@ class EditorWindow(QMainWindow):
         if self._entry is None:
             return
         meta = self._read_meta()
-        where, time = stamp_parts(meta.title if meta else "", meta.app if meta else "", self._entry.created)
-        self.canvas.add_text_stamp(where, time)
+        where, when = stamp_parts(meta.title if meta else "", meta.app if meta else "", self._entry.created)
+        self.canvas.add_text_stamp(where, when)
         if meta is None:
-            message = ("Added when you took this snip. Where it came from couldn't be read just now (another "
-                       "program had the file open): delete the stamp and try again in a moment.")
+            message = ("Added when you took this snip. Where it came from couldn't be read just now: delete the "
+                       "stamp and try again in a moment.")
         elif where:
             message = "Added where and when you took this snip. It's text: edit or move it."
         else:

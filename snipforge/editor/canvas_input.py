@@ -40,6 +40,8 @@ class InputMixin:
 
     # ------------------------------------------------------------------ keyboard
     def keyPressEvent(self, e) -> None:
+        if self._just_picked and e.isAutoRepeat() and e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            return  # Enter held down after a keyboard pick mustn't go on to edit the selection
         if self.picking() and e.key() == Qt.Key_Escape:
             self.stop_picking()
             return
@@ -200,6 +202,7 @@ class InputMixin:
                 self._loupe.hide()
                 super().mouseMoveEvent(e)
             else:
+                self._pick_by_key = False  # the pointer leads again
                 self._pick_hover(view_pos, self._pick_scene_pos(e))
             return
         if drag is None:

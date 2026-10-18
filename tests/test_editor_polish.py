@@ -70,10 +70,14 @@ def test_the_eyedropper_button_works_without_a_mouse(qapp, tmp_path, striped):
     w.show()
     QApplication.processEvents()
     w.canvas.set_tool("rect")
+    w.activateWindow()
     QTest.keyClick(w.panel.pick_button(), Qt.Key_Space)  # Tab to it and press Space
+    QApplication.processEvents()
     assert w.canvas.picking() and "arrow keys" in w.statusBar().currentMessage().lower()
-    key(w.canvas, Qt.Key_Left)
-    key(w.canvas, Qt.Key_Enter)
+    target = QApplication.focusWidget() or w.canvas  # the keyboard goes back to the canvas
+    assert target is w.canvas or not w.isActiveWindow()
+    key(target, Qt.Key_Left)
+    key(target, Qt.Key_Enter)
     assert w.canvas.tool_styles["rect"].color == "#ff9500"
     w.close()
 
@@ -156,6 +160,7 @@ def stamp_text_of(editor):
 
 
 def test_a_briefly_locked_meta_file_is_tried_again(stamped_editor, monkeypatch):
+    monkeypatch.setattr("snipforge.editor.window.META_RETRY_S", 0)
     library = stamped_editor._library
     real = library.read_meta
     calls = []
@@ -171,9 +176,114 @@ def test_a_briefly_locked_meta_file_is_tried_again(stamped_editor, monkeypatch):
 
 
 def test_a_meta_file_that_stays_locked_gives_the_date_and_says_why(stamped_editor, monkeypatch):
+    monkeypatch.setattr("snipforge.editor.window.META_RETRY_S", 0)
+
     def locked(_entry):
         raise PermissionError("locked")
     monkeypatch.setattr(stamped_editor._library, "read_meta", locked)
     stamped_editor.add_source_stamp()
     assert " · " not in stamp_text_of(stamped_editor)
     assert "try again" in stamped_editor.statusBar().currentMessage().lower()
+
+
+# --- review: the lens follows every change; the keys' point survives zooming and scrolling ------------
+def lens_canvas(qapp):
+    img = QImage(400, 300, QImage.Format_ARGB32)
+    img.fill(QColor("#ffffff"))
+    painter = QPainter(img)
+    painter.fillRect(0, 0, 400, 300, QColor("#ffffff"))
+    painter.fillRect(40, 40, 10, 10, QColor("#000000"))
+    painter.fillRect(62, 40, 10, 10, QColor("#000000"))
+    painter.end()
+    return make_canvas(img)
+
+
+def lens_matches_a_fresh_render(c):
+    from snipforge.editor.canvas import Canvas
+    clone = Canvas(c.base_image)
+    clone.load_document(c.to_document())
+    return c.render_image() == clone.render_image()
+
+
+def test_the_lens_follows_redactions_moving_resizing_and_restyling(qapp):
+    c = lens_canvas(qapp)
+    erase = drag(c, "erase", (40, 40), (50, 50))
+    blur = drag(c, "blur", (30, 30), (45, 45))
+    drag(c, "magnify", (30, 30), (60, 60))
+    c.render_image()  # the lens keeps its picture from here
+    erase.setPos(erase.pos() + QPointF(5, 0))
+    assert lens_matches_a_fresh_render(c)
+    blur.set_scene_rect(QRectF(30, 30, 25, 25))
+    assert lens_matches_a_fresh_render(c)
+    blur.set_style(blur.style.with_changes(width=12.0))
+    assert lens_matches_a_fresh_render(c)
+    c.undo_stack.undo()
+    assert lens_matches_a_fresh_render(c)
+
+
+def test_the_lens_follows_an_erase_just_outside_it_under_a_blur(qapp):
+    c = lens_canvas(qapp)
+    erase = drag(c, "erase", (61, 39), (73, 51))  # just right of the lens's source, under the blur
+    drag(c, "blur", (40, 30), (80, 60))
+    drag(c, "magnify", (30, 30), (60, 60))
+    c.render_image()
+    erase.setPos(erase.pos() + QPointF(60, 60))  # away: the blur now shows the black square again
+    assert lens_matches_a_fresh_render(c)
+
+
+def test_zooming_keeps_the_keys_point(qapp, striped):
+    from tests.test_eyedropper import hover
+    big = striped.scaled(3000, 2000)
+    c = make_canvas(big)
+    c.set_zoom(2.0)
+    c.start_picking()
+    hover(c, (10, 10))  # the pointer was over the snip once...
+    for _ in range(60):
+        key(c, Qt.Key_Right, Qt.ShiftModifier)  # ...then the keys took over, scrolling far right
+    point = c.pick_point()
+    assert c.viewport().rect().contains(c.mapFromScene(point)) and c._loupe.isVisible()
+    c.set_zoom(1.0)  # Ctrl+- with the keyboard
+    assert c.pick_point() == point and c.viewport().rect().contains(c.mapFromScene(point))
+
+
+def test_enter_first_shows_where_it_would_pick(striped):
+    c = make_canvas(striped)
+    c.set_tool("arrow")
+    c.start_picking()
+    key(c, Qt.Key_Return)
+    assert c.picking() and c.pick_point() == QPointF(100.5, 50.5) and c._loupe.isVisible()
+    key(c, Qt.Key_Return)
+    assert not c.picking() and c.tool_styles["arrow"].color == "#2cb1bc" and c.pick_point() is None
+
+
+def test_a_held_enter_picks_once_and_edits_nothing(striped):
+    from snipforge.editor.style import Style
+    from snipforge.editor.text_items import TextItem
+    c = make_canvas(striped)
+    note = TextItem(Style(), "Note")
+    note.setPos(20, 20)
+    c._scene.addItem(note)
+    c._select([note])
+    c.start_picking()
+    key(c, Qt.Key_Right)
+    key(c, Qt.Key_Return)
+    QApplication.sendEvent(c, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier, "", True))  # held
+    assert c.editing_text_item() is None
+
+
+def test_torn_edges_match_the_export_on_a_big_snip_too(striped):
+    big = striped.scaled(3000, 700)  # bigger than the backdrop cache: drawn smaller and scaled up
+    c = make_canvas(big)
+    c.set_beautify(DEFAULT_STYLE)
+    c.set_edges(Edges(torn=frozenset({"bottom"})))
+    c.set_zoom(1.0)
+    c.centerOn(QPointF(1500, 690))
+    QApplication.processEvents()
+    view = c.viewport().grab().toImage()
+    export = apply_beautify(c.render_image(), DEFAULT_STYLE)
+    pad = DEFAULT_STYLE.padding
+    gone = [x for x in range(1300, 1700, 7) if c.render_image().pixelColor(x, 699).alpha() == 0]
+    assert gone
+    for x in gone:
+        v, e = view.pixelColor(c.mapFromScene(QPointF(x, 699))), export.pixelColor(pad + x, pad + 699)
+        assert max(abs(v.red() - e.red()), abs(v.green() - e.green()), abs(v.blue() - e.blue())) <= 4
