@@ -14,7 +14,6 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, logs, prefs, preset_output, presets, project, screen_access, theme, wording
 from .capture import CaptureSession, on_screen
-from .editor.window import EditorWindow
 from .home import HomeWindow
 from .hotkey import SUPPORTED as HOTKEYS_SUPPORTED
 from .hotkey import HotkeyListener
@@ -31,6 +30,7 @@ from .theme.tokens import BRAND
 from .update_flow import UpdateFlow
 
 log = logging.getLogger(__name__)
+EDITOR_PRELOAD_MS = 1500  # after start-up, load the editor's code, so the first snip opens as fast as any
 CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing the screen
 REHOOK_MS = 5 * 60 * 1000  # reinstall the keyboard hook in case Windows dropped it
 PRIVACY_POLL_MS = 500  # how often the GUI thread looks for the private-title sweep's result
@@ -105,6 +105,7 @@ class SnipForgeApp:
         app.aboutToQuit.connect(self._hotkey.stop)
         app.aboutToQuit.connect(self._shortcuts.close)
         self._forget_private_titles()
+        QTimer.singleShot(EDITOR_PRELOAD_MS, _load_editor)
         app.aboutToQuit.connect(self.indexer.close)
         app.aboutToQuit.connect(self._stop_recording_on_quit)
         self._reopen = ReopenWatcher(app)  # a Mac: opened again from Finder or the Dock
@@ -519,7 +520,7 @@ class SnipForgeApp:
 
     def open_entry(self, entry_id: str) -> None:
         for window in self._windows:
-            if isinstance(window, EditorWindow) and window._entry and window._entry.id == entry_id:
+            if getattr(window, "_entry", None) is not None and window._entry.id == entry_id:  # an editor
                 self._bring_to_front(window)
                 return
         entry = self.library.get(entry_id)
@@ -546,6 +547,8 @@ class SnipForgeApp:
 
     def _open_editor(self, image: QImage, entry, document, autosave: bool = True,
                      beautify_on: bool | None = None) -> None:
+        from .editor.window import EditorWindow  # loaded just after start-up (_load_editor)
+
         editor = EditorWindow(image, self.library, entry, document, on_new_snip=self.capture,
                               on_open_entry=self.open_entry, on_pin=self.pin, autosave=autosave,
                               on_open_library=self.show_home, beautify_on=beautify_on,
@@ -602,6 +605,15 @@ def about_text() -> str:
             f"<br><br>MIT License. Your snips stay on {wording.this_computer()}. SnipForge only goes online "
             f"to check for updates (choose how in Settings) or when you use Share."
             f"<br><br><a href='{project.REPO_URL}'>{project.REPO_URL.removeprefix('https://')}</a>")
+
+
+def _load_editor() -> None:
+    """The editor's code, loaded once SnipForge is up rather than before it shows anything. A
+    problem is logged now (the first snip would meet it again and say so)."""
+    try:
+        from .editor import window  # noqa: F401
+    except Exception:
+        log.exception("The editor couldn't be loaded")
 
 
 def _command_from_args(argv: list[str]) -> str:

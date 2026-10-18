@@ -36,7 +36,12 @@ python -m ruff check .   # lint
 python scripts/build.py              # dist/SnipForge/SnipForge.exe + portable zip
 python scripts/build.py --installer  # + dist/SnipForge-<version>-setup.exe (needs Inno Setup 6)
 dist/SnipForge/SnipForge.exe --self-test report.json   # proves the packaged app works
+python scripts/measure_performance.py                 # start-up, snip to editor, idle, a big Library
 ```
+
+Speed and size have budgets ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)): the self-test checks what
+start-up loads and how fast the editor and a 1,000-snip Library open, the test suite checks start-up,
+and the build stops if the installer outgrows its size.
 
 ## Design notes
 

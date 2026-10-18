@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from . import hotkey, theme, wording
 from .icons import icon
-from .library import DOCUMENT, META, EntryMeta, Library
+from .library import DOCUMENT, META, EntryMeta, Library, in_parallel
 from .library_search import PERIODS, Item, group_by_date, select, tag_counts, top_apps
 from .library_view import SnipGrid
 from .widgets import NavItem, Segmented
@@ -200,7 +200,8 @@ class HomeWindow(QMainWindow):
         return main
 
     def _build_shortcuts(self) -> None:
-        for keys, slot in ((QKeySequence.Find, self._focus_search), (QKeySequence("Ctrl+G"), self.combine),
+        for keys, slot in ((QKeySequence.Find, self._focus_search), (QKeySequence.Refresh, self.reload),
+                           (QKeySequence("Ctrl+G"), self.combine),
                            (QKeySequence.Delete, lambda: self._trash(self.grid.selected_ids())),
                            (QKeySequence.Copy, self._copy_current)):
             QShortcut(keys, self, slot)
@@ -222,7 +223,9 @@ class HomeWindow(QMainWindow):
         """Re-read the library folder; only snips whose details changed are read again."""
         known = {i.entry.id: i for i in self._items}
         items = []
-        for snap in self._library.scan():
+        snaps = self._library.scan()
+        self._read_metas([s for s in snaps if self._meta_cache.get(s.entry.id, (None,))[0] != s.meta_stamp])
+        for snap in snaps:
             old = known.get(snap.entry.id)
             meta = self._meta_for(snap.entry, snap.meta_stamp, old.meta if old else None)
             created = old.created if old else snap.entry.created
@@ -230,6 +233,12 @@ class HomeWindow(QMainWindow):
             items.append(Item(snap.entry, created, meta, snap.edited_at, duration))
         self._items = items
         self._after_change()
+
+    def reload(self) -> None:
+        """F5: read the whole Library folder again, changes made outside SnipForge included."""
+        self._library.forget_listings()
+        self._meta_cache.clear()
+        self.refresh()
 
     def update_entry(self, entry_id: str) -> None:
         """One snip changed (taken, edited, starred, tagged or removed): read just that one again."""
@@ -243,6 +252,20 @@ class HomeWindow(QMainWindow):
             rest.sort(key=lambda i: i.entry.id, reverse=True)
         self._items = rest
         self._after_change()
+
+    def _read_metas(self, snaps: list) -> None:
+        """Read the details of these snips into the cache, several at a time (the Library window
+        opening on thousands of snips waits on the disk, not on Python)."""
+        def read(snap):
+            if snap.meta_stamp is None:
+                return snap, EntryMeta()
+            try:
+                return snap, self._library.read_meta(snap.entry)
+            except OSError:
+                return snap, None  # locked for a moment: _meta_for keeps what it had
+        for snap, meta in in_parallel(read, snaps):
+            if meta is not None:
+                self._meta_cache[snap.entry.id] = (snap.meta_stamp, meta)
 
     def _meta_for(self, entry, stamp, previous):
         """A snip's details, cached by meta.json's modification time. If the file is locked for a
