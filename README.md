@@ -23,6 +23,8 @@ open the .dmg and drag SnipForge to **Applications**. It isn't notarized by Appl
 time macOS needs **System Settings > Privacy & Security > Open Anyway**; snipping needs
 **Screen & System Audio Recording** turned on for SnipForge there too.
 
+Where SnipForge is going, with what's done ticked off: [docs/ROADMAP.md](docs/ROADMAP.md).
+
 Each [release](https://github.com/nighthawk909/snipforge/releases) lists SHA-256 checksums so you
 can verify the download, and has a portable zip if you'd rather not install anything. Setting it up
 for a team, a SharePoint or network-share mirror, or Software Center? See
