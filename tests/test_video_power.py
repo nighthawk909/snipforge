@@ -39,6 +39,38 @@ def test_the_face_imports_nothing_windows_only_at_the_top():
 
     tree = ast.parse(inspect.getsource(power))
     imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
-    names = {alias.name for node in imports for alias in node.names}
+    names = {alias.name for node in imports if isinstance(node, ast.Import) for alias in node.names}
     names |= {node.module for node in imports if isinstance(node, ast.ImportFrom) and node.module}
-    assert not names & {"ctypes", "wintypes", "_power_win32"}, names
+    assert {name.split(".")[0] for name in names} <= {"__future__", "logging", "sys", "PySide6"}, names
+
+
+class FakeOs:
+    """Stands in for a platform's half (_power_win32.Listener)."""
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def block_shutdown(self, reason):
+        self.calls.append(("block", reason))
+
+    def allow_shutdown(self):
+        self.calls.append(("allow",))
+
+    def close(self):
+        self.calls.append(("close",))
+
+
+def test_the_face_hands_shutdown_and_closing_to_the_platforms_half(on_a_mac, qapp):
+    on_a_mac(power)
+    watch = power.SessionWatch()
+    half = watch._os = FakeOs()
+    watch.window_id = 4242
+
+    watch.block_shutdown("Saving your screen recording")
+    watch.allow_shutdown()
+    watch.close()
+    watch.close()  # twice: nothing more
+
+    assert half.calls == [("block", "Saving your screen recording"), ("allow",), ("close",)]
+    assert watch._os is None and watch.window_id == 0
+    watch.block_shutdown("after closing")  # no half left: nothing happens, nothing fails

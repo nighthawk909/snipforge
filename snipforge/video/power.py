@@ -33,7 +33,7 @@ class SessionWatch(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self.window_id = 0  # Windows: the hidden window it's told through (told to SnipForge, for tests)
+        self.window_id = 0  # Windows: the hidden window Windows tells (SnipForge hears its id, for tests)
         self._os = None
         if sys.platform == "win32" and QCoreApplication.instance() is not None:
             from . import _power_win32
@@ -42,7 +42,7 @@ class SessionWatch(QObject):
             self.window_id = self._os.window_id
 
     def handle(self, event: str) -> None:
-        log.info("The system says: %s", event)
+        log.info("Windows says: %s", event)  # the Mac's half will say so too
         signal = {"sleep": self.sleeping, "ending?": self.ending_soon, "ending": self.ending,
                   "not ending": self.not_ending, "display off": self.display_off, "display on": self.display_on,
                   "locked": self.locked, "unlocked": self.unlocked}.get(event)
@@ -59,8 +59,8 @@ class SessionWatch(QObject):
             self._os.allow_shutdown()
 
     def close(self) -> None:
-        """Stop watching. Not while the system is telling it something (from one of the signals): Qt
-        goes on using Windows' window after its filters."""
+        """Stop watching. Not from one of the signals (while Windows is telling the hidden window
+        something): Qt goes on using that window after its filters."""
         if self._os is not None:
             self._os.close()
             self._os = None

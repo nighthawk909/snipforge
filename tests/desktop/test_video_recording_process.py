@@ -12,7 +12,8 @@ from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QPainter
 from PySide6.QtWidgets import QWidget
 
-from snipforge.video import ffmpeg, power
+from snipforge.video import _power_win32 as win
+from snipforge.video import ffmpeg
 from snipforge.video.recorder import Settings
 from snipforge.video.remote_recorder import RemoteRecorder
 
@@ -118,7 +119,7 @@ def test_a_recording_made_in_its_own_process(qapp, tmp_path):
 
 def test_windows_going_to_sleep_finishes_the_recording_first(qapp, tmp_path):
     def sleep(remote, outcome):
-        send_and_wait(remote.window_id, power.WM_POWERBROADCAST, power.PBT_APMSUSPEND)
+        send_and_wait(remote.window_id, win.WM_POWERBROADCAST, win.PBT_APMSUSPEND)
         # Handled, so Windows would sleep now: the file must already be whole.
         outcome["codec_then"] = ffmpeg.probe(remote.settings.output).first("video").codec
 
@@ -129,8 +130,8 @@ def test_windows_going_to_sleep_finishes_the_recording_first(qapp, tmp_path):
 
 def test_signing_out_finishes_the_recording_first(qapp, tmp_path):
     def sign_out(remote, outcome):
-        outcome["may_end"] = send_and_wait(remote.window_id, power.WM_QUERYENDSESSION, 0, ENDSESSION_LOGOFF)
-        send_and_wait(remote.window_id, power.WM_ENDSESSION, 1, ENDSESSION_LOGOFF)
+        outcome["may_end"] = send_and_wait(remote.window_id, win.WM_QUERYENDSESSION, 0, ENDSESSION_LOGOFF)
+        send_and_wait(remote.window_id, win.WM_ENDSESSION, 1, ENDSESSION_LOGOFF)
         # Handled, so Windows would end the session now: the file must already be whole.
         outcome["codec_then"] = ffmpeg.probe(remote.settings.output).first("video").codec
 

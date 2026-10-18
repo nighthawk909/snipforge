@@ -20,9 +20,13 @@ import ctypes
 import logging
 from ctypes import wintypes
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication
 from PySide6.QtGui import QWindow
+
+if TYPE_CHECKING:
+    from .power import SessionWatch
 
 log = logging.getLogger(__name__)
 
@@ -99,9 +103,8 @@ def classify(message: int, wparam: int, display: int | None = None) -> str | Non
     return None
 
 
-
 class _Filter(QAbstractNativeEventFilter):
-    def __init__(self, watch, window_id: int) -> None:
+    def __init__(self, watch: SessionWatch, window_id: int) -> None:
         super().__init__()
         self.watch, self.window_id = watch, window_id
 
@@ -127,7 +130,7 @@ class Listener:
     """One hidden native window for Windows to tell, the filter that hears it (calling
     `watch.handle` while Windows waits), and the screen and lock notices it asked for."""
 
-    def __init__(self, watch) -> None:
+    def __init__(self, watch: SessionWatch) -> None:
         self.window = QWindow()  # never shown: only there to be told
         self.window.create()
         self.window_id = int(self.window.winId())
@@ -145,6 +148,8 @@ class Listener:
             ctypes.windll.user32.ShutdownBlockReasonDestroy(ctypes.c_void_p(self.window_id))
 
     def close(self) -> None:
+        """Stop listening and let the window go. Not from one of SessionWatch's signals (while
+        Windows is telling the window something): Qt goes on using the window after its filters."""
         app = QCoreApplication.instance()
         if self.filter is not None and app is not None:
             app.removeNativeEventFilter(self.filter)
