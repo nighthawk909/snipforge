@@ -16,7 +16,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, Q
 from PySide6.QtWidgets import QGraphicsItem
 
 from .. import theme
-from .beautify import BeautifyStyle, backdrop_image
+from .beautify import BeautifyStyle, backdrop_image, paint_backdrop
 
 HANDLE_PX = 10
 MIN_CROP = 8.0
@@ -155,6 +155,18 @@ class CropMask(QGraphicsItem):
         if self._backdrop is None or self._backdrop[0] != key:
             self._backdrop = (key, QPixmap.fromImage(backdrop_image(width, height, style, scale)))
         return self._backdrop[1]
+
+    def fill_behind(self, p: QPainter, path: QPainterPath) -> None:
+        """Fill `path` (inside the snip) with what's behind it on screen: Beautify's backdrop and
+        shadow when it's on, exactly as an export draws them, else the canvas's dots. Torn edges
+        use it to look torn away."""
+        if self.beautify is not None:
+            p.save()
+            p.setClipPath(path, Qt.IntersectClip)
+            paint_backdrop(p, self.crop, self.beautify)
+            p.restore()
+        else:
+            self._fill_cut(p, path)
 
     def _fill_cut(self, p: QPainter, outside: QPainterPath) -> None:
         """The canvas's dots on screen, so a cut area blends in; plain background otherwise."""
