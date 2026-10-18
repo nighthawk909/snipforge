@@ -10,6 +10,7 @@ Loopback sends nothing at all while nothing plays; the mixer turns those gaps in
 from __future__ import annotations
 
 import ctypes
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -17,6 +18,8 @@ from ctypes import Structure, byref, c_float, c_int, c_int64, c_long, c_uint, c_
 from dataclasses import dataclass
 
 from .com import GUID, ComError, check, release, vcall
+
+log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 48000
 CHANNELS = 2
@@ -41,6 +44,7 @@ AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM = 0x80000000
 AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY = 0x08000000
 AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY = 0x1
 AUDCLNT_BUFFERFLAGS_SILENT = 0x2
+AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR = 0x4
 WAVE_FORMAT_IEEE_FLOAT = 3
 BUFFER_100NS = 10_000_000  # one second of room on Windows' side, so a busy moment loses nothing
 POLL_SECONDS = 0.005
@@ -89,14 +93,15 @@ class EndpointState:
     volume: float  # 0-1, Windows' volume slider for the device
 
 
-# packet callback: (interleaved float32 bytes, frames, seconds on the perf_counter clock, discontinuity)
-PacketCallback = Callable[[bytes, int, float, bool], None]
+# packet callback: (interleaved float32 bytes, frames, seconds on the perf_counter clock or None when
+# Windows says the timestamp is unreliable, discontinuity)
+PacketCallback = Callable[[bytes, int, float | None, bool], None]
 
 
 def explain(hr: int, kind: str) -> AudioUnavailable:
     """What a failed WASAPI call means for the person recording."""
     hr &= 0xFFFFFFFF
-    what = "microphone" if kind == MICROPHONE else "computer's sound"
+    what = _what(kind)
     if hr == E_ACCESSDENIED and kind == MICROPHONE:
         return MicrophoneBlocked("Windows isn't letting apps use the microphone. Turn on Settings > Privacy & "
                                  "security > Microphone > Let desktop apps access your microphone.")
@@ -105,6 +110,10 @@ def explain(hr: int, kind: str) -> AudioUnavailable:
     if hr == AUDCLNT_E_DEVICE_IN_USE:
         return AudioUnavailable(f"Another app is using the {what} device on its own.")
     return AudioUnavailable(f"The {what} can't be recorded (error 0x{hr:08X}).")
+
+
+def _what(kind: str) -> str:
+    return "microphone" if kind == MICROPHONE else "computer's sound"
 
 
 def _flow(kind: str) -> int:
@@ -135,15 +144,19 @@ class _Enumerator:
         collection = c_void_p()
         check(vcall(self.ptr, 3, c_long, _flow(kind), DEVICE_STATE_ACTIVE, byref(collection),
                     argtypes=(c_int, c_uint, c_void_p)), "Listing sound devices")
+        found = []
         try:
             count = c_uint()
             check(vcall(collection, 3, c_long, byref(count), argtypes=(c_void_p,)), "Counting sound devices")
-            found = []
             for i in range(count.value):
                 device = c_void_p()
                 check(vcall(collection, 4, c_long, i, byref(device), argtypes=(c_uint, c_void_p)), "Sound device")
                 found.append(device)
             return found
+        except Exception:
+            for device in found:
+                release(device)
+            raise
         finally:
             release(collection)
 
@@ -195,11 +208,13 @@ def devices(kind: str) -> list[Device]:
             default_id = _device_id(default) if default else ""
             release(default)
             found = []
-            for device in enumerator.active(kind):
-                try:
+            active = enumerator.active(kind)
+            try:
+                for device in active:
                     device_id = _device_id(device)
                     found.append(Device(device_id, _friendly_name(device) or "Sound device", device_id == default_id))
-                finally:
+            finally:
+                for device in active:
                     release(device)
             return found
         finally:
@@ -213,7 +228,10 @@ def endpoint_state(kind: str, device_id: str | None = None) -> EndpointState | N
         enumerator = _Enumerator()
         device = volume = None
         try:
-            device = enumerator.by_id(device_id) if device_id else enumerator.default(kind)
+            try:
+                device = enumerator.by_id(device_id) if device_id else enumerator.default(kind)
+            except ComError:
+                return None  # unplugged since it was listed
             if not device:
                 return None
             volume = c_void_p()
@@ -251,7 +269,7 @@ class WasapiCapture:
         self._thread.start()
         if not self._ready.wait(START_TIMEOUT):
             self.stop()
-            raise AudioUnavailable(f"The {self.kind} took too long to start.")
+            raise AudioUnavailable(f"The {_what(self.kind)} took too long to start.")
         if self._failure:
             raise self._failure
 
@@ -261,32 +279,36 @@ class WasapiCapture:
             self._thread.join(2)
 
     def _run(self) -> None:
-        ole32 = ctypes.windll.ole32
-        ole32.CoInitializeEx(None, 0)
-        task = c_uint32()
-        avrt = ctypes.windll.avrt
+        ole32, avrt = ctypes.windll.ole32, ctypes.windll.avrt
+        initialised = ole32.CoInitializeEx(None, 0) >= 0
         avrt.AvSetMmThreadCharacteristicsW.restype = c_void_p
         avrt.AvRevertMmThreadCharacteristics.argtypes = [c_void_p]
-        mmcss = avrt.AvSetMmThreadCharacteristicsW("Pro Audio", byref(task))  # Windows' audio-thread priority
-        enumerator = device = client = capture = None
+        mmcss = enumerator = device = client = capture = None
         try:
-            enumerator = _Enumerator()
-            device = enumerator.by_id(self.device_id) if self.device_id else enumerator.default(self.kind)
-            if not device:
-                raise AudioUnavailable("No microphone is connected." if self.kind == MICROPHONE
-                                       else "No speakers or headphones are connected.")
-            client, capture = self._open(device)
-        except ComError as exc:
-            self._failure = explain(exc.hresult, self.kind)
-        except AudioUnavailable as exc:
-            self._failure = exc
-        self._ready.set()
-        try:
+            try:
+                mmcss = avrt.AvSetMmThreadCharacteristicsW("Pro Audio", byref(c_uint32()))  # audio-thread priority
+                enumerator = _Enumerator()
+                device = enumerator.by_id(self.device_id) if self.device_id else enumerator.default(self.kind)
+                if not device:
+                    raise AudioUnavailable("No microphone is connected." if self.kind == MICROPHONE
+                                           else "No speakers or headphones are connected.")
+                client, capture = self._open(device)
+            except ComError as exc:
+                self._failure = explain(exc.hresult, self.kind)
+            except AudioUnavailable as exc:
+                self._failure = exc
+            except Exception as exc:  # whatever it is, start() must hear now, not after its timeout
+                log.exception("Opening the %s failed", _what(self.kind))
+                self._failure = AudioUnavailable(f"The {_what(self.kind)} couldn't be opened ({exc}).")
+            finally:
+                self._ready.set()
             if not self._failure:
                 self._pump(capture)
         except ComError as exc:
-            if self._on_error:
-                self._on_error(explain(exc.hresult, self.kind))
+            self._report(explain(exc.hresult, self.kind))
+        except Exception as exc:  # including one raised by on_packet: never die without saying so
+            log.exception("Recording the %s stopped", _what(self.kind))
+            self._report(AudioUnavailable(f"Recording the {_what(self.kind)} stopped ({exc})."))
         finally:
             if client:
                 vcall(client, 11, c_long)  # Stop
@@ -296,10 +318,18 @@ class WasapiCapture:
                 enumerator.close()
             if mmcss:
                 avrt.AvRevertMmThreadCharacteristics(mmcss)
-            ole32.CoUninitialize()
+            if initialised:
+                ole32.CoUninitialize()
+
+    def _report(self, error: AudioUnavailable) -> None:
+        if self._on_error:
+            try:
+                self._on_error(error)
+            except Exception:
+                log.exception("on_error failed")
 
     def _open(self, device: c_void_p) -> tuple[c_void_p, c_void_p]:
-        client = c_void_p()
+        client, capture = c_void_p(), c_void_p()
         check(vcall(device, 3, c_long, byref(IID_IAudioClient), CLSCTX_ALL, None, byref(client),
                     argtypes=(c_void_p, c_uint, c_void_p, c_void_p)), "Activating the audio client")
         try:
@@ -310,32 +340,41 @@ class WasapiCapture:
                 flags |= AUDCLNT_STREAMFLAGS_LOOPBACK
             check(vcall(client, 3, c_long, AUDCLNT_SHAREMODE_SHARED, flags, BUFFER_100NS, 0, byref(fmt), None,
                         argtypes=(c_int, c_uint, c_int64, c_int64, c_void_p, c_void_p)), "Initialize")
-            capture = c_void_p()
             check(vcall(client, 14, c_long, byref(IID_IAudioCaptureClient), byref(capture),
                         argtypes=(c_void_p, c_void_p)), "GetService")
             check(vcall(client, 10, c_long), "Start")
             return client, capture
         except Exception:
+            release(capture)
             release(client)
             raise
 
     def _pump(self, capture: c_void_p) -> None:
+        """Hand on every packet until stop(), then the last few still waiting."""
+        while True:
+            stopping = self._stop.is_set()
+            self._drain(capture)
+            if stopping:
+                return
+            time.sleep(POLL_SECONDS)
+
+    def _drain(self, capture: c_void_p) -> None:
         size, data, frames, flags = c_uint32(), c_void_p(), c_uint32(), c_uint32()
         position, qpc = c_uint64(), c_uint64()
-        while not self._stop.is_set():
-            time.sleep(POLL_SECONDS)
-            while True:
-                check(vcall(capture, 5, c_long, byref(size), argtypes=(c_void_p,)), "GetNextPacketSize")
-                if size.value == 0:
-                    break
-                check(vcall(capture, 3, c_long, byref(data), byref(frames), byref(flags), byref(position),
-                            byref(qpc), argtypes=(c_void_p,) * 5), "GetBuffer")
-                n = frames.value
-                silent = bool(flags.value & AUDCLNT_BUFFERFLAGS_SILENT)
-                payload = bytes(n * BYTES_PER_FRAME) if silent else ctypes.string_at(data, n * BYTES_PER_FRAME)
-                check(vcall(capture, 4, c_long, n, argtypes=(c_uint,)), "ReleaseBuffer")
-                self.packets += 1
-                self.frames += n
-                # qpc is in 100 ns units of QueryPerformanceCounter time: the clock perf_counter reads.
-                glitch = bool(flags.value & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY)
-                self._on_packet(payload, n, qpc.value * 1e-7, glitch)
+        while True:
+            check(vcall(capture, 5, c_long, byref(size), argtypes=(c_void_p,)), "GetNextPacketSize")
+            if size.value == 0:
+                return
+            check(vcall(capture, 3, c_long, byref(data), byref(frames), byref(flags), byref(position),
+                        byref(qpc), argtypes=(c_void_p,) * 5), "GetBuffer")
+            n = frames.value
+            silent = bool(flags.value & AUDCLNT_BUFFERFLAGS_SILENT)
+            payload = bytes(n * BYTES_PER_FRAME) if silent else ctypes.string_at(data, n * BYTES_PER_FRAME)
+            check(vcall(capture, 4, c_long, n, argtypes=(c_uint,)), "ReleaseBuffer")
+            self.packets += 1
+            self.frames += n
+            # qpc is in 100 ns units of QueryPerformanceCounter time, the clock perf_counter reads;
+            # None when Windows flags it as wrong (or gives none), so the mixer won't trust it.
+            unreliable = flags.value & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR or qpc.value == 0
+            glitch = bool(flags.value & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY)
+            self._on_packet(payload, n, None if unreliable else qpc.value * 1e-7, glitch)

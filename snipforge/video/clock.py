@@ -19,6 +19,8 @@ class Clock:
     def begin(self, now: float) -> None:
         with self._lock:
             self.start = now
+            self._pauses.clear()
+            self._paused_at = None
 
     @property
     def paused(self) -> bool:

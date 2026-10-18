@@ -24,17 +24,26 @@ def need(kind):
     return found
 
 
+def tone_level(left: list[float], hz: float = 1000.0, rate: int = 48000) -> tuple[float, float]:
+    """(amplitude at `hz`, overall RMS) of a block: a pure tone of amplitude A gives (A, A/sqrt 2)."""
+    if not left:
+        return 0.0, 0.0
+    i = sum(v * math.cos(2 * math.pi * hz * n / rate) for n, v in enumerate(left))
+    q = sum(v * math.sin(2 * math.pi * hz * n / rate) for n, v in enumerate(left))
+    return 2 * math.hypot(i, q) / len(left), math.sqrt(sum(v * v for v in left) / len(left))
+
+
 class Collector:
     def __init__(self):
         self.lock = threading.Lock()
-        self.packets = []  # (wall time received, stamp, frames, peak)
+        self.packets = []  # (wall time received, stamp, frames, peak, left channel)
 
     def __call__(self, payload, frames, stamp, _glitch):
         samples = array.array("f")
         samples.frombytes(payload)
         peak = max((abs(v) for v in samples), default=0.0)
         with self.lock:
-            self.packets.append((time.perf_counter(), stamp, frames, peak))
+            self.packets.append((time.perf_counter(), stamp, frames, peak, list(samples[0::2])))
 
 
 def run_for(seconds, qapp):
@@ -86,7 +95,11 @@ def test_system_audio_hears_what_plays(qapp):
 
     loud = [p for p in collector.packets if p[3] > 0.05]
     assert loud, "the tone never reached the system-audio recording"
-    assert max(p[3] for p in loud) < 0.5  # it's the tone (0.18 full scale), not noise or a clipped mess
+    middle = [s for p in loud[len(loud) // 4: 3 * len(loud) // 4] for s in p[4]]  # away from its start and end
+    amplitude, rms = tone_level(middle)
+    # the 1 kHz tone played (0.18 of full scale; Windows spreads a mono sound over two speakers 3 dB down)
+    assert 0.09 < amplitude < 0.25
+    assert amplitude / (rms * math.sqrt(2)) > 0.8  # and little else: it's that tone, not other sound
 
 
 def test_the_microphone_records_in_real_time_on_the_shared_clock(qapp):
@@ -104,14 +117,17 @@ def test_the_microphone_records_in_real_time_on_the_shared_clock(qapp):
 
     packets = collector.packets[5:]  # the device settles first
     seconds = sum(p[2] for p in packets) / 48000
+    assert all(p[1] is not None for p in packets)
     span = packets[-1][1] - packets[0][1]
     assert seconds == pytest.approx(span, abs=0.05)  # 48 000 frames for every second of timestamps
-    lags = [received - stamp for received, stamp, _frames, _peak in packets]
-    assert all(0 <= lag < 0.5 for lag in lags)  # stamped on the clock time.perf_counter() reads
+    lags = [received - stamp for received, stamp, *_rest in packets]
+    assert all(0 <= lag < 0.1 for lag in lags)  # stamped on the clock time.perf_counter() reads
 
 
 def test_a_device_that_isnt_there_is_explained(qapp):
     capture = wasapi.WasapiCapture(wasapi.MICROPHONE, lambda *a: None, device_id="{0.0.1.00000000}.{nonexistent}")
 
-    with pytest.raises(wasapi.AudioUnavailable):
+    started = time.perf_counter()
+    with pytest.raises(wasapi.AudioUnavailable, match="unplugged"):
         capture.start()
+    assert time.perf_counter() - started < 2.0
