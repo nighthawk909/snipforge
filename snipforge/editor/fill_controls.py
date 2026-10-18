@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QColorDialog, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 from .. import theme
-from .style import PALETTE, Style, fill_opacity
+from .style import COLOR_NAMES, PALETTE, Style, fill_opacity
 
 
 class SameAsOutline(QPushButton):
@@ -19,7 +19,6 @@ class SameAsOutline(QPushButton):
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Same color as the outline")
-        self.setAccessibleName("Fill color: same as the outline")
 
     def paintEvent(self, _e) -> None:  # noqa: N802 - Qt API
         p = QPainter(self)
@@ -36,10 +35,17 @@ class SameAsOutline(QPushButton):
         p.drawEllipse(dot)
         p.setBrush(QColor(self.outline))
         p.drawPie(dot, 90 * 16, 180 * 16)  # half the outline's color, half its tint: "from the outline"
-        p.setPen(QPen(QColor(self.outline), 1.2))
+        p.setPen(QPen(self.ring_color(), 1.2))
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(dot)
         p.end()
+
+    def ring_color(self) -> QColor:
+        """The outline's color, or the theme's quiet text color where it wouldn't show on the panel."""
+        outline, panel = QColor(self.outline), self.palette().color(QPalette.Window)
+        if abs(outline.lightness() - panel.lightness()) < 48:
+            return QColor(theme.current().palette.text3)
+        return outline
 
 
 class FillControls(QWidget):
@@ -78,7 +84,6 @@ class FillControls(QWidget):
         self.swatches = {}
         for color in PALETTE:
             swatch = swatch_factory(color)
-            swatch.setAccessibleName(f"Fill {swatch.accessibleName().lower()}")
             swatch.clicked.connect(lambda _=False, c=color: self._pick(c))
             self.swatches[color] = swatch
             row.addWidget(swatch)
@@ -99,6 +104,18 @@ class FillControls(QWidget):
         self.opacity.setAccessibleName("Fill opacity")
         self.opacity.valueChanged.connect(self._opacity_moved)
         column.addWidget(self.opacity)
+        self.set_noun("fill")
+
+    def set_noun(self, noun: str) -> None:
+        """"fill", or "background" for text boxes: what the controls are called, for screen readers too."""
+        title = noun.capitalize()
+        self.title.setText(noun.upper())
+        self.same.setAccessibleName(f"{title} color: same as the outline")
+        for color, swatch in self.swatches.items():
+            swatch.setAccessibleName(f"{title} color: {COLOR_NAMES.get(color, color)}")
+        self.custom.setToolTip(f"Custom {noun} color")
+        self.custom.setAccessibleName(f"Custom {noun} color")
+        self.opacity.setAccessibleName(f"{title} opacity")
 
     def load(self, kind: str, style: Style) -> None:
         self._loading = True

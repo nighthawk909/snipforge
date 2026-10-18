@@ -151,10 +151,10 @@ class PropertiesPanel(QScrollArea):
         self._build_shape()
         self._build_stamps()
         self._build_colors()
-        self._build_fill()
         self._build_size()
         self._build_text()
         self._build_effects()
+        self._build_fill()  # right under the Fill switch, so turning it on doesn't move the switch
         self._build_crop()
         self._build_cutout()
         self._build_image()
@@ -346,12 +346,18 @@ class PropertiesPanel(QScrollArea):
             b.setToolButtonStyle(Qt.ToolButtonIconOnly)
             b.setIconSize(QSize(20, 20))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._line.changed.connect(lambda key: self._emit(**LINE_CHANGES[key]))
+        self._line_loaded = "solid"
+        self._line.changed.connect(self._line_chosen)
         row.addWidget(self._line)
         col.addWidget(self._line_row)
         for key, label in (("tail", "Pointer"), ("fill", "Fill"), ("shadow", "Shadow")):
             switch = self._switch_row(col, key, label)
             switch.toggled.connect(lambda on, k=key: self._emit(**{k: on}))
+
+    def _line_chosen(self, key: str) -> None:
+        if key != self._line_loaded:  # clicking the line you have already adds nothing to undo
+            self._line_loaded = key
+            self._emit(**LINE_CHANGES[key])
 
     def _build_crop(self) -> None:
         col = self._section("crop", "Crop")
@@ -436,7 +442,7 @@ class PropertiesPanel(QScrollArea):
         for key in SWITCHES:
             self._switches[key].parentWidget().setVisible(key in fields)
         self._line_row.setVisible("dash" in fields)
-        self._fill.title.setText("BACKGROUND" if kind == "text" else "FILL")
+        self._fill.set_noun("background" if kind == "text" else "fill")
         self._switches["fill"].property("rowLabel").setText(
             {"text": "Background", "callout": "Filled"}.get(kind, "Fill"))
         self._size_label.setText(self.size_label().upper())
@@ -455,7 +461,8 @@ class PropertiesPanel(QScrollArea):
         self._font.setValue(int(style.font_size))
         for key in SWITCHES:
             self._switches[key].setChecked(bool(getattr(style, key)))
-        self._line.set_value(line_style(style))
+        self._line_loaded = line_style(style)
+        self._line.set_value(self._line_loaded)
         self._fill.load(self._kind, style)
         if style.shape in CALLOUT_SHAPES:
             self._shapes.set_value(style.shape)

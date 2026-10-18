@@ -14,7 +14,7 @@ from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPaint
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsItem
 
 from ..fonts import ui_font
-from .style import Style, fill_qcolor
+from .style import USUAL_OPACITY, Style, fill_opacity, fill_qcolor
 
 FLAGS = QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable
 HIT_SLOP = 8.0
@@ -31,9 +31,9 @@ def make_pen(color: QColor, width: float, dash: bool = False, dotted: bool = Fal
     return pen
 
 
-def style_pen(style: Style, width: float | None = None) -> QPen:
+def style_pen(style: Style) -> QPen:
     """The outline pen for `style`: its color and line (solid, dashed or dotted)."""
-    return make_pen(QColor(style.color), style.width if width is None else width, style.dash, style.dotted)
+    return make_pen(QColor(style.color), style.width, style.dash, style.dotted)
 
 
 def constrain_45(origin: QPointF, point: QPointF) -> QPointF:
@@ -47,6 +47,51 @@ def constrain_45(origin: QPointF, point: QPointF) -> QPointF:
 def readable_on(color: QColor) -> QColor:
     luminance = 0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()
     return QColor("#1c1c1e") if luminance > 170 else QColor("#ffffff")
+
+
+DARK_INK, LIGHT_INK = "#1c1c1e", "#ffffff"
+MIN_CONTRAST = 3.0  # WCAG's floor for large text: callout and text-box lettering is big and bold
+
+
+def _luminance(color: QColor) -> float:
+    def channel(value: int) -> float:
+        v = value / 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * channel(color.red()) + 0.7152 * channel(color.green()) + 0.0722 * channel(color.blue())
+
+
+def contrast(a: QColor, b: QColor) -> float:
+    high, low = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def over_white(color: QColor) -> QColor:
+    """A see-through color as it looks on a light snip, which most screenshots are."""
+    alpha = color.alphaF()
+    return QColor(*(round(v * alpha + 255 * (1 - alpha)) for v in (color.red(), color.green(), color.blue())))
+
+
+def ink_on(background: QColor, preferred: QColor | None = None) -> QColor:
+    """Text color for `background`: `preferred` if it reads there, else dark or white, whichever reads better."""
+    shown = over_white(background)
+    if preferred is not None and contrast(preferred, shown) >= MIN_CONTRAST:
+        return QColor(preferred)
+    dark, light = QColor(DARK_INK), QColor(LIGHT_INK)
+    return dark if contrast(dark, shown) >= contrast(light, shown) else light
+
+
+def fill_ink(kind: str, style: Style) -> QColor:
+    """The letters' color on a filled text box or callout. The usual look (no fill color or opacity of
+    its own) is as it always was. Otherwise the letters read on the fill: a text box keeps its color
+    when it reads on a background of its own, and a callout its outline's when its fill is faint."""
+    color = QColor(style.color)
+    if not style.fill_color and style.fill_opacity == USUAL_OPACITY:
+        return readable_on(color)
+    if kind == "text":
+        preferred = color if style.fill_color else None
+    else:
+        preferred = color if fill_opacity(kind, style) < 50 else None
+    return ink_on(fill_qcolor(kind, style), preferred)
 
 
 def stroke_band(path: QPainterPath, width: float) -> QPainterPath:

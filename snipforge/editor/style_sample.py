@@ -7,9 +7,9 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
 
-from .items import make_pen, readable_on
+from .items import fill_ink, make_pen, readable_on
 from .stamps import renderer
-from .style import Style, fill_opacity, fill_qcolor
+from .style import Style, fill_qcolor
 
 MAX_PEN = 5.0  # thicker lines are drawn this thick, so the sample still fits its tile
 
@@ -153,11 +153,6 @@ def _paint_redaction(p: QPainter, rect: QRectF, kind: str, style: Style) -> None
 
 def _sample_ink(kind: str, style: Style) -> QColor:
     """The "Aa" color on a text or callout sample, as the real item colors its text."""
-    color = QColor(style.color)
     if not style.fill:
-        return color if kind == "text" else QColor("#1c1c1e")
-    if kind == "text":
-        return color if style.fill_color else readable_on(color)
-    if fill_opacity(kind, style) >= 50:
-        return readable_on(QColor(style.fill_color or style.color))
-    return color
+        return QColor(style.color) if kind == "text" else QColor("#1c1c1e")
+    return fill_ink(kind, style)

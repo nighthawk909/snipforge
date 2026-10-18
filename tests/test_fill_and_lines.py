@@ -69,8 +69,56 @@ def test_text_with_a_background_color_of_its_own_uses_its_color_for_the_letters(
     from snipforge.editor.text_items import TextItem
     usual = TextItem(Style(color=RED, fill=True))
     assert usual.defaultTextColor() == QColor("#ffffff")  # the usual look: white on the red box
-    own = TextItem(Style(color=RED, fill=True, fill_color="#ffd60a"))
-    assert own.defaultTextColor() == QColor(RED)
+    own = TextItem(Style(color=RED, fill=True, fill_color="#ffffff"))
+    assert own.defaultTextColor() == QColor(RED)  # red reads on white: it's kept
+
+
+def test_text_on_a_faint_background_stays_readable(qapp):
+    from snipforge.editor.text_items import TextItem
+    faint = TextItem(Style(color=RED, fill=True, fill_opacity=30))
+    assert faint.defaultTextColor() == QColor("#1c1c1e")  # not white on a pale pink tint
+    same = TextItem(Style(color=RED, fill=True, fill_color=RED))
+    assert same.defaultTextColor() != QColor(RED)  # never red on red
+
+
+def test_huge_numbers_in_damaged_data_are_clamped(qapp):
+    style = Style.from_dict({"width": 10 ** 400, "font_size": 10 ** 400, "fill_opacity": 10 ** 400})
+    assert (style.width, style.font_size, style.fill_opacity) == (200.0, 400, 100)
+    assert Style.from_dict({"width": float("nan"), "fill_opacity": float("inf")}) == Style()
+
+
+def test_a_hollow_look_ignores_its_hidden_fill_choices():
+    from snipforge.editor import saved_styles
+    a, b = Style(fill=False), Style(fill=False, fill_color=BLUE, fill_opacity=40)
+    assert saved_styles.same_look("rect", a, b)
+    assert "fill_color" not in saved_styles.fields_of("rect", b)
+    assert not saved_styles.same_look("rect", a.with_changes(fill=True), b.with_changes(fill=True))
+
+
+def test_choosing_the_line_you_have_adds_nothing(qapp):
+    panel = PropertiesPanel()
+    panel.load("arrow", Style(dash=True), has_selection=True)
+    seen = []
+    panel.changed.connect(seen.append)
+    panel.line_control().button("dashed").click()
+    assert seen == []
+
+
+def test_the_same_as_outline_swatch_shows_for_a_white_outline(qapp):
+    from snipforge.editor.fill_controls import SameAsOutline
+    swatch = SameAsOutline()
+    swatch.outline = "#ffffff" if swatch.palette().window().color().lightness() > 128 else "#1c1c1e"
+    assert swatch.ring_color() != QColor(swatch.outline)
+    swatch.outline = "#0a84ff"
+    assert swatch.ring_color() == QColor("#0a84ff")
+
+
+def test_text_boxes_call_it_background_for_screen_readers_too(qapp):
+    panel = PropertiesPanel()
+    panel.load("text", DEFAULT_TOOL_STYLES["text"], has_selection=True)
+    assert panel.fill_controls().opacity.accessibleName() == "Background opacity"
+    panel.load("rect", Style(fill=True), has_selection=True)
+    assert panel.fill_controls().opacity.accessibleName() == "Fill opacity"
 
 
 def test_dotted_lines_have_round_gaps(qapp, white_image):

@@ -17,24 +17,31 @@ SHAPE_TINT_ALPHA = 70  # the usual fill of rectangles and ellipses: a light tint
 TINTED_KINDS = {"rect", "ellipse"}
 
 
+def _number(value):
+    """`value` if it's a real number (not a bool, NaN or infinity), else None. Huge integers pass:
+    callers clamp before converting, so damaged data can't overflow."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
 def _clean(name: str, value):
     """`value` if it's a usable value for the field `name`, else None."""
     if name == "color":
         return value if isinstance(value, str) and QColor(value).isValid() else None
-    if name == "width":
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if name in ("width", "font_size", "fill_opacity"):
+        number = _number(value)
+        if number is None:
             return None
-        return min(WIDTH_RANGE[1], max(WIDTH_RANGE[0], float(value)))
-    if name == "font_size":
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-            return None
-        return min(FONT_RANGE[1], max(FONT_RANGE[0], int(value)))
+        if name == "width":
+            return float(min(WIDTH_RANGE[1], max(WIDTH_RANGE[0], number)))
+        if name == "font_size":
+            return int(min(FONT_RANGE[1], max(FONT_RANGE[0], number)))
+        return USUAL_OPACITY if number < 0 else int(round(min(100, number)))
     if name == "fill_color":  # "" means the outline's color
         return value if isinstance(value, str) and (value == "" or QColor(value).isValid()) else None
-    if name == "fill_opacity":
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-            return None
-        return USUAL_OPACITY if value < 0 else min(100, int(round(value)))
     if name == "shape":
         return value if value in CALLOUT_SHAPES else None
     if name == "stamp":

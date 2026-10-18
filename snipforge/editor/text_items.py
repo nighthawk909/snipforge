@@ -8,8 +8,8 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextOption
 from PySide6.QtWidgets import QGraphicsTextItem, QStyle, QStyleOptionGraphicsItem
 
 from ..fonts import ui_font
-from .items import HIT_SLOP, Annotation, BoxItem, make_pen, readable_on, stroke_band
-from .style import Style, fill_opacity, fill_qcolor
+from .items import HIT_SLOP, Annotation, BoxItem, fill_ink, make_pen, stroke_band
+from .style import Style, fill_qcolor
 
 
 class EditableText(QGraphicsTextItem):
@@ -100,10 +100,7 @@ class TextItem(Annotation, EditableText):
 
     def _apply_text_style(self) -> None:
         self.setFont(_font(self.style.font_size, QFont.Bold))
-        color = QColor(self.style.color)
-        if self.style.fill and not self.style.fill_color:
-            color = readable_on(color)  # the usual look: a box of the color, text that reads on it
-        self.setDefaultTextColor(color)  # with a fill color of its own, the color is the text's
+        self.setDefaultTextColor(fill_ink(self.kind, self.style) if self.style.fill else QColor(self.style.color))
 
     def _geometry(self) -> dict:
         return {"text": self.toPlainText()}
@@ -190,11 +187,7 @@ class CalloutItem(BoxItem):
         self._relayout()
 
     def _text_color(self) -> QColor:
-        if not self.style.fill:
-            return QColor("#1c1c1e")  # on the white box
-        if fill_opacity(self.kind, self.style) >= 50:
-            return readable_on(QColor(self.style.fill_color or self.style.color))
-        return QColor(self.style.color)  # a faint fill shows what's under it: the outline's color reads there
+        return fill_ink(self.kind, self.style) if self.style.fill else QColor("#1c1c1e")  # else on the white box
 
     def _insets(self) -> tuple[float, float]:
         r = self._rect
