@@ -200,6 +200,9 @@ _PATHS = {
     "pause": '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
     "play": '<polygon points="6 3 20 12 6 21 6 3"/>',
     "stop": '<rect width="14" height="14" x="5" y="5" rx="2"/>',
+    "camera": (
+        '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/>'
+        '<rect x="2" y="6" width="14" height="12" rx="2"/>'),
     # SnipForge's own
     "record": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5" fill="currentColor"/>',
     "step": '<circle cx="12" cy="12" r="8"/><path d="M11 9l2-1v8"/>',

@@ -285,3 +285,22 @@ def test_physical_and_logical_on_a_scaled_monitor_left_of_the_main_one():
 
     assert logical == QRect(-1920 + 200, 100, 640, 360)  # top-left stays put; inside, 1.5x smaller
     assert geometry.physical_geometry(screen) == QRect(-1920, 0, 1920, 1080)
+
+
+def test_the_webcam_choices_are_remembered():
+    chosen = RecordingChoices(webcam=True, webcam_id="{cam}", bubble_shape="rounded", bubble_size="large",
+                              bubble_x=-1500, bubble_y=600)
+
+    video_prefs.save(chosen)
+
+    assert video_prefs.load() == chosen
+
+
+def test_damaged_webcam_choices_fall_back_to_the_defaults():
+    settings = app_settings()
+    settings.setValue("video/bubble_shape", "star")
+    settings.setValue("video/bubble_size", "huge")
+    settings.setValue("video/bubble_x", "left")
+    settings.setValue("video/webcam", "maybe")
+
+    assert video_prefs.load() == RecordingChoices()

@@ -19,6 +19,7 @@ from PySide6.QtCore import QObject, QRect, Signal
 from . import video_prefs
 from .area_frame import AreaFrame
 from .cursor import PointerEffects
+from .flow_camera import FlowCamera
 from .geometry import to_logical
 from .levels import LevelPreview
 from .recorder import RecordingError, Settings
@@ -37,7 +38,8 @@ class RecordFlow(QObject):
 
     def __init__(self, area: QRect, screen, folder: Path, *, notify: Callable[[str], None],
                  open_video: Callable[[Path], None], make_recorder=None, make_countdown=None,
-                 make_bar=None, levels: LevelPreview | None = None, devices=None) -> None:
+                 make_bar=None, levels: LevelPreview | None = None, devices=None, make_webcam=None,
+                 make_bubble=None) -> None:
         super().__init__()
         self.area, self.screen, self.folder = QRect(area), screen, Path(folder)
         self._notify, self._open_video = notify, open_video
@@ -46,6 +48,8 @@ class RecordFlow(QObject):
         self._make_bar = make_bar or _control_bar
         self._levels = levels or LevelPreview()
         self._devices = devices
+        self.camera = FlowCamera(self.area, make_webcam, make_bubble)
+        self.camera.failed.connect(self._camera_failed)
         self.panel = self.frame = self.recorder = self.countdown = self.bar = None
         self.state = "ready"  # then "counting down", "recording", "ended"
 
@@ -60,11 +64,25 @@ class RecordFlow(QObject):
         logical = to_logical(self.area, self.screen)
         self.frame = AreaFrame(logical)
         self.frame.show()
-        self.panel = ReadyPanel(logical, self.screen, video_prefs.load(), self._levels, self._devices)
+        choices = video_prefs.load()
+        self.panel = ReadyPanel(logical, self.screen, choices, self._levels, self._devices, self.camera.devices)
         self.panel.record.connect(self._record)
         self.panel.cancelled.connect(lambda: self._end(None))
+        self.panel.changed.connect(self._choices_changed)
         self.panel.show()
         self.panel.activateWindow()
+        self.camera.show(choices)
+
+    def _choices_changed(self, choices: video_prefs.RecordingChoices) -> None:
+        self.camera.show(choices)  # the camera switched on or off, or another camera chosen
+
+    def _camera_failed(self, message: str) -> None:
+        self._notify(message)
+        if self.panel is not None and self.state == "ready":
+            try:
+                self.panel.set_camera(False)
+            except RuntimeError:  # the panel is gone
+                pass
 
     def stop(self) -> None:
         """The tray's Stop, the shortcut again, or SnipForge quitting: end it, keeping what was recorded."""
@@ -90,6 +108,7 @@ class RecordFlow(QObject):
         try:
             settings = self._settings(choices)
             self.recorder = recorder = self._make_recorder(settings)
+            self.camera.follow(recorder)
             recorder.finished.connect(self._finished)
             recorder.failed.connect(self._failed)
             recorder.cancelled.connect(lambda: self._end(None))
@@ -114,7 +133,8 @@ class RecordFlow(QObject):
         return Settings(area=(a.x(), a.y(), a.width(), a.height()), output=new_recording(self.folder),
                         microphone=choices.microphone, microphone_id=choices.microphone_id,
                         system_audio=choices.system_audio,
-                        effects=PointerEffects(choices.pointer, choices.highlight, choices.clicks))
+                        effects=PointerEffects(choices.pointer, choices.highlight, choices.clicks),
+                        **(self.camera.share() if choices.webcam else {}))
 
     def _show_bar(self, settings: Settings) -> None:
         if self.bar is None and self.state != "ended":
@@ -157,6 +177,7 @@ class RecordFlow(QObject):
         self.state = "ended"
         self._drop_countdown()
         self._levels.close()
+        self.camera.close()
         if self.bar is not None:
             self.bar.close()
             self.bar = None
