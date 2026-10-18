@@ -10,6 +10,7 @@ below, each under its own license. License texts are in the `licenses` folder ne
 | [Qt](https://www.qt.io/) libraries (Qt6Core, Qt6Gui, Qt6Widgets, Qt6Svg, Qt6Network, Qt6Multimedia and their plugins) | 6.12.0 | user interface; video encoding and playback | LGPL-3.0 |
 | [PySide6 / Shiboken6](https://pypi.org/project/PySide6-Essentials/6.12.0/) ([PySide6-Essentials](https://pypi.org/project/PySide6-Essentials/6.12.0/), [PySide6-Addons](https://pypi.org/project/PySide6-Addons/6.12.0/)) | 6.12.0 | Python bindings for Qt | LGPL-3.0 |
 | [FFmpeg](https://ffmpeg.org/) libraries (avcodec, avformat, avutil, swscale, swresample), as built by the Qt Project for Qt Multimedia | 9.0.1 | reading and writing video files | LGPL-2.1-or-later (`licenses/LGPL-2.1.txt`) |
+| [Pillow](https://python-pillow.github.io/) (its core and GIF writer only) | 12.3.0 | writing GIFs in the video editor | MIT-CMU (HPND) (`licenses/Pillow-MIT-CMU.txt`) |
 | [pywin32](https://github.com/mhammond/pywin32) | 312 | Outlook draft, Explorer share commands | PSF License 2.0 |
 | [pywinrt](https://github.com/pywinrt/pywinrt) (`winrt-*` packages) | 3.2.1 | Windows built-in text recognition (OCR) | MIT |
 | [Lucide](https://lucide.dev/) icons (path data embedded in `snipforge/icons.py`) | 1.49.0 | toolbar and menu icons | ISC (`licenses/Lucide-ISC.txt`) |
@@ -45,6 +46,15 @@ Corresponding source code:
 
 Full text: `licenses/LGPL-2.1.txt`. H.264 video is encoded by Windows' own Media Foundation encoder,
 which is part of Windows, not of these libraries.
+
+## MIT-CMU (Pillow)
+
+Pillow is the Python Imaging Library fork (Copyright © 1997-2011 by Secret Labs AB, Copyright ©
+1995-2011 by Fredrik Lundh and contributors, Copyright © 2010 by Jeffrey A. Clark and contributors).
+Only its core (`PIL\_imaging`, `PIL\_imagingmath`) and Python modules ship; its optional font, colour
+management, WebP and AVIF modules are left out of the build. Its core is built with libjpeg-turbo,
+libtiff, OpenJPEG, libwebp, xz and zlib-ng, all under permissive licenses. Full texts, as Pillow
+12.3.0 ships them (including those of libraries the build leaves out): `licenses/Pillow-MIT-CMU.txt`.
 
 ## Bill of materials
 

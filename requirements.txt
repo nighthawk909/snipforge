@@ -2,6 +2,7 @@
 # pywin32 and WinRT (OCR) are Windows only; the macOS build installs just PySide6 (docs/MAC-PLAN.md).
 PySide6-Essentials==6.12.0
 PySide6-Addons==6.12.0  # QtMultimedia, for screen recording
+pillow==12.3.0  # writes GIFs in the video editor (only its core and GIF writer are bundled)
 pywin32==312; sys_platform == "win32"
 winrt-runtime==3.2.1; sys_platform == "win32"
 winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"

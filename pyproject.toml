@@ -13,6 +13,7 @@ requires-python = ">=3.11"
 dependencies = [
     "PySide6-Essentials>=6.12",
     "PySide6-Addons>=6.12",  # video: Qt 6.12's FFmpeg 9 is what snipforge/video/ffmpeg.py is written for
+    "pillow>=12",  # video: GIF export
     "pywin32>=306; sys_platform == 'win32'",
     "winrt-runtime>=2.0; sys_platform == 'win32'",
     "winrt-Windows.Media.Ocr>=2.0; sys_platform == 'win32'",

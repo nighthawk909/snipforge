@@ -5,4 +5,4 @@ pytest==9.1.1
 ruff==0.17.0
 pyinstaller==6.22.3
 cyclonedx-bom==7.5.0
-pillow==12.3.0  # scripts/make_icon.py
+# Pillow (also used by scripts/make_icon.py) is a runtime dependency now, pinned in requirements.txt.
