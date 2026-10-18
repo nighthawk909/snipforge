@@ -59,9 +59,9 @@ Software Center) and the SnagIt features people miss most. Built in this order:
   with no snips, titles or personal paths, and nothing sent anywhere (#99)
 - [x] Capture presets: saved mode, delay, pointer, size, effects and destination, each with an
   optional shortcut of its own (#103)
-- [ ] Speed and footprint: startup, snip-to-editor, idle memory, a big Library and installer size
-  measured, the worst fixed, and budgets checked in CI so they can't creep back
-- [ ] Combine images: side by side, a grid, or numbered steps with captions
+- [x] Speed and footprint: startup, snip-to-editor, idle memory, a big Library and installer size
+  measured, the worst fixed, and budgets checked in CI so they can't creep back (#106)
+- [x] Combine images: side by side, a grid, or numbered steps with captions (#109)
 - [ ] Edit text in a screenshot, and Smart Move (drag part of a snip somewhere else)
 - [ ] Accessibility: full keyboard use, screen-reader names, Windows high-contrast mode
 - [ ] Video editor, part two: cut out the middle, add a title or caption
