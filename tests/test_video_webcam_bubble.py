@@ -74,6 +74,10 @@ def test_a_medium_circle_by_default(bubble):
     assert bubble.size() == QSize(192, 192)
 
 
+def test_size_for():
+    assert webcam_bubble.size_for(ROUNDED, webcam_bubble.LARGE) == QSize(384, 288)
+
+
 @pytest.mark.parametrize(("shape", "size", "expected"), [
     (CIRCLE, webcam_bubble.SMALL, QSize(128, 128)), (CIRCLE, webcam_bubble.LARGE, QSize(288, 288)),
     (ROUNDED, webcam_bubble.MEDIUM, QSize(256, 192)), (RECTANGLE, webcam_bubble.SMALL, QSize(171, 128))])
@@ -148,6 +152,34 @@ def test_a_right_drag_doesnt_move_it(bubble):
     assert bubble.pos() == start
 
 
+def test_a_bubble_dragged_off_the_screen_stays_within_reach(bubble):
+    bubble.show()
+    available = QApplication.primaryScreen().availableGeometry()
+    origin = bubble.mapToGlobal(QPoint(20, 20))
+    mouse(bubble, "press", QPoint(20, 20), origin)
+    mouse(bubble, "move", QPoint(20, 20), origin + QPoint(5000, 5000))
+    mouse(bubble, "release", QPoint(20, 20), origin + QPoint(5000, 5000))
+    visible = bubble.geometry().intersected(available)
+    assert visible.width() == webcam_bubble.KEEP_VISIBLE and visible.height() == webcam_bubble.KEEP_VISIBLE
+
+
+@pytest.mark.parametrize(("top_left", "expected"), [
+    (QPoint(100, 100), QPoint(100, 100)),  # well inside: left alone
+    (QPoint(-500, 50), QPoint(48 - 192, 50)),  # off the left: a strip stays showing
+    (QPoint(900, 700), QPoint(800 - 48, 600 - 48)),  # off the bottom right
+])
+def test_keep_reachable(top_left, expected):
+    area = QRect(0, 0, 800, 600)
+    assert webcam_bubble.keep_reachable(QRect(top_left, QSize(192, 192)), area) == expected
+
+
+def test_move_physical_keeps_a_bubble_near_an_edge_within_reach(bubble):
+    available = QApplication.primaryScreen().availableGeometry()
+    bubble.move_physical(available.right() - 5, available.top() + 10)
+    visible = bubble.geometry().intersected(available)
+    assert visible.width() == webcam_bubble.KEEP_VISIBLE
+
+
 def test_move_physical_places_the_top_left_on_that_monitor(bubble):
     screen = QApplication.primaryScreen().geometry()
     bubble.move_physical(screen.x() + 30, screen.y() + 40)  # the test screen isn't scaled
@@ -178,10 +210,20 @@ def test_a_physical_point_maps_back_to_the_monitor_its_on():
     assert webcam_bubble.to_logical(QPoint(5000, 100), screens) is None
 
 
-def test_area_rect_is_in_physical_pixels(bubble):
-    screen = bubble.screen()
-    expected = webcam_bubble.to_physical(bubble.geometry(), screen.geometry(), screen.devicePixelRatio())
-    assert bubble.area_rect() == expected and bubble.area_rect().size() == QSize(192, 192)
+class FakeScreen:
+    """A second monitor at 150%: 1920x1080 physical pixels to the right of a 1920-wide one."""
+
+    def geometry(self):
+        return QRect(1920, 0, 1280, 720)
+
+    def devicePixelRatio(self):
+        return 1.5
+
+
+def test_area_rect_is_in_physical_pixels_on_a_scaled_monitor(bubble, monkeypatch):
+    monkeypatch.setattr(bubble, "screen", lambda: FakeScreen())
+    bubble.setGeometry(QRect(2020, 100, 192, 192))
+    assert bubble.area_rect() == QRect(2070, 150, 288, 288)
 
 
 # The snapshot the frame thread reads
@@ -213,27 +255,27 @@ def test_a_snapshot_cant_be_changed_by_whoever_reads_it(bubble):
 
 def test_another_thread_only_ever_sees_whole_snapshots(bubble):
     bubble.show()
-    seen, done = [], threading.Event()
+    widths = {CIRCLE: 192, ROUNDED: 256}
+    reads, wrong, done = [0], [], threading.Event()
 
     def read():
         while not done.is_set():
-            seen.append(bubble.snapshot())
+            snap = bubble.snapshot()
+            reads[0] += 1
+            if snap.rect[2:] != (widths[snap.shape], 192) and not wrong:  # shape and size belong together
+                wrong.append(snap)
 
     reader = threading.Thread(target=read)
     reader.start()
     try:
         for step in range(150):
-            bubble.move(step, step)
+            bubble.move(200 + step, 200 + step)
             bubble.set_shape((CIRCLE, ROUNDED)[step % 2])
     finally:
         done.set()
         reader.join(5)
 
-    widths = {CIRCLE: 192, ROUNDED: 256}
-    assert seen
-    for snap in seen:
-        x, y, width, height = snap.rect
-        assert width == widths[snap.shape] and height == 192  # shape and size always belong together
+    assert reads[0] > 0 and wrong == []
 
 
 # The right-click menu
@@ -258,13 +300,14 @@ def test_choosing_from_the_menu_changes_shape_and_size(bubble):
     assert (bubble.shape(), bubble.bubble_size()) == (RECTANGLE, webcam_bubble.LARGE)
 
 
-def test_a_right_click_opens_the_menu_without_waiting_on_it(bubble):
+def test_a_right_click_opens_the_menu_without_waiting_on_it_and_out_of_the_recording(bubble, excluded):
     bubble.show()
     QApplication.sendEvent(bubble, QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(5, 5), bubble.mapToGlobal(
         QPoint(5, 5))))
     menus = [menu for menu in bubble.findChildren(QMenu) if menu.isVisible()]
     try:
         assert len(menus) == 1 and "Circle" in actions(menus[0])
+        assert excluded == [bubble, menus[0]]  # changing the shape mid-recording isn't recorded
     finally:
         for menu in menus:
             menu.close()
@@ -290,10 +333,13 @@ def test_set_image_none_goes_back_to_the_placeholder(bubble):
     bubble.set_image(camera_picture())
     bubble.set_image(None)
     assert rendered(bubble).pixelColor(40, 96).name() not in (RED, BLUE)
+    assert bubble.message() == webcam_bubble.WAITING
 
 
 class FakeCamera(QObject):
     frame = Signal(QImage)
+    failed = Signal(str)
+    stopped = Signal()
 
 
 def test_pictures_from_the_camera_are_shown(qapp, excluded):
@@ -301,3 +347,19 @@ def test_pictures_from_the_camera_are_shown(qapp, excluded):
     widget = WebcamBubble(camera)
     camera.frame.emit(camera_picture())
     assert rendered(widget).pixelColor(40, 96).name() == BLUE
+
+
+def test_a_camera_that_stops_isnt_left_frozen_on_screen(qapp, excluded):
+    camera = FakeCamera()
+    widget = WebcamBubble(camera)
+    camera.frame.emit(camera_picture())
+    camera.stopped.emit()
+    assert rendered(widget).pixelColor(40, 96).name() not in (RED, BLUE)
+    assert widget.message() == webcam_bubble.CAMERA_OFF
+
+
+def test_a_camera_that_fails_says_so_in_the_bubble(qapp, excluded):
+    camera = FakeCamera()
+    widget = WebcamBubble(camera)
+    camera.failed.emit("No camera was found.")  # refused before it ever started: no `stopped`
+    assert widget.message() == webcam_bubble.CAMERA_OFF

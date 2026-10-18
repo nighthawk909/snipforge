@@ -146,6 +146,16 @@ def test_windows_privacy_setting_is_explained_without_switching_the_camera_on(ca
     assert backend.sessions == []
 
 
+def test_cameras_that_cant_be_listed_are_explained(camera, backend):
+    def broken():
+        raise OSError("Media Foundation is missing")
+
+    backend.devices = broken
+    assert camera.devices() == []
+    assert camera.start() is False
+    assert camera.failures == [f"{webcam.LIST_FAILED} (Media Foundation is missing)."]
+
+
 def test_starting_again_closes_the_camera_that_was_open(camera, backend):
     camera.start("cam-1")
     first = backend.session
@@ -204,6 +214,42 @@ def test_the_latest_picture_can_be_read_from_another_thread(camera, backend):
 
 
 # Stopping and failing
+
+
+def test_stopped_is_said_only_when_a_camera_was_on(camera, backend):
+    stops = []
+    camera.stopped.connect(lambda: stops.append("stopped"))
+    camera.stop()
+    assert stops == []
+    camera.start()
+    camera.stop()
+    assert stops == ["stopped"]
+
+
+def test_a_failure_says_stopped_before_failed(camera, backend):
+    said = []
+    camera.stopped.connect(lambda: said.append("stopped"))
+    camera.failed.connect(lambda message: said.append("failed"))
+    camera.start()
+    backend.session.on_error("Device lost")
+    assert said == ["stopped", "failed"]
+
+
+def test_the_wait_for_a_first_picture_starts_once_the_camera_has(camera, backend, monkeypatch):
+    """A camera slow to start mustn't use up the time it has to send its first picture."""
+    watching = []
+    real_start = FakeSession.start
+    monkeypatch.setattr(FakeSession, "start", lambda self: watching.append(camera.waiting_for_picture)
+                        or real_start(self))
+    camera.start()
+    assert watching == [False] and camera.waiting_for_picture
+
+
+def test_closing_a_camera_that_fails_to_close_is_logged_not_raised(camera, backend, caplog):
+    camera.start()
+    backend.session.close = lambda: (_ for _ in ()).throw(RuntimeError("already deleted"))
+    camera.stop()
+    assert not camera.is_active and "Closing the camera failed" in caplog.text
 
 
 def test_stop_closes_the_camera_and_forgets_its_picture(camera, backend):
@@ -345,11 +391,6 @@ def test_the_privacy_setting_is_read_from_the_registry():
 
 
 # Startup cost
-
-
-def test_the_real_device_list_loads_without_switching_a_camera_on(qapp):
-    found = webcam.Webcam().devices()
-    assert all(isinstance(i, str) and i and isinstance(name, str) for i, name in found)
 
 
 def test_importing_the_webcam_parts_doesnt_load_qt_multimedia():

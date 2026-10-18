@@ -76,6 +76,13 @@ def test_the_camera_is_mirrored_like_a_mirror(qapp):
     assert colour(image, 90, 60) == RED
 
 
+def test_the_mirror_can_be_left_out(qapp):
+    target = frame()
+    webcam_layer.WebcamLayer(AREA, FakeCamera(camera_picture()), FakeBubble(shape=webcam_layer.RECTANGLE),
+                             mirror=False).draw(target, 1.0)
+    assert colour(target, 50, 60) == RED and colour(target, 90, 60) == BLUE
+
+
 def test_a_circle_leaves_the_corners_alone(qapp):
     image = draw(shape=webcam_layer.CIRCLE)
     assert colour(image, 41, 31) == WHITE and colour(image, 98, 88) == WHITE

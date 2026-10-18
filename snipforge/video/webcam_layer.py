@@ -49,9 +49,10 @@ def shape_path(rect: QRectF, shape: str) -> QPainterPath:
     return path
 
 
-def paint_camera(painter: QPainter, image: QImage, target: QRectF, shape: str) -> None:
-    """Fills `shape` in `target` with `image`, mirrored like a mirror and cropped to fill (never
-    squashed). The picture is a texture brush, so the shape's edge is smooth (a clip path isn't)."""
+def paint_camera(painter: QPainter, image: QImage, target: QRectF, shape: str, mirror: bool = True) -> None:
+    """Fills `shape` in `target` with `image`, cropped to fill (never squashed) and, unless told
+    otherwise, mirrored like a mirror. The picture is a texture brush, so the shape's edge is smooth
+    (a clip path's isn't)."""
     if target.isEmpty() or image.isNull():
         return
     scale = max((target.width() + 2 * BLEED) / image.width(), (target.height() + 2 * BLEED) / image.height())
@@ -59,7 +60,7 @@ def paint_camera(painter: QPainter, image: QImage, target: QRectF, shape: str) -
     # Picture centre to target centre, flipped left to right (QTransform applies the last step first).
     placement = QTransform()
     placement.translate(centre.x(), centre.y())
-    placement.scale(-scale, scale)
+    placement.scale(-scale if mirror else scale, scale)
     placement.translate(-image.width() / 2, -image.height() / 2)
     brush = QBrush(image)
     brush.setTransform(placement)
@@ -76,12 +77,18 @@ def paint_camera(painter: QPainter, image: QImage, target: QRectF, shape: str) -
 
 class WebcamLayer:
     """Draws the camera into frames of `area` (x, y, width, height in physical desktop pixels) where
-    `bubble` is. A frame may be smaller than the area (scaled down): the camera is scaled to match."""
+    `bubble` is. A frame may be smaller than the area (scaled down): the camera is scaled to match.
 
-    def __init__(self, area: tuple[int, int, int, int], camera: CameraPictures, bubble: BubblePlace) -> None:
+    Mirrored by default, so the recording matches the bubble the person arranged themselves in
+    (docs/VIDEO-PLAN.md, step 7); mirror=False gives viewers the camera's own view, where text
+    behind the person reads the right way round."""
+
+    def __init__(self, area: tuple[int, int, int, int], camera: CameraPictures, bubble: BubblePlace, *,
+                 mirror: bool = True) -> None:
         self.area = tuple(area)
         self._camera = camera
         self._bubble = bubble
+        self._mirror = mirror
 
     def prewarm(self, now: float | None = None) -> None:
         """Nothing to make ahead: here so the recorder can treat every overlay alike."""
@@ -98,7 +105,7 @@ class WebcamLayer:
         painter = QPainter(frame)
         try:
             _place(painter, frame, self.area)
-            paint_camera(painter, image, QRectF(*snap.rect), snap.shape)
+            paint_camera(painter, image, QRectF(*snap.rect), snap.shape, self._mirror)
         finally:
             painter.end()
 

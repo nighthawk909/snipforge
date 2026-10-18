@@ -8,6 +8,7 @@ privacy setting or another app keeps it from SnipForge. Run with:
 import time
 
 import pytest
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QImage
 
 from snipforge.video import webcam
@@ -20,11 +21,14 @@ TIMEOUT = 6.0  # seconds; opening a camera takes ~0.2 s, a few seconds for some 
 
 def test_the_default_camera_sends_pictures(qapp):
     camera = webcam.Webcam()
-    if not camera.devices():
+    found = camera.devices()
+    if not found:
         pytest.skip("no camera on this machine")
-    failures, shown = [], []
+    assert all(isinstance(i, str) and i and isinstance(name, str) for i, name in found)
+    failures, shown, on_main_thread = [], [], []
     camera.failed.connect(failures.append)
     camera.frame.connect(shown.append)
+    camera.frame.connect(lambda _image: on_main_thread.append(QThread.currentThread() is qapp.thread()))
     latest = None
     try:
         if camera.start():
@@ -36,8 +40,9 @@ def test_the_default_camera_sends_pictures(qapp):
     finally:
         camera.stop()
 
-    if failures and failures[0] in (webcam.blocked_message(), webcam.IN_USE, webcam.NO_PICTURE):
+    if failures and failures[0] in (webcam.blocked_message(), webcam.IN_USE):
         pytest.skip(failures[0])
     assert failures == [] and len(shown) >= PICTURES
+    assert on_main_thread and all(on_main_thread)  # where webcam.py expects them
     assert latest is not None and latest.format() == QImage.Format_RGB32 and latest.height() >= 240
     assert camera.latest() is None and not camera.is_active

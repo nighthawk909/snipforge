@@ -35,6 +35,7 @@ TARGET_SIDE = 480  # pixels: enough for the largest bubble on a scaled screen
 MIN_CAMERA_FPS = 24
 
 NO_CAMERA = "No camera was found. Plug one in, or check it's switched on."
+LIST_FAILED = "SnipForge couldn't look for cameras"
 CHOSEN_MISSING = "The chosen camera isn't connected. Plug it in, or choose another camera."
 CAMERA_GONE = "The camera was unplugged or switched off."
 IN_USE = "Another app is using the camera. Close it, then try again."
@@ -116,10 +117,12 @@ def _qt_permission_denied() -> bool:
 
 class Webcam(QObject):
     """One camera at a time: start() switches it on, stop() off. latest() is its newest picture (for
-    the frame thread), `frame` brings each picture to the bubble, and `failed` says why the camera
-    couldn't start or stopped, after switching it off."""
+    the frame thread), `frame` brings each picture to the bubble, `stopped` says a camera that was on
+    is off (so the bubble doesn't keep showing its last picture), and `failed` says why the camera
+    couldn't start or stopped (after `stopped`, if it had started)."""
 
     frame = Signal(QImage)
+    stopped = Signal()
     failed = Signal(str)
 
     def __init__(self, parent: QObject | None = None, *, backend=None, max_fps: int = MAX_FPS,
@@ -148,8 +151,14 @@ class Webcam(QObject):
     def device_id(self) -> str | None:
         return self._device_id
 
+    @property
+    def waiting_for_picture(self) -> bool:
+        """The camera is on and its first picture is still awaited."""
+        return self._watchdog.isActive()
+
     def devices(self) -> list[tuple[str, str]]:
-        """The cameras as (id, name), Windows' default first; empty when there are none."""
+        """The cameras as (id, name), Windows' default first; empty when there are none (or they
+        couldn't be listed, which is logged)."""
         try:
             return self._backend.devices()
         except (ImportError, OSError, RuntimeError):
@@ -160,7 +169,11 @@ class Webcam(QObject):
         """Switches on Windows' default camera, or `device_id` from devices(). False if it can't, after
         `failed` says why; a failure once it's running is reported through `failed` too."""
         self.stop()
-        listed = [camera_id for camera_id, _name in self.devices()]
+        try:
+            listed = [camera_id for camera_id, _name in self._backend.devices()]
+        except (ImportError, OSError, RuntimeError) as exc:  # e.g. Windows without Media Foundation
+            log.exception("Listing the cameras failed")
+            return self._refuse(f"{LIST_FAILED} ({exc}).")
         if not listed:
             return self._refuse(NO_CAMERA)
         chosen = listed[0] if device_id is None else device_id
@@ -181,6 +194,7 @@ class Webcam(QObject):
                 session.close()
             except RuntimeError:
                 log.exception("Closing the camera failed")
+            self.stopped.emit()
 
     def latest(self) -> QImage | None:
         """The newest picture (opaque RGB32), or None. Safe from any thread; the copy shares memory
@@ -194,13 +208,17 @@ class Webcam(QObject):
         self._device_id, self.pictures, self._last_picture = device_id, 0, None
         try:
             self._session = self._backend.open(device_id, self._on_video_frame, self._on_camera_error, self)
-            self._watchdog.start()
             self._session.start()  # may report a failure straight away, through _on_camera_error
         except Exception as exc:  # the camera driver is out of our hands; a failure mustn't take the app down
             log.exception("Opening the camera failed")
             self._fail(str(exc))
             return False
-        return self._session is not None
+        if self._session is None:
+            return False
+        # Only now: a camera slow to start mustn't use up the time it has to send a first picture.
+        if self.pictures == 0:
+            self._watchdog.start()
+        return True
 
     def _on_video_frame(self, video_frame) -> None:
         if self._session is None:
@@ -259,7 +277,12 @@ class _QtBackend:
         return camera_blocked()
 
     def open(self, device_id: str, on_frame: Callable, on_error: Callable[[str], None], parent: QObject):
-        return _QtCamera(device_id, on_frame, on_error, parent)
+        from PySide6.QtMultimedia import QMediaDevices
+
+        device = next((d for d in QMediaDevices.videoInputs() if _device_id(d) == device_id), None)
+        if device is None:
+            raise LookupError("the camera isn't connected")
+        return _QtCamera(device, device_id, on_frame, on_error, parent)
 
 
 def _device_id(device) -> str:
@@ -280,15 +303,21 @@ class _QtCamera(QObject):
     """One camera switched on. Its pictures go to on_frame and anything that stops it to on_error, both
     on the main thread, and neither once close() has been called."""
 
-    def __init__(self, device_id: str, on_frame: Callable, on_error: Callable[[str], None], parent: QObject) -> None:
+    def __init__(self, device, device_id: str, on_frame: Callable, on_error: Callable[[str], None],
+                 parent: QObject) -> None:
         super().__init__(parent)
-        from PySide6 import QtMultimedia as M
-
-        device = next((d for d in M.QMediaDevices.videoInputs() if _device_id(d) == device_id), None)
-        if device is None:
-            raise LookupError("the camera isn't connected")
         self._device_id, self._on_frame, self._on_error = device_id, on_frame, on_error
         self._closing = False
+        try:
+            self._build(device)
+        except Exception:
+            self._closing = True
+            self.deleteLater()  # not left behind, half made, as a child of the Webcam
+            raise
+
+    def _build(self, device) -> None:
+        from PySide6 import QtMultimedia as M
+
         # Qt children, freed with this object in a safe order: the session first, which lets go of the rest.
         self._session = M.QMediaCaptureSession(self)
         self._camera = M.QCamera(device, self)

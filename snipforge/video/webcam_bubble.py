@@ -27,8 +27,13 @@ SMALL, MEDIUM, LARGE = "small", "medium", "large"
 HEIGHTS = {SMALL: 128, MEDIUM: 192, LARGE: 288}  # logical pixels; a circle's diameter
 RECTANGLE_ASPECT = 4 / 3  # most webcams' own shape, so little of the picture is cropped away
 MARGIN = 24  # from the screen's edge, when the bubble has to be put somewhere new
+# Pixels of the bubble that always stay on a screen: it can't take focus or be found from the
+# taskbar, so one dragged entirely off the screen could never be grabbed again.
+KEEP_VISIBLE = 48
 SHAPE_NAMES = {CIRCLE: "Circle", ROUNDED: "Rounded rectangle", RECTANGLE: "Rectangle"}
 SIZE_NAMES = {SMALL: "Small", MEDIUM: "Medium", LARGE: "Large"}
+WAITING = "Starting the camera…"
+CAMERA_OFF = "Camera off"
 PLACEHOLDER = QColor(40, 40, 44, 235)
 PLACEHOLDER_TEXT = QColor(220, 220, 220)
 
@@ -41,10 +46,18 @@ class BubbleSnapshot:
     shape: str
 
 
-def bubble_size(shape: str, size: str) -> QSize:
+def size_for(shape: str, size: str) -> QSize:
     """The bubble's size in logical pixels: square for a circle, 4:3 otherwise."""
     height = HEIGHTS[size]
     return QSize(height if shape == CIRCLE else round(height * RECTANGLE_ASPECT), height)
+
+
+def keep_reachable(rect: QRect, area: QRect, keep: int = KEEP_VISIBLE) -> QPoint:
+    """Where `rect`'s top-left should go so at least `keep` pixels each way stay inside `area` (a
+    screen's available geometry); unchanged when they already do."""
+    x = min(max(rect.x(), area.left() + keep - rect.width()), area.right() + 1 - keep)
+    y = min(max(rect.y(), area.top() + keep - rect.height()), area.bottom() + 1 - keep)
+    return QPoint(x, y)
 
 
 def to_physical(rect: QRect, screen_geometry: QRect, ratio: float) -> QRect:
@@ -68,7 +81,8 @@ def to_logical(point: QPoint, screens: Sequence[tuple[QRect, float]]) -> QPoint 
 
 
 class WebcamBubble(QWidget):
-    """The camera on screen. Give it a Webcam (or connect its `frame` to set_image yourself)."""
+    """The camera on screen. Give it a Webcam, or connect its `frame` to set_image() and its
+    `stopped` and `failed` to camera_off() yourself."""
 
     moved = Signal(QRect)  # the person dragged it somewhere new: its rectangle in physical pixels
     shape_changed = Signal(str)
@@ -89,13 +103,16 @@ class WebcamBubble(QWidget):
         self.setCursor(Qt.OpenHandCursor)
         self._shape, self._size = shape, size
         self._image: QImage | None = None
+        self._message = WAITING  # shown until the first picture
         self._drag_offset: QPoint | None = None
         self._lock = threading.Lock()
         self._snapshot: BubbleSnapshot | None = None
-        self._watching_screen = False
-        self.resize(bubble_size(shape, size))
+        self._watched_window = None  # the native window whose monitor changes are followed
+        self.resize(size_for(shape, size))
         if camera is not None:
             camera.frame.connect(self.set_image)
+            camera.stopped.connect(self.camera_off)  # never a frozen last picture that looks live
+            camera.failed.connect(self._camera_failed)
 
     # --- what it shows ---------------------------------------------------------------------------
 
@@ -124,11 +141,27 @@ class WebcamBubble(QWidget):
     def set_image(self, image: QImage | None) -> None:
         """The camera's newest picture (None: waiting for the camera)."""
         self._image = image
+        if image is None:
+            self._message = WAITING
         self.update()
 
+    def camera_off(self) -> None:
+        """The camera stopped or couldn't start: says so instead of showing its last picture."""
+        self._image = None
+        self._message = CAMERA_OFF
+        self.update()
+
+    def message(self) -> str:
+        """What the bubble says while there's no picture."""
+        return self._message
+
+    def _camera_failed(self, _reason: str) -> None:
+        self.camera_off()  # the reason is for whoever shows it in words (the ready panel)
+
     def _resize_keeping_centre(self) -> None:
-        geometry = QRect(QPoint(0, 0), bubble_size(self._shape, self._size))
+        geometry = QRect(QPoint(0, 0), size_for(self._shape, self._size))
         geometry.moveCenter(self.geometry().center())
+        geometry.moveTopLeft(self._reachable(geometry, geometry.center()))  # "Large" by an edge
         self.setGeometry(geometry)
         self.update()
         self._refresh_snapshot()  # the shape may change without the geometry changing
@@ -147,14 +180,20 @@ class WebcamBubble(QWidget):
 
     def move_physical(self, x: int, y: int) -> None:
         """Puts the bubble's top-left at physical desktop pixel (x, y), as area_rect() reported it.
-        If no monitor is there any more, it goes to the main monitor's bottom-right corner."""
+        If no monitor is there any more, it goes to the main monitor's bottom-right corner; near an
+        edge, it's kept within reach."""
         screens = [(screen.geometry(), screen.devicePixelRatio()) for screen in QGuiApplication.screens()]
         point = to_logical(QPoint(x, y), screens)
         if point is None:
             available = QGuiApplication.primaryScreen().availableGeometry()
             point = QPoint(available.right() + 1 - self.width() - MARGIN,
                            available.bottom() + 1 - self.height() - MARGIN)
-        self.move(point)
+        self.move(self._reachable(QRect(point, self.size()), point))
+
+    def _reachable(self, rect: QRect, anchor: QPoint) -> QPoint:
+        """keep_reachable() on the monitor at `anchor` (or the bubble's own)."""
+        screen = QGuiApplication.screenAt(anchor) or self.screen() or QGuiApplication.primaryScreen()
+        return keep_reachable(rect, screen.availableGeometry())
 
     def _refresh_snapshot(self) -> None:
         snap = BubbleSnapshot(self.area_rect().getRect(), self._shape) if self.isVisible() else None
@@ -166,10 +205,14 @@ class WebcamBubble(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         exclude_from_capture(self)  # every time: Windows forgets it if the native window is remade
-        if not self._watching_screen and self.windowHandle() is not None:
+        window = self.windowHandle()
+        if window is not None and window is not self._watched_window:
             # Dragged onto a monitor with other scaling: the same logical size is a new physical one.
-            self.windowHandle().screenChanged.connect(lambda _screen: self._refresh_snapshot())
-            self._watching_screen = True
+            window.screenChanged.connect(self._screen_changed)
+            self._watched_window = window
+        self._refresh_snapshot()
+
+    def _screen_changed(self, _screen) -> None:
         self._refresh_snapshot()
 
     def hideEvent(self, event) -> None:
@@ -201,7 +244,7 @@ class WebcamBubble(QWidget):
         painter.setBrush(PLACEHOLDER)
         painter.drawPath(shape_path(target, self._shape))
         painter.setPen(PLACEHOLDER_TEXT)
-        painter.drawText(target, Qt.AlignCenter, "Starting the camera…")
+        painter.drawText(target, Qt.AlignCenter, self._message)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -211,7 +254,8 @@ class WebcamBubble(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            pointer = event.globalPosition().toPoint()
+            self.move(self._reachable(QRect(pointer - self._drag_offset, self.size()), pointer))
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
@@ -223,7 +267,9 @@ class WebcamBubble(QWidget):
 
     def contextMenuEvent(self, event) -> None:
         # popup(), not exec(): no event loop inside an event loop while a recording runs.
-        self.context_menu().popup(event.globalPos())
+        menu = self.context_menu()
+        menu.popup(event.globalPos())
+        exclude_from_capture(menu)  # its own window: changing the shape mid-recording isn't recorded
 
     def context_menu(self) -> QMenu:
         """Shape and size, the current ones ticked."""
