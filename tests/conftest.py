@@ -68,13 +68,14 @@ def _isolated_settings():
 
 @pytest.fixture(autouse=True, scope="session")
 def _clipboard_let_go_before_python_exits():
-    """Offscreen, Qt keeps what's on the clipboard in a C++ static that's freed only after Python has
-    shut down. Something put there from Python (the QMimeData Copy makes for a recording) then
-    reaches into the dead interpreter as it's freed: a segfault on exit, exit code 139, whenever the
-    file that put it there runs last. Windows and macOS free the clipboard with the QApplication,
-    while Python is still there, so the app itself is fine (tests/desktop checks)."""
+    """Offscreen (and minimal), Qt keeps what's on the clipboard in a C++ static that's freed only
+    after Python has shut down. Something put there from Python (the QMimeData Copy makes for a
+    recording) then reaches into the dead interpreter as it's freed: an access violation on exit
+    (139 in bash, 0xC0000005 natively) whenever the file that put it there runs last. On Windows the
+    clipboard is freed with the QApplication, while Python is still there, so the app itself is fine
+    (tests/desktop checks)."""
     yield
-    if QApplication.instance() is not None and QGuiApplication.platformName() == "offscreen":
+    if QApplication.instance() is not None and QGuiApplication.platformName() in ("offscreen", "minimal"):
         QGuiApplication.clipboard().clear()
 
 

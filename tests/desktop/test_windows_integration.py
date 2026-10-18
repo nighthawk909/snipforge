@@ -131,12 +131,12 @@ def test_copying_a_recording_gives_windows_a_file_to_paste(qapp, tmp_path):
 
 
 _COPY_AND_QUIT = """
-import sys, tempfile
+import sys
 from pathlib import Path
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 QSettings.setDefaultFormat(QSettings.IniFormat)
-QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, tempfile.mkdtemp())  # never the real settings
+QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, sys.argv[2])  # never the real settings
 app = QApplication([])
 from snipforge.home import HomeWindow
 from snipforge.library import Library, write_recording_details
@@ -159,7 +159,8 @@ def test_the_app_quits_cleanly_after_copying_a_recording(tmp_path):
     import sys
 
     env = {**os.environ, "QT_QPA_PLATFORM": "windows"}
-    done = subprocess.run([sys.executable, "-c", _COPY_AND_QUIT, str(tmp_path / "Library")], env=env,
+    done = subprocess.run([sys.executable, "-c", _COPY_AND_QUIT, str(tmp_path / "Library"), str(tmp_path / "settings")],
+                          env=env,
                           capture_output=True, text=True, timeout=120, cwd=str(Path(__file__).parents[2]))
 
     assert done.returncode == 0 and "copied" in done.stdout, done.stdout[-2000:] + done.stderr[-2000:]

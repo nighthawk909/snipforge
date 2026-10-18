@@ -311,7 +311,7 @@ def test_copying_a_recording_puts_the_file_on_the_clipboard(lib, qapp):
 
 
 def test_the_test_process_exits_cleanly_after_copying_a_recording():
-    """It used to segfault on exit (code 139) when this was the last test to run."""
+    """It used to crash on exit (an access violation) when this was the last test to run."""
     import os
     import subprocess
     import sys
@@ -319,9 +319,10 @@ def test_the_test_process_exits_cleanly_after_copying_a_recording():
     test = f"{__file__}::test_copying_a_recording_puts_the_file_on_the_clipboard"
     env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
     done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", test],
-                          env=env, capture_output=True, text=True, timeout=120)
+                          env=env, capture_output=True, text=True, timeout=120,
+                          cwd=str(Path(__file__).parents[1]))  # this checkout's snipforge
 
-    assert done.returncode == 0, done.stdout[-2000:] + done.stderr[-2000:]
+    assert done.returncode == 0 and "1 passed" in done.stdout, done.stdout[-2000:] + done.stderr[-2000:]
 
 
 def test_the_library_window_lists_a_recording_with_its_length(lib, qapp):
