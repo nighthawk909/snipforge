@@ -14,11 +14,13 @@ from .beautify import BeautifyStyle
 from .canvas_draw import DrawMixin
 from .canvas_image import ImageMixin
 from .canvas_input import InputMixin
+from .canvas_pick import PickMixin
 from .canvas_view import MAX_ZOOM as MAX_ZOOM  # re-exported: the window's zoom buttons use these
 from .canvas_view import MIN_ZOOM as MIN_ZOOM
 from .canvas_view import SCENE_MARGIN, ViewMixin
 from .commands import AddItemsCommand, CropCommand, RemoveItemsCommand, StateCommand
 from .crop import MIN_CROP, CropMask
+from .eyedropper import Loupe
 from .factory import create_item
 from .handles import HandleOverlay
 from .image_ops import ImageGeometry
@@ -34,11 +36,13 @@ class UnsupportedDocument(ValueError):
     """Saved by a newer SnipForge, in a way this version can't show correctly."""
 
 
-class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
+class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsView):
     tool_changed = Signal(str)
     selection_changed = Signal()
     zoom_changed = Signal(float)
     document_changed = Signal()
+    picking_changed = Signal(bool)  # the eyedropper started or ended
+    color_picked = Signal(str)  # "#rrggbb", now the selection's or the tool's color
 
     def __init__(self, image: QImage, tool_styles: dict[str, Style] | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -80,10 +84,16 @@ class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
         self._press_states: dict = {}
         self._panning = False
         self._unparsed: list[dict] = []  # saved items this version couldn't load; written back untouched
+        self._pick_source: QImage | None = None  # the snip as you see it, while the eyedropper is on
+        self._just_picked = False
+        self._loupe = Loupe(self.viewport())
 
         self._scene.selectionChanged.connect(self._on_selection_changed)
         theme.on_change(self.retheme)
         self.undo_stack.indexChanged.connect(self._on_undo_index)
+        for bar in (self.horizontalScrollBar(), self.verticalScrollBar()):
+            bar.valueChanged.connect(self._refresh_loupe)
+        self.zoom_changed.connect(self._refresh_loupe)
         self._apply_drag_mode()
 
     # ------------------------------------------------------------------ queries
@@ -115,6 +125,7 @@ class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
 
     # ------------------------------------------------------------------ tools and style
     def set_tool(self, tool: str) -> None:
+        self.stop_picking()
         self.commit_text()
         if tool == "crop" and self.tool == "crop" and self._mask.editing:
             return  # re-choosing Crop mid-crop keeps your adjustments
@@ -336,7 +347,10 @@ class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
         if commit:
             self.commit_text()
         crop = self._mask.crop if (self._mask.editing and use_draft) else self._crop_rect
-        rect = crop.toAlignedRect()
+        return self._render_rect(crop.toAlignedRect())
+
+    def _render_rect(self, rect) -> QImage:
+        """The snip and its markup inside `rect` (scene pixels), without crop shading or handles."""
         out = QImage(rect.size(), QImage.Format_ARGB32_Premultiplied)
         out.fill(Qt.transparent)
         self._mask.setVisible(False)
@@ -390,6 +404,7 @@ class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
         self.selection_changed.emit()
 
     def _on_undo_index(self, _index: int) -> None:
+        self.stop_picking()  # the snip changed (undo, redo, a turn, a delete...): the eyedropper's picture is old
         self._overlay.update()
         self.selection_changed.emit()
         self.document_changed.emit()

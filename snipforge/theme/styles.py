@@ -174,6 +174,8 @@ QLabel#Chip {{ background: {a.soft}; color: {a.text}; border-radius: 9px; paddin
 QToolButton#StampChoice {{ border-radius: 6px; padding: 3px; }}
 QToolButton#StampChoice:checked {{ background: {a.soft}; border: 1px solid {a.fill}; }}
 QToolButton#CustomColor {{ border: 1px dashed {p.text3}; border-radius: 12px; padding: 3px; }}
+QToolButton#PickColor {{ border: 1px solid {p.border}; border-radius: 12px; padding: 3px; }}
+QToolButton#PickColor:checked {{ background: {a.soft}; border-color: {a.fill}; }}
 QToolButton#ImageAction {{ border: 1px solid {p.border}; border-radius: 8px; padding: 6px; }}
 
 QWidget#Segmented {{ background: {p.surface2}; border: 1px solid {p.border}; border-radius: 8px; }}

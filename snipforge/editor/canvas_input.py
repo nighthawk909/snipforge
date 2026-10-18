@@ -9,7 +9,7 @@ The Select tool adds rubber-band selection and never draws.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QEvent, QPointF, Qt
 
 from .commands import StateCommand
 from .crop import MIN_CROP, crop_handle_at, move_crop, new_crop, resize_crop
@@ -39,6 +39,11 @@ class InputMixin:
 
     # ------------------------------------------------------------------ keyboard
     def keyPressEvent(self, e) -> None:
+        if self.picking() and e.key() == Qt.Key_Escape:
+            self.stop_picking()
+            return
+        if self.picking() and e.key() != Qt.Key_Space and e.key() not in TOOL_KEYS:
+            return  # Delete, Enter, arrows... wait until you've picked (a tool key ends picking)
         if self.editing_text_item() is not None:
             if e.key() == Qt.Key_Escape:
                 self.commit_text()
@@ -97,6 +102,7 @@ class InputMixin:
             self._apply_drag_mode()
         if e.reason() != Qt.PopupFocusReason:
             self._cancel_drag()  # the mouse release may never arrive either
+            self.stop_picking()
         super().focusOutEvent(e)
 
     def _cancel_drag(self) -> None:
@@ -119,6 +125,9 @@ class InputMixin:
 
     # ------------------------------------------------------------------ mouse
     def mousePressEvent(self, e) -> None:
+        if self.picking() and e.button() == Qt.RightButton:
+            self.stop_picking()  # right-click cancels, as in most apps
+            return
         if self._panning or e.button() != Qt.LeftButton:
             super().mousePressEvent(e)
             return
@@ -126,6 +135,10 @@ class InputMixin:
             self._cancel_drag()
         view_pos = e.position().toPoint()
         pos = self.mapToScene(view_pos)
+        self._just_picked = False
+        if self.picking():
+            self._pick_press(self._pick_scene_pos(e))  # the eyedropper's click picks; it never selects or draws
+            return
         editing = self.editing_text_item()
         if editing is not None:
             if self._annotation_at(view_pos) is editing.owner():
@@ -171,6 +184,13 @@ class InputMixin:
         pos = self.mapToScene(view_pos)
         shift = bool(e.modifiers() & Qt.ShiftModifier)
         drag = self._drag
+        if self.picking():
+            if self._panning:  # Space+drag still pans
+                self._loupe.hide()
+                super().mouseMoveEvent(e)
+            else:
+                self._pick_hover(view_pos, self._pick_scene_pos(e))
+            return
         if drag is None:
             if not e.buttons():
                 self._update_hover(view_pos, pos)
@@ -204,6 +224,11 @@ class InputMixin:
         """Qt sends the second press of a quick double-click here, not to mousePressEvent."""
         if self._panning or e.button() != Qt.LeftButton:
             super().mouseDoubleClickEvent(e)
+            return
+        if self._just_picked or self.picking():  # a double-click with the eyedropper is just a pick
+            self._just_picked = False
+            if self.picking():
+                self.mousePressEvent(e)
             return
         view_pos = e.position().toPoint()
         hit = self._annotation_at(view_pos)
@@ -286,4 +311,10 @@ class InputMixin:
 
     def leaveEvent(self, e) -> None:
         self._overlay.set_hover(None)
+        self._loupe.hide()
         super().leaveEvent(e)
+
+    def viewportEvent(self, e) -> bool:  # noqa: N802 - Qt API
+        if e.type() == QEvent.Leave:  # onto a scrollbar, which the view's own leaveEvent doesn't see
+            self._loupe.hide()
+        return super().viewportEvent(e)
