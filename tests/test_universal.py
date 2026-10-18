@@ -94,22 +94,72 @@ def test_a_file_still_thin_after_fusing_stops_the_build(tmp_path):
                                  archs=mac.lipo_archs, download=mac.download)
 
 
-def test_the_built_app_is_checked_too(tmp_path):
+def test_fused_files_are_signed_again(tmp_path):
+    mac = FakeMac(tmp_path)
+    installed = package(tmp_path / "PIL")
+    universal.make_universal("pillow", "PIL", installed, "12.3.0", run=mac.run, archs=mac.lipo_archs,
+                             download=mac.download)
+    signed = [cmd[-1] for cmd in mac.commands if cmd[:4] == ["codesign", "--force", "--sign", "-"]]
+    assert sorted(signed) == sorted(str(p) for p in universal.compiled_files(installed))
+
+
+def test_every_compiled_file_in_the_built_app_is_checked(tmp_path):
     mac = FakeMac(tmp_path)
     app = tmp_path / "SnipForge.app"
-    bundled = package(app / "Contents" / "Frameworks" / "PIL")
-    package(app / "Contents" / "Frameworks" / "PySide6", files=("QtCore.abi3.so",))  # not ours to check
-    with pytest.raises(SystemExit, match="Not universal in the app"):
-        universal.check_bundle(app, archs=mac.lipo_archs)
-    for path in universal.compiled_files(bundled):
+    frameworks = app / "Contents" / "Frameworks"
+    package(frameworks / "PIL")
+    package(frameworks / "PySide6", files=("QtCore.abi3.so",))
+    for path in universal.compiled_files(frameworks / "PIL"):
         mac.archs[path] = {"arm64", "x86_64"}
-    assert len(universal.check_bundle(app, archs=mac.lipo_archs)) == len(FILES)
-    (tmp_path / "empty").mkdir()
+    with pytest.raises(SystemExit, match=r"Not universal in the app.*QtCore"):  # the next split-wheel package
+        universal.check_bundle(app, archs=mac.lipo_archs)
+    mac.archs[frameworks / "PySide6" / "QtCore.abi3.so"] = {"arm64", "x86_64"}
+    compiled, split = universal.check_bundle(app, archs=mac.lipo_archs)
+    assert len(compiled) == len(FILES) + 1 and len(split) == len(FILES)
+    without_pillow = tmp_path / "Other.app"
+    package(without_pillow / "PySide6", files=("QtCore.abi3.so",))
+    mac.archs[without_pillow / "PySide6" / "QtCore.abi3.so"] = {"arm64", "x86_64"}
     with pytest.raises(SystemExit, match="None of PIL"):
-        universal.check_bundle((tmp_path / "empty").resolve(), archs=mac.lipo_archs)
+        universal.check_bundle(without_pillow, archs=mac.lipo_archs)
+
+
+def test_downloads_the_installed_version_for_each_architecture(tmp_path):
+    import zipfile
+
+    asked = []
+
+    def pip(cmd):
+        asked.append(cmd)
+        dest = Path(cmd[cmd.index("--dest") + 1])
+        dest.mkdir(parents=True)
+        with zipfile.ZipFile(dest / "pillow-12.3.0-cp314-cp314-macosx_11_0_arm64.whl", "w") as wheel:
+            wheel.writestr("PIL/_imaging.cpython-314-darwin.so", b"arm64 code")
+
+    unpacked = universal.download_wheel("pillow", "12.3.0", "arm64", tmp_path, run=pip)
+    assert (unpacked / "PIL" / "_imaging.cpython-314-darwin.so").read_bytes() == b"arm64 code"
+    cmd = asked[0]
+    python = f"{sys.version_info.major}{sys.version_info.minor}"
+    assert cmd[:5] == [sys.executable, "-m", "pip", "download", "pillow==12.3.0"]
+    assert {"--no-deps", "--only-binary=:all:"} <= set(cmd)
+    for flag, value in (("--platform", "macosx_14_0_arm64"), ("--python-version", python),
+                        ("--implementation", "cp"), ("--abi", f"cp{python}")):
+        assert cmd[cmd.index(flag) + 1] == value
+    with pytest.raises(SystemExit, match="Expected one x86_64 wheel"):
+        universal.download_wheel("pillow", "12.3.0", "x86_64", tmp_path, run=lambda cmd: None)
+
+
+def test_a_missing_package_stops_the_build(monkeypatch):
+    monkeypatch.setattr(universal, "SPLIT_WHEELS", {"no-such-dist": "no_such_package_here"})
+    with pytest.raises(SystemExit, match="no-such-dist isn't installed"):
+        universal.make_dependencies_universal()
+
+
+def test_wheels_are_asked_for_the_oldest_macos_the_app_supports():
+    spec = (ROOT / "packaging" / "snipforge.spec").read_text(encoding="utf-8")
+    assert f'"LSMinimumSystemVersion": "{universal.MIN_MACOS.replace("_", ".")}"' in spec
 
 
 @pytest.mark.mac
 def test_lipo_reads_architectures_on_a_mac():
-    assert "arm64" in universal.lipo_archs(Path(sys.executable).resolve()) or \
-        "x86_64" in universal.lipo_archs(Path(sys.executable).resolve())
+    found = universal.lipo_archs(Path(sys.executable).resolve())
+    assert found and found <= {"arm64", "arm64e", "x86_64"}

@@ -72,8 +72,10 @@ def build_app(version: str) -> Path:
     app = DIST / APP_NAME
     if not (app / "Contents" / "MacOS" / "SnipForge").exists():
         sys.exit(f"PyInstaller didn't produce {APP_NAME}")
-    for bundled in universal.check_bundle(app):
-        print(f"Universal in the app ({' '.join(sorted(universal.lipo_archs(bundled)))}): {bundled.relative_to(app)}")
+    compiled, split = universal.check_bundle(app)
+    print(f"All {len(compiled)} compiled files in the app hold {' and '.join(universal.ARCHS)}, including:")
+    for bundled in split:
+        print(f"  {bundled.relative_to(app)}")
     resources = app / "Contents" / "Resources"
     build.add_license_files(resources)  # LGPL notice: license texts ship with the app
     build.add_theme_packs(resources)

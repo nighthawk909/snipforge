@@ -4,8 +4,10 @@ SnipForge.app is one universal2 build, so PyInstaller needs every compiled file 
 both arm64 and x86_64 code. Most dependencies (Python, PySide6, PyObjC) publish universal2 wheels;
 the packages in SPLIT_WHEELS publish a separate wheel per architecture. Before PyInstaller runs,
 scripts/build_mac.py fuses each one's compiled files (.so, .dylib) with `lipo`, from the arm64 and
-x86_64 wheels of the version that's installed, into the installed package. A file that's already
-universal is left as it is, so running it twice changes nothing.
+x86_64 wheels of the version that's installed, into the installed package, and signs each again
+(ad hoc). A package whose files are all universal already is left as it is, so running it twice
+changes nothing. After PyInstaller, check_bundle() makes sure every compiled file in the app holds
+both architectures, which also catches the next dependency that belongs in SPLIT_WHEELS.
 
 macOS only (lipo comes with Xcode's command line tools, as on GitHub's macOS runners).
 """
@@ -88,6 +90,9 @@ def make_universal(dist: str, package: str, installed: Path, version: str, run: 
         plan = fuse_plan(package, installed, unpacked)
         for target, slices in plan:
             run(["lipo", "-create", *map(str, slices), "-output", str(target)])
+            # Each slice keeps its own signature; sign the fused file again, ad hoc, so the Python that
+            # runs PyInstaller (which loads Pillow for the icon) can always load it.
+            run(["codesign", "--force", "--sign", "-", str(target)])
     thin = [str(f) for f in files if not is_universal(f, archs)]
     if thin:
         sys.exit(f"Still not universal after fusing: {', '.join(thin)}")
@@ -108,13 +113,14 @@ def make_dependencies_universal() -> list[Path]:
     return fused
 
 
-def check_bundle(app: Path, archs: Callable[[Path], set[str]] = lipo_archs) -> list[Path]:
-    """The SPLIT_WHEELS packages' compiled files inside the built app all hold both architectures.
-    Returns them; exits if one is missing or single-architecture."""
-    found = [p for p in compiled_files(app) if any(package in p.parts for package in SPLIT_WHEELS.values())]
-    if not found:
-        sys.exit(f"None of {', '.join(SPLIT_WHEELS.values())}'s compiled files are in {app}")
-    thin = [str(p) for p in found if not is_universal(p, archs)]
+def check_bundle(app: Path, archs: Callable[[Path], set[str]] = lipo_archs) -> tuple[list[Path], list[Path]]:
+    """Every compiled file inside the built app holds both architectures, and the SPLIT_WHEELS
+    packages' are there. Returns (all of them, the SPLIT_WHEELS ones); exits otherwise."""
+    found = compiled_files(app)
+    thin = [str(p.relative_to(app)) for p in found if not is_universal(p, archs)]
     if thin:
-        sys.exit(f"Not universal in the app: {', '.join(thin)}")
-    return found
+        sys.exit(f"Not universal in the app (add its package to SPLIT_WHEELS): {', '.join(thin)}")
+    split = [p for p in found if any(package in p.relative_to(app).parts for package in SPLIT_WHEELS.values())]
+    if not split:
+        sys.exit(f"None of {', '.join(SPLIT_WHEELS.values())}'s compiled files are in {app}")
+    return found, split
