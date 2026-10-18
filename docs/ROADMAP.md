@@ -57,8 +57,8 @@ What IT asks about (speed, accessibility, a way to report problems, packaging fo
 Software Center) and the SnagIt features people miss most. Built in this order:
 - [x] Report a problem: a diagnostics bundle to attach to a bug report, shown before it's saved,
   with no snips, titles or personal paths, and nothing sent anywhere (#99)
-- [ ] Capture presets: saved mode, delay, pointer, size, effects and destination, each with an
-  optional shortcut of its own
+- [x] Capture presets: saved mode, delay, pointer, size, effects and destination, each with an
+  optional shortcut of its own (#103)
 - [ ] Speed and footprint: startup, snip-to-editor, idle memory, a big Library and installer size
   measured, the worst fixed, and budgets checked in CI so they can't creep back
 - [ ] Combine images: side by side, a grid, or numbered steps with captions
@@ -79,6 +79,8 @@ Software Center) and the SnagIt features people miss most. Built in this order:
 - [x] 0.4.0 to 0.10.0: the update engine, the new look, Settings, capture parity
 - [x] 0.11.0: Phase 3, recording, privacy
 - [x] 0.12.0: the first release with the Mac version (a .dmg), editor and privacy fixes (#72)
+- [x] 0.13.0: Report a problem, capture presets, copy and paste markup, fills and dotted lines,
+  Send in Teams through the share window, Mac phase 1 (#97)
 - [ ] 1.0: when Phase 4's hand checks and the fix-it backlog are done
 
 ## Fix-it: feedback from testing
