@@ -56,7 +56,9 @@ combination another app already registered is refused. None are set by default.
 the Record switch on the capture toolbar, or a shortcut they set) and then an area, and only that
 area. Before recording starts, the panel beside the area opens the microphone and the computer's
 sound only to show their levels; they're let go when Record or Cancel is clicked. While recording,
-the recorder process has them open (Windows shows its microphone-in-use icon), and SnipForge's
+the recorder process has them open (Windows shows its microphone-in-use icon; recording Windows'
+default devices, it moves to the new default when Windows changes it, so plugging in a headset
+mid-recording is followed), and SnipForge's
 control bar (pause, stop, discard) stays on screen, kept out of the recording itself. Nothing is sent anywhere:
 the recording is saved in the Library folder (see Data on the PC). While it records (not while it's
 paused), the recorder process asks Windows not to sleep or turn the screen off for inactivity

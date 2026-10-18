@@ -6,6 +6,11 @@ format), each stamped with the QueryPerformanceCounter time of its first frame, 
 time.perf_counter() reads. So sound lines up with the video's frames (video/mixer.py places it).
 
 Loopback sends nothing at all while nothing plays; the mixer turns those gaps into silence.
+
+Recording Windows' default device (no device chosen), the capture follows it: when Windows makes
+another device the default (headphones plugged in, a Bluetooth headset connecting) or the one being
+recorded goes away, it carries on from the new default, checked every FOLLOW_SECONDS. Otherwise the
+computer's sound would quietly go missing from the rest of the recording once it plays elsewhere.
 """
 from __future__ import annotations
 
@@ -49,6 +54,7 @@ WAVE_FORMAT_IEEE_FLOAT = 3
 BUFFER_100NS = 10_000_000  # one second of room on Windows' side, so a busy moment loses nothing
 POLL_SECONDS = 0.005
 START_TIMEOUT = 5.0
+FOLLOW_SECONDS = 1.0  # following Windows' default device: how often it's checked
 
 E_ACCESSDENIED = 0x80070005
 AUDCLNT_E_DEVICE_INVALIDATED = 0x88890004
@@ -173,6 +179,24 @@ def _device_id(device: c_void_p) -> str:
         ctypes.windll.ole32.CoTaskMemFree(text)
 
 
+def _id_or_none(device: c_void_p) -> str | None:
+    try:
+        return _device_id(device)
+    except ComError:
+        return None
+
+
+def _default_id(enumerator, kind: str) -> str | None:
+    """Windows' default device's id now, or None if there's none (or it can't be read)."""
+    device = enumerator.default(kind)
+    if not device:
+        return None
+    try:
+        return _id_or_none(device)
+    finally:
+        release(device)
+
+
 def _friendly_name(device: c_void_p) -> str:
     store = c_void_p()
     if vcall(device, 4, c_long, STGM_READ, byref(store), argtypes=(c_uint, c_void_p)) < 0:
@@ -262,6 +286,8 @@ class WasapiCapture:
         self._failure: AudioUnavailable | None = None
         self.packets = 0
         self.frames = 0
+        self.switches = 0  # moves to a new default device
+        self._glitch_next = False  # the first packet after a move: the mixer mustn't run on from the last
 
     def start(self) -> None:
         """Open the device; raises AudioUnavailable (or MicrophoneBlocked) if it can't be recorded."""
@@ -283,16 +309,13 @@ class WasapiCapture:
         initialised = ole32.CoInitializeEx(None, 0) >= 0
         avrt.AvSetMmThreadCharacteristicsW.restype = c_void_p
         avrt.AvRevertMmThreadCharacteristics.argtypes = [c_void_p]
-        mmcss = enumerator = device = client = capture = None
+        mmcss = enumerator = None
+        held: list = []  # what's open on the device being recorded: device, client, capture
         try:
             try:
                 mmcss = avrt.AvSetMmThreadCharacteristicsW("Pro Audio", byref(c_uint32()))  # audio-thread priority
                 enumerator = _Enumerator()
-                device = enumerator.by_id(self.device_id) if self.device_id else enumerator.default(self.kind)
-                if not device:
-                    raise AudioUnavailable("No microphone is connected." if self.kind == MICROPHONE
-                                           else "No speakers or headphones are connected.")
-                client, capture = self._open(device)
+                held[:] = self._open_device(enumerator)
             except ComError as exc:
                 self._failure = explain(exc.hresult, self.kind)
             except AudioUnavailable as exc:
@@ -303,23 +326,66 @@ class WasapiCapture:
             finally:
                 self._ready.set()
             if not self._failure:
-                self._pump(capture)
+                self._record(enumerator, held)
         except ComError as exc:
             self._report(explain(exc.hresult, self.kind))
+        except AudioUnavailable as exc:  # the default went and there's no other device to go to
+            self._report(exc)
         except Exception as exc:  # including one raised by on_packet: never die without saying so
             log.exception("Recording the %s stopped", _what(self.kind))
             self._report(AudioUnavailable(f"Recording the {_what(self.kind)} stopped ({exc})."))
         finally:
-            if client:
-                vcall(client, 11, c_long)  # Stop
-            for obj in (capture, client, device):
-                release(obj)
+            self._close_device(held)
             if enumerator:
                 enumerator.close()
             if mmcss:
                 avrt.AvRevertMmThreadCharacteristics(mmcss)
             if initialised:
                 ole32.CoUninitialize()
+
+    def _open_device(self, enumerator) -> list:
+        """The device to record (the chosen one, or Windows' default), opened: [device, client, capture]."""
+        device = enumerator.by_id(self.device_id) if self.device_id else enumerator.default(self.kind)
+        if not device:
+            raise AudioUnavailable("No microphone is connected." if self.kind == MICROPHONE
+                                   else "No speakers or headphones are connected.")
+        try:
+            client, capture = self._open(device)
+        except Exception:
+            release(device)
+            raise
+        return [device, client, capture]
+
+    @staticmethod
+    def _close_device(held: list) -> None:
+        device, client, capture = (held + [None, None, None])[:3]
+        held.clear()
+        if client:
+            vcall(client, 11, c_long)  # Stop
+        for obj in (capture, client, device):
+            release(obj)
+
+    def _record(self, enumerator, held: list) -> None:
+        """Hand on packets until stop(). Following Windows' default device, move to the new one when
+        it changes or the one being recorded goes away (and there's another to go to)."""
+        if self.device_id is not None:  # a device chosen: that one, or nothing
+            self._pump(held[2])
+            return
+        recording = _id_or_none(held[0])
+        while True:
+            try:
+                moved = lambda was=recording: _default_id(enumerator, self.kind) not in (None, was)  # noqa: E731
+                if self._pump(held[2], moved):
+                    return
+            except ComError as exc:
+                if exc.hresult not in (AUDCLNT_E_DEVICE_INVALIDATED, E_NOTFOUND):
+                    raise
+            self._close_device(held)
+            held[:] = self._open_device(enumerator)  # AudioUnavailable if there's no device left
+            recording = _id_or_none(held[0])
+            self.switches += 1
+            self._glitch_next = True
+            log.info("Recording the %s from Windows' new default device", _what(self.kind))
 
     def _report(self, error: AudioUnavailable) -> None:
         if self._on_error:
@@ -349,13 +415,19 @@ class WasapiCapture:
             release(client)
             raise
 
-    def _pump(self, capture: c_void_p) -> None:
-        """Hand on every packet until stop(), then the last few still waiting."""
+    def _pump(self, capture: c_void_p, moved: Callable[[], bool] | None = None) -> bool:
+        """Hand on every packet until stop(), then the last few still waiting: True. With `moved`,
+        asked every FOLLOW_SECONDS, also until it says the device has changed: False."""
+        check_at = time.perf_counter() + FOLLOW_SECONDS
         while True:
             stopping = self._stop.is_set()
             self._drain(capture)
             if stopping:
-                return
+                return True
+            if moved is not None and time.perf_counter() >= check_at:
+                check_at = time.perf_counter() + FOLLOW_SECONDS
+                if moved():
+                    return False
             time.sleep(POLL_SECONDS)
 
     def _drain(self, capture: c_void_p) -> None:
@@ -376,5 +448,6 @@ class WasapiCapture:
             # qpc is in 100 ns units of QueryPerformanceCounter time, the clock perf_counter reads;
             # None when Windows flags it as wrong (or gives none), so the mixer won't trust it.
             unreliable = flags.value & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR or qpc.value == 0
-            glitch = bool(flags.value & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY)
+            glitch = bool(flags.value & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) or self._glitch_next
+            self._glitch_next = False
             self._on_packet(payload, n, None if unreliable else qpc.value * 1e-7, glitch)
