@@ -23,8 +23,9 @@ agent-driven changes safe to ship.
 5. Open a PR with `gh pr create`; include what changed, why, and how it was verified. CI must be
    green before merge.
 6. After a feature lands, have the change reviewed (code-reviewer agent) and fix high/medium
-   findings in the same PR.
-7. **Both platforms.** The Mac version is kept at parity with Windows. Before touching anything
+   findings in the same PR. Say in the PR which `docs/ROADMAP.md` box it ticks.
+7. **Both platforms.** Windows first, then the Mac port (`docs/ROADMAP.md`); the Mac build must
+   always build and start, and features not on the Mac yet step aside there. Before touching anything
    that talks to the OS, or adding a feature, read `docs/CROSS-PLATFORM.md` (the rules, the code
    layout and the macOS gotchas; the `cross-platform` skill in `.claude/skills` sums it up). A
    feature ships on both platforms in the same release, or steps aside cleanly on the one that's

@@ -5,8 +5,10 @@ description: Keep SnipForge's Windows and Mac versions at parity. Use before add
 
 # Cross-platform SnipForge
 
-SnipForge ships for Windows and macOS from one codebase, and the Mac version stays at parity with
-Windows. The full rules are in `docs/CROSS-PLATFORM.md`; feature status per platform is in
+SnipForge ships for Windows and macOS from one codebase. The plan is Windows first, then the Mac
+port (docs/ROADMAP.md): until then new features step aside cleanly on the Mac, the Mac build must
+keep building and starting in CI, and OS calls stay behind the platform layer so the port is
+mechanical. The full rules are in `docs/CROSS-PLATFORM.md`; feature status per platform is in
 `docs/PARITY.md`; macOS APIs and permissions are in `docs/MAC-PLAN.md`. Read CROSS-PLATFORM.md
 before you start.
 
