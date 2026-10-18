@@ -24,6 +24,7 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | License texts and theme packs shipped with the app; caches | ✅ next to SnipForge.exe; `%LOCALAPPDATA%` | ✅ CI self-test finds them in `Contents/Resources`; `~/Library/Caches` | |
 | | Start when I sign in | ✅ | ❌ explains it isn't available | Phase 6: `SMAppService` |
 | | Settings, themes, accents | ✅ | 🟡 Match macOS; no Windows key switches | |
+| | Report a problem (logs, versions, displays, last crash) | ✅ | 🟡 logs in `~/Library/Logs/SnipForge`, macOS version from `platform.mac_ver()` | |
 | **Capture** | The snip key (Win+Shift+S, Print Screen) | ✅ | ❌ | Phase 3: `RegisterEventHotKey` (e.g. ⌘⇧2) |
 | | Shortcuts of your own | ✅ | ❌ hidden | Phase 3: same API |
 | | Capture presets (toolbar, menu bar, Settings; effects; editor, copy or folder) | ✅ | 🟡 same code; a preset's own shortcut is hidden with the other shortcuts | Phase 3: shortcuts |
@@ -43,7 +44,7 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | Save PNG, JPG, WebP, PDF | ✅ | 🟡 | |
 | | Copy, Drag out, Pin | ✅ | 🟡 | |
 | | Copy, cut and paste markup between snips; right-click menu | ✅ | 🟡 Qt's clipboard and menus; the private markup format needs a check on a real Mac | A tester confirms |
-| **Share** | Send in Teams | ✅ | 🟡 | |
+| **Share** | Send in Teams | ✅ the share window with the snip attached; a chat by email for work accounts | 🟡 a chat by email (`msteams:`), the snip copied to paste | Phase 5: Teams through `NSSharingServicePicker` |
 | | Email | ✅ Outlook draft with the snip | 🟡 copies, opens the mail app | Phase 5: compose-email service |
 | | OneDrive link, share sheet | ✅ | ❌ hidden | Phase 5: `NSSharingServicePicker` |
 | **Library** | Browse, favorites, tags, delete, search titles and tags | ✅ | 🟡 Trash (⌘⌫), Finder | |

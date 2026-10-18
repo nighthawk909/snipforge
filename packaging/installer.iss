@@ -94,6 +94,8 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#AppExe} /F"; Flags: runhidden
 Type: filesandordirs; Name: "{%TEMP}\SnipForge"
 ; Small theme images SnipForge regenerates on start.
 Type: filesandordirs; Name: "{localappdata}\SnipForge\cache"
+; Logs and crash details kept for Report a problem.
+Type: filesandordirs; Name: "{localappdata}\SnipForge\logs"
 
 [Code]
 function RelaunchAfterSilentInstall: Boolean;

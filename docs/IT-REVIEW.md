@@ -12,7 +12,7 @@ be checked in the source code; file references are given where useful.
 | Install | Per-user to `%LOCALAPPDATA%\Programs\SnipForge`; **no admin rights needed** |
 | Machine-wide | Optional, needs admin: `SnipForge-<version>-setup.exe /VERYSILENT /ALLUSERS /TASKS="autostart"` |
 | Network | A once-a-day update check against GitHub or a feed you host (can be turned off by the user or by policy), a background download of a new version in the Automatic and Ask modes, plus Share actions the user starts. Nothing else (details below) |
-| Telemetry | None. No accounts, analytics or crash reporting |
+| Telemetry | None. No accounts, analytics or crash reporting. A log and crash details stay on the PC, for the user to look at and attach to a bug report if they choose (Report a problem) |
 | Updates | Three modes: Automatic, Ask before installing (default) and Manual. Per-user installs download the new installer, verify its SHA-256 (against the release's `SHA256SUMS.txt`, or the feed's `releases.json`) and install silently. All-users installs only point to the download page. Policy can force the mode, channel and source (details below) |
 | Elevation | The app never runs elevated; only an all-users install needs admin |
 
@@ -23,6 +23,8 @@ be checked in the source code; file references are given where useful.
 | The user's snips (original capture, editable markup, rendered image) | `%USERPROFILE%\Pictures\SnipForge` | No (it's the user's work) |
 | Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses, update choices (mode, channel, pinned or skipped version, the waiting download), capture choices (mode, delay, pointer, Fixed size), capture presets (a name, those choices, effects, where the snip goes and, for Save to a folder, the folder's path, and each one's shortcut), shortcuts of your own, which version of the private-window check last swept the Library, and the last snip's area for Repeat last snip (the monitor's name, position, size and scale, and a rectangle on it; no image) | `HKCU\Software\SnipForge\SnipForge` | Yes |
 | Small theme images (check mark, arrows) regenerated at start | `%LOCALAPPDATA%\SnipForge\cache` | Yes |
+| Logs for Report a problem: what SnipForge logs as it works (`snipforge.log`, and `recorder.log` from the recording process; 1 MB each, with two older copies), the last unexpected error, the last crash (Python's faulthandler output: which code was running), and a marker with the process ID that's there while SnipForge runs, so the next start can tell it didn't quit normally. Faulthandler output written while SnipForge carries on (an error Windows handled) is moved into the log every half a minute. Messages can name files and folders the user works with; no snips, keystrokes or window titles | `%LOCALAPPDATA%\SnipForge\logs` | Yes |
+| A problem report the user saves (a zip; see Report a problem) | Wherever the user saves it (the Desktop is suggested) | No (it's the user's file) |
 | Per snip in the library: `meta.json` with the app name and window title it came from (best effort: windows recognised as private browsing, such as InPrivate, Incognito, Private Browsing and their equivalents in other browsers and several languages, keep only the app name; titles an older version saved are always hidden, and cleared from these files in the background; a file locked at the time is cleared at a later start), favorite, tags, and the words Windows OCR read in the finished snip (for Library search; read offline, cleared and re-read after each edit, so blurred or cropped text doesn't stay searchable) | `%USERPROFILE%\Pictures\SnipForge\Library\<snip>` | No (it's the user's work) |
 | Screen recordings: `recording.mp4` in a folder of its own per recording (H.264 video, AAC sound), with `recording.json` (its length and size, written once it's finished, which is when the Library lists it), `preview.png` (a frame from it for its Library card, made the first time it's shown) and, once it's tagged or made a favorite, `meta.json` | `%USERPROFILE%\Pictures\SnipForge\Library\<recording>` | No (it's the user's work) |
 | Recording choices: microphone and computer sound on or off, the microphone's device ID, pointer effects, countdown, the camera on or off and its device ID, and its bubble's shape, size and place on screen | `HKCU\Software\SnipForge\SnipForge\video` | Yes |
@@ -113,6 +115,24 @@ grows slowly (702 to 727 MB in a one-hour test; likely partly the MP4's index, k
 finished), and it's all let go when the recording ends. Measured as committed private bytes,
 recording a made-up screen (`scripts/soak_recording.py`).
 
+**Report a problem** (`snipforge/diagnostics.py`, `snipforge/report_dialog.py`). From the tray
+menu, About or Settings > About, SnipForge puts together a report for a bug: the newest end of its
+logs (up to about 400 KB each), the versions of SnipForge, Python, Qt and Windows, the displays
+(resolution, scaling, refresh rate, position, make and model), its settings, IT policy for updates,
+the last unexpected error and the last crash. Settings that are personal or say where files are
+(recent Teams recipients, the save folder, the last snip's area, update downloads, device IDs) and
+any long value are left out; the update feed's location is reduced to "a network share", "an https
+address" or "a folder". Throughout, the user's profile folder becomes `%USERPROFILE%`, OneDrive
+folders `%OneDrive%` (and any `OneDrive - <organization>`), and the user, computer and domain names
+(including the DNS domain's parts), email addresses, other users' profile folders, `\\server\share`
+names however they're written, the update feed's server, web addresses other than GitHub's and
+server names ending in a common domain (`.com`, `.local`, `.corp` and so on) are replaced with
+placeholders. Other text the user typed, such as a file name, can still appear: the user sees every
+part of the report before saving it.
+It never reads snips, recordings or the Library's `meta.json` files (so no window titles), and
+it sends nothing: the user sees every part of the report first, then saves it as a zip where they
+choose and decides whether to attach it to a GitHub issue.
+
 **Explorer right-click commands** (`snipforge/share.py`). The Share menu invokes the same
 right-click commands a user would click by hand (OneDrive "Copy link"/"Share", Windows "Share") on
 the exported image.
@@ -125,7 +145,8 @@ the exported image.
 | Update download: in the background in Automatic and Ask modes, otherwise only after the user chooses to install | `github.com/nighthawk909/snipforge/releases/download/...` (redirects to GitHub's file storage), or the feed's folder | Downloads the installer and checksum file |
 | Share → OneDrive | The user's own signed-in OneDrive client | The PNG is saved into the OneDrive folder; OneDrive syncs it |
 | Share → Outlook | Classic Outlook via COM on the same PC | Opens a draft; nothing is sent until the user clicks Send |
-| Share → Teams | The Teams desktop app (`msteams:` link with the chosen recipients) | Opens the chat; the user pastes and sends |
+| Share → Send in Teams | The Windows share window (Explorer's Share command on the exported PNG in `%TEMP%\SnipForge\share`); or, for work and school accounts, the Teams desktop app (`msteams:` link with the chosen recipients) | The user picks Teams and who to send to, or the chat opens; the user pastes the message or snip and sends |
+| Report a problem → Open the bug report form | The default browser opens `github.com/nighthawk909/snipforge/issues/new` | Nothing from SnipForge: the user fills in the form and attaches the report if they choose |
 
 Update traffic is https only, and redirects can't downgrade to http. GitHub downloads must come from
 `github.com` or GitHub's file storage hosts (the server and hosts named in `snipforge/project.py`),

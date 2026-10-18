@@ -27,6 +27,14 @@ body:
     attributes:
       label: Windows version and display setup
       placeholder: "Windows 11 24H2, two monitors at 150% and 100%"
+  - type: textarea
+    id: report
+    attributes:
+      label: Problem report (optional)
+      description: >-
+        Tray icon → Report a problem… shows the details that help fix bugs (logs, versions, displays,
+        the last crash) and saves them as a zip. Drag the zip here. It never includes your snips,
+        window titles or your name.
   - type: markdown
     attributes:
       value: "Please don't attach screenshots that contain private or company information."

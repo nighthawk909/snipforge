@@ -29,7 +29,7 @@ import sys
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer
 
-from .. import __version__
+from .. import __version__, logs
 from .channel import Channel, connect, is_name, settings_from_message
 from .power import SessionWatch, stay_awake
 from .recorder import ACTIVE, Recorder, RecordingError
@@ -45,6 +45,7 @@ EXIT_FINISH_SECONDS = 10.0  # quitting for any other reason: finish the file fir
 COMMANDS = ("go", "pause", "resume", "stop", "cancel")
 AWAKE_STATES = ("starting", "recording", "finishing")  # Windows kept awake: not while paused
 PROGRESS_MS = 250
+LOG_TICK_MS = 30_000  # how often the log session tidies up (snipforge.logs.LogSession.tick)
 
 
 def channel_name(argv: list[str]) -> str | None:
@@ -57,14 +58,23 @@ def channel_name(argv: list[str]) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from PySide6.QtWidgets import QApplication
-
     argv = sys.argv if argv is None else argv
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     name = channel_name(argv)
     if name is None:
         log.error("SnipForge's recorder needs the channel to SnipForge: --record <name>")
         return 2
+    logging_session = logs.setup("recorder", slots=logs.SLOTS)  # for Report a problem (snipforge.diagnostics)
+    try:
+        return _record(argv, name, logging_session)
+    finally:
+        if logging_session is not None:
+            logging_session.close()
+
+
+def _record(argv: list[str], name: str, logging_session=None) -> int:
+    from PySide6.QtWidgets import QApplication
+
     app = QApplication(argv)
     app.setQuitOnLastWindowClosed(False)
     try:
@@ -75,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
     watch = SessionWatch()
     child = RecorderChild(Channel(socket), watch)
     sys.excepthook = child.unexpected  # an error in a slot ends the recording cleanly, not silently
+    if logging_session is not None:  # Windows' handled errors aren't mistaken for a crash
+        tidy = QTimer(app, interval=LOG_TICK_MS)
+        tidy.timeout.connect(logging_session.tick)
+        tidy.start()
     code = app.exec()
     watch.close()  # here, not while Windows is still telling its hidden window something
     return code
@@ -112,6 +126,7 @@ class RecorderChild(QObject):
     def unexpected(self, kind, error, trace) -> None:
         """sys.excepthook: log it, keep what was recorded, and end."""
         log.error("The recorder hit an unexpected problem", exc_info=(kind, error, trace))
+        logs.remember_error(kind, error, trace)  # for Report a problem
         if not self._done:
             self.channel.send("warning", message=f"The recorder hit an unexpected problem: {error}")
             self._finish(1)
