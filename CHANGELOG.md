@@ -3,6 +3,28 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.13.0](https://github.com/nighthawk909/snipforge/compare/v0.12.0...v0.13.0) (2026-10-18)
+
+
+### Features
+
+* **capture:** capture presets save a mode, delay, pointer, size, effects and where the snip goes, each with a shortcut of its own ([#103](https://github.com/nighthawk909/snipforge/issues/103)) ([a5c2055](https://github.com/nighthawk909/snipforge/commit/a5c20558565d4e9117de43c452b3085af52f02f8))
+* **editor:** copy, cut and paste markup between snips, with a right-click menu ([#98](https://github.com/nighthawk909/snipforge/issues/98)) ([e2e6247](https://github.com/nighthawk909/snipforge/commit/e2e62475e4be635fb39de9d55c25280f83503847))
+* **editor:** fill shapes, callouts and text in a color of their own, at any opacity, and draw dotted lines ([#100](https://github.com/nighthawk909/snipforge/issues/100)) ([a00bc69](https://github.com/nighthawk909/snipforge/commit/a00bc69b8ff05d51fcbe336cf9335cb8ce177b2a))
+* **help:** Report a problem saves the details for a bug report (logs, versions, displays, last crash), and shows you all of it first ([#99](https://github.com/nighthawk909/snipforge/issues/99)) ([0888178](https://github.com/nighthawk909/snipforge/commit/088817829151c951c7ea9ad38b7106d567f27fe7))
+* **mac:** a Mac version people can try: it asks for Screen Recording, speaks the Mac's language and comes back when reopened ([#90](https://github.com/nighthawk909/snipforge/issues/90)) ([a71e337](https://github.com/nighthawk909/snipforge/commit/a71e337d3b9e7be19426f8ac3eeab29fbfcdc005))
+
+
+### Bug fixes
+
+* **share:** Send in Teams opens the share window with your snip attached, and copies your message to paste ([#101](https://github.com/nighthawk909/snipforge/issues/101)) ([762778a](https://github.com/nighthawk909/snipforge/commit/762778a0e16858c63c557f78fc17e83c03fbf9fe))
+
+
+### Documentation
+
+* 0.12.0, Mac downloads and Mac phase 1 ticked off on the roadmap ([#96](https://github.com/nighthawk909/snipforge/issues/96)) ([60f72dd](https://github.com/nighthawk909/snipforge/commit/60f72dd1e48e950ac60f653e22654cd054d995c2))
+* the download page says Send in Teams uses the Windows share window, and Report a problem is ticked off ([#102](https://github.com/nighthawk909/snipforge/issues/102)) ([918d8e6](https://github.com/nighthawk909/snipforge/commit/918d8e601e2cbd27b7b7ee265b1375e644b37d57))
+
 ## [0.12.0](https://github.com/nighthawk909/snipforge/compare/v0.11.0...v0.12.0) (2026-10-18)
 
 
