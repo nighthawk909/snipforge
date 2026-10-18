@@ -203,10 +203,12 @@ def memory_budget() -> float | None:
     return BUDGETS["startup_memory_mb"] if sys.platform == "win32" else None
 
 
-def over_budget(results: dict) -> list[str]:
-    """What in `results` (measurements named as in BUDGETS) is over its budget, in words."""
-    return [f"{name} is {value} (budget {BUDGETS[name]})" for name, value in results.items()
-            if name in BUDGETS and value > BUDGETS[name]]
+def over_budget(results: dict, budgets: dict | None = None) -> list[str]:
+    """What in `results` (measurements named as in BUDGETS) is over its budget, in words. `budgets`
+    replaces some of BUDGETS (library_budgets() for this machine)."""
+    limits = BUDGETS | (budgets or {})
+    return [f"{name} is {value} (budget {round(limits[name], 3)})" for name, value in results.items()
+            if name in limits and value > limits[name]]
 
 
 def big_library(snips: int = 1200) -> dict:
@@ -219,6 +221,7 @@ def big_library(snips: int = 1200) -> dict:
     for path in root.rglob("*"):  # as a Library on disk for a while is: antivirus has seen every file
         if path.is_file():
             path.read_bytes()
+    disk_s = plain_read_s(root)
     before = memory_mb()
     from .home import HomeWindow
     from .library import Library
@@ -239,4 +242,28 @@ def big_library(snips: int = 1200) -> dict:
     home.close()
     return {"snips": snips, "open_s": round(shown - started, 3), "previews_settled_s": round(settled - started, 3),
             "refresh_s": round(refreshed - started_refresh, 3), "memory_mb": memory_mb(),
-            "memory_added_mb": round(memory_mb() - before, 1)}
+            "memory_added_mb": round(memory_mb() - before, 1), "plain_read_s": round(disk_s, 3)}
+
+
+def plain_read_s(root: Path) -> float:
+    """How long this machine takes to list each snip's folder and read its details the simplest way,
+    one after another: the yardstick for the Library on a slow disk (antivirus on a CI machine
+    made the same Library take fifteen times longer there than on a laptop)."""
+    import os
+
+    started = time.perf_counter()
+    with os.scandir(root) as folders:
+        for folder in folders:
+            with os.scandir(folder.path) as files:
+                names = [f.name for f in files]
+            if "meta.json" in names:
+                Path(folder.path, "meta.json").read_bytes()
+    return time.perf_counter() - started
+
+
+def library_budgets(plain_s: float) -> dict:
+    """The Library's budgets on this machine: the fixed ones, or the time to read it the plain way
+    and a little more on a machine where even that is slow. Reading what isn't needed (every snip's
+    picture, say) takes several times the plain read, and is caught everywhere."""
+    return {"library_open_s": max(BUDGETS["library_open_s"], 2 * plain_s + 1.0),
+            "library_refresh_s": max(BUDGETS["library_refresh_s"], plain_s)}

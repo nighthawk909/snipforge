@@ -102,11 +102,28 @@ def test_the_self_test_checks_https_can_work():
 
 def test_the_self_test_times_the_editor_and_a_big_library(monkeypatch):
     monkeypatch.setattr(perf, "open_editor_s", lambda: 0.2)
-    monkeypatch.setattr(perf, "big_library", lambda snips: {"open_s": 0.5, "refresh_s": 0.05, "snips": snips})
-    assert selftest._speed() == "snip_to_editor_s 0.2, library_open_s 0.5, library_refresh_s 0.05"
-    monkeypatch.setattr(perf, "big_library", lambda snips: {"open_s": 30.0, "refresh_s": 0.05})
+    monkeypatch.setattr(perf, "big_library",
+                        lambda snips: {"open_s": 0.5, "refresh_s": 0.05, "snips": snips, "plain_read_s": 0.1})
+    assert selftest._speed().startswith("snip_to_editor_s 0.2, library_open_s 0.5, library_refresh_s 0.05")
+    monkeypatch.setattr(perf, "big_library", lambda snips: {"open_s": 30.0, "refresh_s": 0.05, "plain_read_s": 0.1})
     with pytest.raises(RuntimeError, match="library_open_s is 30.0"):
         selftest._speed()
+
+
+def test_a_slow_disk_moves_the_librarys_budget_not_its_code(monkeypatch):
+    """A CI machine's antivirus made reading the same Library 15 times slower: the budget follows the
+    machine's plain read, so a slow disk passes and reading what isn't needed still fails."""
+    assert perf.library_budgets(0.1) == {"library_open_s": perf.BUDGETS["library_open_s"],
+                                         "library_refresh_s": perf.BUDGETS["library_refresh_s"]}
+    slow = perf.library_budgets(2.0)
+    assert slow["library_open_s"] == 5.0 and slow["library_refresh_s"] == 2.0
+    assert perf.over_budget({"library_open_s": 3.6}, slow) == []
+    assert perf.over_budget({"library_open_s": 12.0}, slow) == ["library_open_s is 12.0 (budget 5.0)"]
+
+
+def test_the_plain_read_is_measured(tmp_path, qapp):
+    perf.make_library(tmp_path / "Library", 10)
+    assert 0 < perf.plain_read_s(tmp_path / "Library") < 5
 
 
 def test_the_editor_timing_works(qapp):

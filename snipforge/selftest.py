@@ -336,10 +336,11 @@ def _speed() -> str:
     library = perf.big_library(SPEED_SNIPS)
     measured = {"snip_to_editor_s": editor, "library_open_s": library["open_s"],
                 "library_refresh_s": library["refresh_s"]}
-    problems = perf.over_budget(measured)
+    problems = perf.over_budget(measured, perf.library_budgets(library["plain_read_s"]))
     if problems:
-        raise RuntimeError("; ".join(problems))
-    return ", ".join(f"{name} {value}" for name, value in measured.items())
+        raise RuntimeError("; ".join(problems) + f" (the plain read took {library['plain_read_s']} s here)")
+    return ", ".join(f"{name} {value}" for name, value in measured.items()) + \
+        f" (the plain read: {library['plain_read_s']} s)"
 
 
 def _tls() -> str:
