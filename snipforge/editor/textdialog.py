@@ -1,8 +1,10 @@
 """Dialog showing text grabbed from a snip."""
 from __future__ import annotations
 
-from PySide6.QtGui import QFont, QGuiApplication
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
+
+from ..fonts import mono_font
 
 
 class GrabbedTextDialog(QDialog):
@@ -15,7 +17,7 @@ class GrabbedTextDialog(QDialog):
                       if text else "No text was found in this snip.")
         layout.addWidget(note)
         self._edit = QPlainTextEdit(text)
-        self._edit.setFont(QFont("Consolas", 10))
+        self._edit.setFont(mono_font(10))
         layout.addWidget(self._edit, 1)
         buttons = QHBoxLayout()
         buttons.addStretch(1)

@@ -33,8 +33,11 @@ a = Analysis(
     [str(ROOT / "packaging" / "snipforge_main.py")],
     pathex=[str(ROOT)],
     datas=[(str(ROOT / "assets" / "snipforge.ico"), "assets")],  # license files are copied by scripts/build.py
-    # Qt Multimedia is imported only when needed (snipforge/video), so it's named here.
-    hiddenimports=["PySide6.QtMultimedia"] + ([] if MAC else [
+    # Qt Multimedia is imported only when needed (snipforge/video), so it's named here, as are the
+    # platform halves (_<name>_mac.py) and the PyObjC frameworks they use on a Mac.
+    hiddenimports=["PySide6.QtMultimedia"] + ([
+        "objc", "Quartz", "snipforge._screen_access_mac",
+    ] if MAC else [
         "winrt.windows.media.ocr", "winrt.windows.graphics.imaging", "winrt.windows.storage.streams",
         "winrt.windows.foundation", "winrt.windows.foundation.collections", "winrt.windows.globalization",
         "win32com.shell", "win32com.client",

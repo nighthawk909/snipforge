@@ -1,15 +1,16 @@
-"""Owns the active theme: reads the preferences, follows Windows light/dark, applies it app-wide."""
+"""Owns the active theme: reads the preferences, follows Windows' (or macOS's) light/dark, applies
+it app-wide."""
 from __future__ import annotations
 
 import logging
 import os
-import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
+from ..bundle import cache_dir
 from ..settings import app_settings
 from . import styles, titlebar
 from .packs import ThemePack, discover_packs, pack_folders
@@ -21,9 +22,9 @@ MODE_KEY = "appearance/theme"
 ACCENT_KEY = "appearance/accent"
 PREFERENCES = ("system", "light", "dark")
 def _asset_dir() -> Path:
-    base = os.environ.get("LOCALAPPDATA")
-    root = Path(base) / "SnipForge" / "cache" if base else Path(tempfile.gettempdir()) / "SnipForge"
-    return root / "theme"
+    """Where the stylesheet's little SVGs are written: %LOCALAPPDATA%\\SnipForge\\cache\\theme, or
+    ~/Library/Caches/SnipForge/theme on a Mac."""
+    return cache_dir() / "theme"
 
 
 ASSET_DIR = _asset_dir()
