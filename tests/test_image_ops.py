@@ -2,7 +2,7 @@
 import itertools
 
 import pytest
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -79,12 +79,23 @@ def test_points_land_on_the_same_pixels_as_the_image(marked):
 
 
 def test_geometry_round_trips_and_rejects_nonsense():
+    original = QSize(640, 480)
     g = ImageGeometry(640, 480, 3, True)
-    assert ImageGeometry.from_dict(g.to_dict()) == g
+    assert ImageGeometry.from_dict(g.to_dict(), original) == g
     for bad in (None, [], {"turns": 4, "size": [10, 10]}, {"turns": 1.0, "size": [10, 10]},
                 {"mirrored": "yes", "size": [10, 10]}, {"size": [0, 10]}, {"size": [10]},
                 {"size": [100000, 10]}, {"size": [10000, 10000]}, {"size": ["10", 10]}):
-        assert ImageGeometry.from_dict(bad) is None, bad
+        assert ImageGeometry.from_dict(bad, original) is None, bad
+
+
+def test_a_capture_bigger_than_the_limits_can_still_turn(qapp):
+    tall = QImage(100, image_ops.MAX_SIDE + 2000, QImage.Format_ARGB32)  # a long scrolling capture
+    tall.fill(QColor("white"))
+    c = Canvas(tall)
+    c.rotate_image(True)
+    clone = Canvas(tall)
+    clone.load_document(c.to_document())
+    assert clone.base_image.size().toTuple() == (image_ops.MAX_SIDE + 2000, 100)
 
 
 # --- rotate and flip on the canvas ---------------------------------------------------------
@@ -229,6 +240,12 @@ def test_shrinking_then_growing_back_is_the_original_pixels(marked):
 def test_growing_never_makes_a_pixelation_finer(marked):
     style = image_ops.scaled_style("pixelate", Style(width=4).to_dict(), 3.0)
     assert (4 + 2.5 * style["width"]) >= (4 + 2.5 * 4) * 3 - 1e-6
+    for sx, sy in ((4, 0.25), (1, 3), (1.1, 1.1), (0.3, 2.7)):  # either axis, and the block rounds down
+        for kind, (a, b) in image_ops.STRENGTH.items():
+            for strength in (1, 4, 13.7):
+                width = image_ops.scaled_style(kind, Style(width=strength).to_dict(), sx, sy)["width"]
+                block = int(a + b * width) if kind == "pixelate" else a + b * width
+                assert block >= (a + b * strength) * max(sx, sy) - 1e-6, (kind, sx, sy, strength)
     shrunk = image_ops.scaled_style("blur", Style(width=4).to_dict(), 0.1)
     assert shrunk["width"] >= 1.0
     text = image_ops.scaled_style("text", Style(font_size=18).to_dict(), 0.1)
@@ -267,10 +284,78 @@ def test_untouched_documents_have_no_image_entry(marked):
     assert "image" not in c.to_document()
 
 
-def test_a_damaged_image_entry_is_ignored(marked):
+@pytest.mark.parametrize("doc", [
+    {"image": {"turns": 9, "size": [10, 10]}},  # damaged
+    {"image": {"turns": 1, "size": [100, 200], "crop_mode": "new"}, "version": 2},  # from a newer version
+])
+def test_markup_from_a_document_this_version_cant_draw_is_left_alone(marked, doc):
+    from snipforge.editor.canvas import UnsupportedDocument
+    arrow = {"kind": "arrow", "pos": [0, 0], "style": {}, "p1": [90, 10], "p2": [10, 10]}
     c = Canvas(marked)
-    c.load_document({"image": {"turns": 9, "size": [10, 10]}, "items": []})
-    assert c.base_image.size() == marked.size()
+    with pytest.raises(UnsupportedDocument):
+        c.load_document({**doc, "items": [arrow]})
+    assert c.base_image.size() == marked.size() and c.annotations() == []
+
+
+def test_editor_opens_such_a_document_without_autosave(qapp, tmp_path, marked):
+    from snipforge.editor.window import EditorWindow
+    from snipforge.library import Library
+    lib = Library(tmp_path)
+    entry = lib.create(marked)
+    doc = {"image": {"turns": 9, "size": [10, 10]}, "items": []}
+    w = EditorWindow(marked, lib, entry, doc)
+    w.show()
+    w.canvas.rotate_image(True)
+    w.close()
+    assert not (entry.path / "document.json").exists() and w.tray.saved_text() == "Autosave off"
+
+
+def test_a_missing_crop_after_a_turn_is_the_whole_image(marked):
+    c = Canvas(marked)
+    c.load_document({"image": {"turns": 1, "mirrored": False, "size": [100, 200]}, "crop": [], "items": []})
+    assert c.crop_rect() == QRectF(0, 0, 100, 200)
+    assert c.render_image().size().toTuple() == (100, 200)
+
+
+def test_markup_from_a_newer_version_blocks_turning(editor):
+    canvas = editor.canvas
+    canvas.load_document({"items": [{"kind": "laser", "pos": [0, 0], "style": {}}]})
+    with pytest.raises(ValueError):
+        canvas.rotate_image(True)
+    editor.image_action("rotate_right")
+    assert "newer SnipForge" in editor.statusBar().currentMessage()
+    assert canvas.render_image().size().toTuple() == (200, 100) and canvas.undo_stack.count() == 0
+
+
+def test_shrinking_never_drops_markup_from_the_saved_document(marked):
+    c = make_canvas(marked)
+    drag(c, "blur", (10, 10), (40, 99))
+    drag(c, "arrow", (100, 50), (120, 50))
+    drag(c, "stamp", (150, 20), (170, 40))
+    callout = drag(c, "callout", (60, 20), (130, 60))
+    callout.text.setPlainText("Hi")
+    c.commit_text()
+    before = sorted(s["kind"] for s in c.to_document()["items"])
+    c.resize_image(20, 10)
+    assert sorted(s["kind"] for s in c.to_document()["items"]) == before
+
+
+def test_a_resize_to_the_same_size_does_nothing(marked):
+    c = make_canvas(marked)
+    c.resize_image(200, 100)
+    assert c.undo_stack.count() == 0
+
+
+def test_text_stays_centred_when_resized(marked):
+    for size in ((100, 50), (400, 200)):
+        c = make_canvas(marked)
+        text = TextItem(Style(), "Centred note")
+        text.setPos(60, 40)
+        c._scene.addItem(text)
+        k = size[0] / 200
+        center = text.sceneBoundingRect().center() * k
+        c.resize_image(*size)
+        assert (text.sceneBoundingRect().center() - center).manhattanLength() < 2, size
 
 
 # --- the panel buttons, shortcuts and the Resize dialog ------------------------------------
@@ -322,6 +407,17 @@ def test_resize_dialog_keeps_the_aspect_ratio_by_default(qapp):
     dialog.keep_ratio.setChecked(False)
     dialog.height_box.setValue(100)
     assert dialog.result_size() == (100, 300)
+
+
+def test_resize_dialog_switching_units_keeps_the_exact_size(qapp):
+    from snipforge.editor.resize_dialog import ResizeDialog
+    dialog = ResizeDialog(333, 166)
+    dialog.show()
+    assert QApplication.focusWidget() in (dialog.width_box, dialog.width_box.lineEdit()) or not dialog.isActiveWindow()
+    dialog.set_unit("percent")
+    dialog.set_unit("pixels")
+    assert dialog.result_size() == (333, 166)
+    dialog.close()
 
 
 def test_resize_dialog_refuses_too_big(qapp):

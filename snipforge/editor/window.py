@@ -30,7 +30,7 @@ from ..library import Entry, Library
 from ..settings import app_settings
 from . import beautify
 from .beautify import DEFAULT_STYLE, apply_beautify
-from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas
+from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
 from .panel import PropertiesPanel
 from .resize_dialog import ResizeDialog
@@ -81,8 +81,13 @@ class EditorWindow(QMainWindow):
         self._beautify = beautify.enabled()
 
         self.canvas = Canvas(image, load_tool_styles(self._settings))
+        unsupported = False
         if document:
-            self.canvas.load_document(document)
+            try:
+                self.canvas.load_document(document)
+            except UnsupportedDocument as exc:
+                log.warning("Opening snip without its markup: %s", exc)
+                self._autosave_enabled, unsupported = False, True
         self.commands = CommandBar()
         self.panel = PropertiesPanel()
         self.tray = Tray()
@@ -132,6 +137,11 @@ class EditorWindow(QMainWindow):
             self.tray.set_saved("Saved", "Changes save to your library automatically")
         elif entry is not None:
             self.tray.set_saved("Autosave off", "Use Save or Copy to keep what you change")
+        if unsupported:
+            self.tray.set_saved("Autosave off", "This snip's markup was saved by a newer SnipForge. It opens without "
+                                "it, and autosave is off so the saved file isn't changed.")
+            self.statusBar().showMessage("Saved by a newer SnipForge: opened without its markup, and autosave is off",
+                                         10000)
 
         self._update_title()
         self._refresh_props()
@@ -289,7 +299,10 @@ class EditorWindow(QMainWindow):
     def image_action(self, action: str) -> None:
         """Turn, flip or resize the snip (the panel's Image buttons and Ctrl+R)."""
         canvas = self.canvas
-        if action == "resize":
+        if not canvas.can_change_image():
+            self.statusBar().showMessage("This snip has markup from a newer SnipForge, so it can't be turned, "
+                                         "flipped or resized here", 6000)
+        elif action == "resize":
             self._resize()
         elif action in ("rotate_left", "rotate_right"):
             canvas.rotate_image(clockwise=action == "rotate_right")

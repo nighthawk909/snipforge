@@ -16,8 +16,10 @@ from dataclasses import dataclass, replace
 from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF, Qt
 from PySide6.QtGui import QImage, QTransform
 
-MAX_SIDE = 16384  # pixels on either side
-MAX_PIXELS = 64_000_000  # 256 MB as 32-bit pixels: more than an 8K screenshot, less than runs out of memory
+# The biggest image a rotate or resize makes: the same as a scrolling capture's limits (stitch.py). A
+# capture that's bigger still can always be turned and flipped, and resized up to its own size.
+MAX_SIDE = 30_000
+MAX_PIXELS = 60_000_000
 UPRIGHT_KINDS = {"text", "callout", "stamp", "step"}  # move with the image but never turn
 STRENGTH = {"pixelate": (4.0, 2.5), "blur": (3.0, 1.5)}  # effect size = a + b * strength (items.EffectItem)
 MIN_FONT = 6
@@ -44,8 +46,8 @@ class ImageGeometry:
         return {"turns": self.turns, "mirrored": self.mirrored, "size": [self.width, self.height]}
 
     @staticmethod
-    def from_dict(data) -> ImageGeometry | None:
-        """None for anything that isn't a geometry this version can draw."""
+    def from_dict(data, original: QSize) -> ImageGeometry | None:
+        """None for anything that isn't a geometry this version can draw from `original`."""
         if not isinstance(data, dict):
             return None
         turns, mirrored, size = data.get("turns", 0), data.get("mirrored", False), data.get("size")
@@ -53,12 +55,16 @@ class ImageGeometry:
             return None
         if not isinstance(size, list) or len(size) != 2 or not all(type(v) is int for v in size):
             return None
-        return ImageGeometry(size[0], size[1], turns, mirrored) if fits(*size) else None
+        return ImageGeometry(size[0], size[1], turns, mirrored) if fits(*size, original) else None
 
 
-def fits(width: int, height: int) -> bool:
-    """Whether an image this size is one SnipForge will make."""
-    return 1 <= width <= MAX_SIDE and 1 <= height <= MAX_SIDE and width * height <= MAX_PIXELS
+def fits(width: int, height: int, original: QSize | None = None) -> bool:
+    """Whether SnipForge makes an image this size (from `original`, which may itself be bigger)."""
+    side, pixels = MAX_SIDE, MAX_PIXELS
+    if original is not None:
+        side = max(side, original.width(), original.height())
+        pixels = max(pixels, original.width() * original.height())
+    return 1 <= width <= side and 1 <= height <= side and width * height <= pixels
 
 
 def render(original: QImage, geometry: ImageGeometry) -> QImage:
@@ -84,11 +90,6 @@ class Remap:
     transform: QTransform
     sx: float = 1.0
     sy: float = 1.0
-
-    @property
-    def scale(self) -> float:
-        """One factor for things that have a single size: line widths, font sizes."""
-        return math.sqrt(self.sx * self.sy)
 
 
 def rotate(geometry: ImageGeometry, clockwise: bool) -> tuple[ImageGeometry, Remap]:
@@ -123,21 +124,23 @@ def snap(rect: QRectF, bounds: QRectF) -> QRectF:
 # ---------------------------------------------------------------------------
 # Markup
 # ---------------------------------------------------------------------------
-def scaled_style(kind: str, style: dict, k: float) -> dict:
+def scaled_style(kind: str, style: dict, sx: float, sy: float | None = None) -> dict:
     """Line widths and font sizes grow and shrink with the image, so it looks the same. A blur or
-    pixelation keeps covering the same share of what's under it (never finer than before when
-    the image grows, so nothing it hid becomes readable)."""
-    if k == 1.0:
+    pixelation keeps covering at least as much of what's under it along both axes, so nothing it
+    hid ever becomes readable."""
+    sy = sx if sy is None else sy
+    if sx == sy == 1.0:
         return style
     out = dict(style)
     width = float(style.get("width", 4.0))
     if kind in STRENGTH:
         a, b = STRENGTH[kind]
-        out["width"] = max(1.0, ((a + b * width) * k - a) / b)
+        block = math.ceil((a + b * width) * max(sx, sy) - 1e-9)  # EffectItem rounds its block down
+        out["width"] = max(1.0, (block - a) / b + 1e-6)
     else:
-        out["width"] = max(1.0, width * k)
+        out["width"] = max(1.0, width * math.sqrt(sx * sy))
     if "font_size" in style:
-        out["font_size"] = max(MIN_FONT, round(int(style["font_size"]) * k))
+        out["font_size"] = max(MIN_FONT, round(int(style["font_size"]) * math.sqrt(sx * sy)))
     return out
 
 
@@ -146,17 +149,18 @@ def mapped_state(item, remap: Remap) -> dict:
     state = item.get_state()
     kind, t = state["kind"], remap.transform
     pos = QPointF(*state["pos"])
-    state["style"] = scaled_style(kind, state["style"], remap.scale)
+    old_style = state["style"]
+    state["style"] = scaled_style(kind, old_style, remap.sx, remap.sy)
     if kind in UPRIGHT_KINDS:
-        _map_upright(item, state, pos, remap)
+        _map_upright(item, state, pos, remap, old_style)
     elif "size" in state:
         rect = t.mapRect(QRectF(pos, QSizeF(*state["size"])))
         state["pos"], state["size"] = [rect.x(), rect.y()], [rect.width(), rect.height()]
     elif "p1" in state:
         new_pos = t.map(pos)
-        for key in ("p1", "p2"):
-            point = t.map(pos + QPointF(*state[key])) - new_pos
-            state[key] = [point.x(), point.y()]
+        p1, p2 = (t.map(pos + QPointF(*state[key])) - new_pos for key in ("p1", "p2"))
+        p2 = _long_enough(p1, p2)
+        state["p1"], state["p2"] = [p1.x(), p1.y()], [p2.x(), p2.y()]
         state["pos"] = [new_pos.x(), new_pos.y()]
     elif "points" in state:
         new_pos = t.map(pos)
@@ -166,10 +170,43 @@ def mapped_state(item, remap: Remap) -> dict:
     else:
         new_pos = t.map(pos)
         state["pos"] = [new_pos.x(), new_pos.y()]
+    if "size" in state:
+        _big_enough(item, state)
     return state
 
 
-def _map_upright(item, state: dict, pos: QPointF, remap: Remap) -> None:
+MIN_LINE = 6.0  # a shrunk line is kept at least this long (LineItem drops lines under 4 px)
+
+
+def _long_enough(p1: QPointF, p2: QPointF) -> QPointF:
+    """A line shrunk to almost nothing would be dropped when saved: keep it MIN_LINE long."""
+    dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
+    length = math.hypot(dx, dy)
+    if length >= MIN_LINE:
+        return p2
+    if length < 1e-6:
+        return QPointF(p1.x() + MIN_LINE, p1.y())
+    return QPointF(p1.x() + dx * MIN_LINE / length, p1.y() + dy * MIN_LINE / length)
+
+
+def _big_enough(item, state: dict) -> None:
+    """A box shrunk below its smallest size would be dropped when saved (and a redaction with it):
+    grow it back to that size around its centre."""
+    min_w, min_h = getattr(item, "min_size", (6.0, 6.0))
+    x, y = state["pos"]
+    w, h = state["size"]
+    new_w, new_h = max(w, min_w), max(h, min_h)
+    if getattr(item, "always_square", False):
+        new_w = new_h = max(new_w, new_h)
+    if (new_w, new_h) == (w, h):
+        return
+    state["pos"] = [x - (new_w - w) / 2, y - (new_h - h) / 2]
+    state["size"] = [new_w, new_h]
+    if "tail" in state:  # the callout's pointer stays where it pointed
+        state["tail"] = [state["tail"][0] + (new_w - w) / 2, state["tail"][1] + (new_h - h) / 2]
+
+
+def _map_upright(item, state: dict, pos: QPointF, remap: Remap, old_style: dict) -> None:
     """Keep the item's centre over the same spot, scaled but not turned."""
     t = remap.transform
     if "size" in state:  # callout, stamp: a box
@@ -186,7 +223,10 @@ def _map_upright(item, state: dict, pos: QPointF, remap: Remap) -> None:
     elif state["kind"] == "text":  # positioned by its top-left corner; its size comes from the font
         box = item.boundingRect()
         center = t.map(pos + box.center())
-        top_left = center - QPointF(box.width() * remap.scale / 2, box.height() * remap.scale / 2)
+        margin = 2 * item.document().documentMargin()  # doesn't scale with the font
+        k = state["style"]["font_size"] / max(1, int(old_style["font_size"]))
+        w, h = (box.width() - margin) * k + margin, (box.height() - margin) * k + margin
+        top_left = center - QPointF(w / 2, h / 2)
         state["pos"] = [top_left.x(), top_left.y()]
     else:  # step: positioned by its centre
         center = t.map(pos)

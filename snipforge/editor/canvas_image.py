@@ -11,6 +11,8 @@ from .commands import ImageCommand
 from .image_ops import ImageGeometry, Remap
 from .items import EffectItem, SpotlightItem
 
+NEWER_MARKUP = "This snip has markup from a newer SnipForge, which this version can't turn or resize along with it."
+
 
 class ImageMixin:
     """For the Canvas. Uses its `original_image`, `base_image`, `_geometry`, `_image_rect`,
@@ -27,11 +29,16 @@ class ImageMixin:
         geometry, remap = image_ops.flip(self._geometry, horizontal)
         self._change_image("Flip horizontal" if horizontal else "Flip vertical", geometry, remap)
 
+    def can_change_image(self) -> bool:
+        """False while the snip has markup from a newer SnipForge: this version can't move it."""
+        return not self._unparsed
+
     def can_resize(self, width: int, height: int) -> bool:
         """Whether resize_image(width, height) makes an image SnipForge will make."""
         if width < 1 or height < 1:
             return False
-        return image_ops.fits(width, height) and image_ops.fits(*self._full_size(width, height))
+        original = self.original_image.size()
+        return image_ops.fits(width, height, original) and image_ops.fits(*self._full_size(width, height), original)
 
     def _full_size(self, width: int, height: int) -> tuple[int, int]:
         """The whole image's size when the crop becomes `width` x `height`."""
@@ -42,10 +49,14 @@ class ImageMixin:
     def resize_image(self, width: int, height: int) -> None:
         """Make the snip as you'd export it (the crop, if there is one) `width` x `height` pixels.
         Raises ValueError for a size SnipForge won't make."""
+        if not self.can_change_image():
+            raise ValueError(NEWER_MARKUP)
         self._finish_gestures()
         if not self.can_resize(width, height):
             raise ValueError(f"SnipForge doesn't make {width} x {height} images")
         crop = self._crop_rect
+        if crop.size().toSize().toTuple() == (width, height):
+            return  # already that size
         full_w, full_h = self._full_size(width, height)
         geometry, remap = image_ops.resize(self._geometry, full_w, full_h)
         left = min(round(crop.x() * remap.sx), full_w - width)
@@ -75,6 +86,8 @@ class ImageMixin:
             self.set_tool("select")  # leaving Crop applies it
 
     def _change_image(self, text: str, geometry: ImageGeometry, remap: Remap, crop: QRectF | None = None) -> None:
+        if not self.can_change_image():
+            raise ValueError(NEWER_MARKUP)
         self._finish_gestures()
         if crop is None:
             bounds = QRectF(0, 0, geometry.width, geometry.height)

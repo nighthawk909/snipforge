@@ -32,6 +32,7 @@ class ResizeDialog(QDialog):
         self._allowed = allowed
         self._unit = "pixels"
         self._syncing = False
+        self._exact: tuple[int, int] | None = None  # the pixel size, kept while you only switch units
 
         column = QVBoxLayout(self)
         column.setSizeConstraint(QLayout.SetFixedSize)  # grows with the warning instead of squashing the boxes
@@ -73,12 +74,15 @@ class ResizeDialog(QDialog):
         self.width_box.valueChanged.connect(lambda v: self._edited(self.width_box, v))
         self.height_box.valueChanged.connect(lambda v: self._edited(self.height_box, v))
         self._load(width, height)
+        self.width_box.setFocus()
+        self.width_box.selectAll()
 
     # ------------------------------------------------------------------ units
     def set_unit(self, unit: str) -> None:
         if unit == self._unit:
             return
         w, h = self.result_size()
+        self._exact = (w, h)  # switching back and forth never rounds the size away
         self._unit = unit
         self.units.set_value(unit)
         self._load(w, h)
@@ -102,6 +106,7 @@ class ResizeDialog(QDialog):
     def _edited(self, box: QSpinBox, value: int) -> None:
         if self._syncing:
             return
+        self._exact = None
         if self.keep_ratio.isChecked():
             self._syncing = True
             other = self.height_box if box is self.width_box else self.width_box
@@ -116,6 +121,8 @@ class ResizeDialog(QDialog):
 
     def result_size(self) -> tuple[int, int]:
         """The new size in pixels."""
+        if self._exact is not None:
+            return self._exact
         w, h = self.width_box.value(), self.height_box.value()
         if self._unit == "percent":
             return max(1, round(self._width * w / 100)), max(1, round(self._height * h / 100))
@@ -123,7 +130,7 @@ class ResizeDialog(QDialog):
 
     def _refresh(self) -> None:
         w, h = self.result_size()
-        ok = self._allowed(w, h)
+        ok = bool(self._allowed(w, h))
         self.ok_button.setEnabled(ok)
         if ok:
             self._result.setText(f"New size {w} × {h} px")

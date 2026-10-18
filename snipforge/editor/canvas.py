@@ -27,6 +27,11 @@ from .style import DEFAULT_TOOL_STYLES, Style
 from .text_items import EditableText
 
 DUPLICATE_OFFSET = 16.0
+DOCUMENT_VERSION = 1  # documents from newer versions are opened read-only (see load_document)
+
+
+class UnsupportedDocument(ValueError):
+    """Saved by a newer SnipForge, in a way this version can't show correctly."""
 
 
 class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
@@ -300,9 +305,18 @@ class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
         return doc
 
     def load_document(self, doc: dict) -> None:
-        geometry = ImageGeometry.from_dict(doc.get("image")) if "image" in doc else None
-        if geometry is not None:
+        """Raises UnsupportedDocument, before changing anything, for a document whose markup this
+        version would put in the wrong place. The caller opens the snip without it and doesn't
+        autosave, so the file and its rendered image aren't overwritten."""
+        version = doc.get("version", 1)
+        if not isinstance(version, int) or version > DOCUMENT_VERSION:
+            raise UnsupportedDocument(f"document version {version!r} is newer than this SnipForge")
+        if "image" in doc:
+            geometry = ImageGeometry.from_dict(doc["image"], self.original_image.size())
+            if geometry is None:
+                raise UnsupportedDocument(f"can't draw the snip as saved: {doc['image']!r}"[:200])
             self.set_image_geometry(geometry)
+            self.set_crop_rect(QRectF(self._image_rect))  # until the saved crop says otherwise
         for state in doc.get("items", []):
             try:
                 self._scene.addItem(self._adopt(create_item(state, self.base_image, self._image_rect)))
