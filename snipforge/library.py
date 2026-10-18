@@ -246,11 +246,15 @@ def in_parallel(work, items: list) -> list:
         return list(pool.map(work, items))
 
 
-def _snapshot(folder: os.DirEntry) -> Snapshot | None:
+_UNREADABLE = object()  # a folder that couldn't be listed this time (locked, a share that hiccuped)
+
+
+def _snapshot(folder: os.DirEntry):
+    """The snip in `folder`, None if it holds none, or _UNREADABLE (never remembered: tried again)."""
     try:
         files = {f.name: f for f in os.scandir(folder.path)}
     except OSError:
-        return None
+        return _UNREADABLE
     kind = _kind(files)
     if kind is None:
         return None
@@ -262,7 +266,8 @@ class Library:
     def __init__(self, root: Path = DEFAULT_ROOT) -> None:
         self.root = Path(root)
         self._meta_lock = threading.Lock()  # the text indexer writes from its own thread
-        self._snapshots: dict[str, tuple[int, Snapshot | None]] = {}  # scan()'s last look at each folder
+        # scan()'s last look at each folder: (its time, trusted, its snip or None)
+        self._snapshots: dict[str, tuple[int, bool, Snapshot | None]] = {}
 
     def create(self, image: QImage, source=None) -> Entry:
         """`source` is the window the snip came from (a winrects.WindowInfo), if known."""
@@ -371,31 +376,44 @@ class Library:
 
         A snip's folder is listed again only when its own modification time says something in it
         changed: every write here renames a finished file into place, which updates it. Folders
-        changed in the last few seconds are always listed (some file systems keep coarse times)."""
+        changed within a few seconds of being listed are listed again next time (some file systems
+        keep coarse times, so a second change in the same tick wouldn't move the time), and a folder
+        that couldn't be listed is tried again. forget_listings() starts afresh (the Library's F5),
+        for changes made outside SnipForge that don't rename files into place."""
         try:
             with os.scandir(self.root) as listing:
                 folders = [d for d in listing if d.is_dir()]
         except OSError:
             return []
-        now, known, current, to_list = time.time(), self._snapshots, {}, []
+        known, current, to_list = self._snapshots, {}, []
         for folder in folders:
             try:
                 changed = folder.stat().st_mtime_ns  # from the listing itself on Windows: no extra call
             except OSError:
                 continue
             cached = known.get(folder.name)
-            if cached is not None and cached[0] == changed and now - changed / 1e9 > SETTLED_S:
+            if cached is not None and cached[0] == changed and cached[1]:
                 current[folder.name] = cached
             else:
                 to_list.append((folder, changed))
         # Listing a folder waits on the disk (and antivirus), not on Python: a few at a time
+        listed_at = time.time()
         listed = in_parallel(lambda item: _snapshot(item[0]), to_list)
+        found = [snapshot for _changed, _settled, snapshot in current.values() if snapshot is not None]
         for (folder, changed), snapshot in zip(to_list, listed, strict=True):
-            current[folder.name] = (changed, snapshot)
+            if snapshot is _UNREADABLE:
+                continue  # not remembered, so it's listed again next time
+            settled = listed_at - changed / 1e9 > SETTLED_S  # trusted only once its time had settled
+            current[folder.name] = (changed, settled, snapshot)
+            if snapshot is not None:
+                found.append(snapshot)
         self._snapshots = current
-        found = [snapshot for _changed, snapshot in current.values() if snapshot is not None]
         found.sort(key=lambda s: s.entry.id, reverse=True)
         return found
+
+    def forget_listings(self) -> None:
+        """The next scan() lists every folder again."""
+        self._snapshots = {}
 
     def entries(self, limit: int | None = None) -> list[Entry]:
         """Snips only (not recordings), newest first: what callers that open images expect."""

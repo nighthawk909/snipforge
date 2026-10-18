@@ -58,6 +58,8 @@ def test_starting_up_is_within_budget():
         "print(json.dumps({'startup_s': r['startup_s'], 'startup_memory_mb': r['memory_mb'],"
         " 'heavy': r['heavy_modules']}))")
     assert measured.pop("heavy") == []
+    if perf.memory_budget() is None:  # a Mac: peak resident size, reported but not budgeted yet
+        measured.pop("startup_memory_mb")
     assert perf.over_budget(measured) == []
 
 
@@ -66,11 +68,19 @@ def test_over_budget_names_what_is_over():
         [f"library_open_s is 9.0 (budget {perf.BUDGETS['library_open_s']})"]
 
 
-def test_memory_is_measured_on_every_platform(on_a_mac):
+def test_memory_is_measured_on_every_platform(on_a_mac, monkeypatch):
     assert 5 < perf.memory_mb() < 4000
     on_a_mac(perf)
-    if sys.platform != "darwin":
-        pytest.skip("macOS's resource module")
+
+    class Usage:
+        ru_maxrss = 80 * 1024 * 1024  # bytes on macOS
+
+    fake = type(sys)("resource")
+    fake.RUSAGE_SELF = 0
+    fake.getrusage = lambda who: Usage
+    monkeypatch.setitem(sys.modules, "resource", fake)
+    assert perf.memory_mb() == 80.0
+    assert perf.memory_budget() is None and perf.module_budget() is None
 
 
 # --- the packaged self-test's budgets ------------------------------------------------------------
@@ -84,6 +94,10 @@ def test_the_self_test_fails_when_start_up_loaded_too_much(monkeypatch):
         selftest._startup_imports()
     monkeypatch.setattr(perf, "module_budget", lambda: None)  # a Mac: only the heavy ones checked
     assert "none of the heavy ones" in selftest._startup_imports()
+
+
+def test_the_self_test_checks_https_can_work():
+    assert selftest._tls().startswith("https via ")
 
 
 def test_the_self_test_times_the_editor_and_a_big_library(monkeypatch):
@@ -130,7 +144,7 @@ def test_the_library_lists_a_snips_folder_again_only_when_it_changed(snips, monk
     assert next(s for s in again if s.entry.id == entry.id).meta_stamp != first[5].meta_stamp
 
 
-def test_a_new_snip_and_a_deleted_one_show_at_once(snips, monkeypatch, white_image):
+def test_a_new_snip_and_a_deleted_one_show_at_once(snips, white_image):
     snips.scan()
     gone = snips.scan()[0].entry
     import shutil
@@ -148,6 +162,70 @@ def test_a_folder_changed_just_now_is_always_listed(snips, monkeypatch):
     snips.scan()
     snips.scan()
     assert listed == [folder.name, folder.name]
+
+
+def test_a_folder_that_could_not_be_listed_is_tried_again(snips, monkeypatch):
+    folder = sorted(snips.root.iterdir())[3]
+    real = library_module.os.scandir
+    failed = []
+
+    def locked_once(path):
+        if str(path) == str(folder) and not failed:
+            failed.append(path)
+            raise PermissionError(32, "being used by another process")
+        return real(path)
+    monkeypatch.setattr(library_module.os, "scandir", locked_once)
+    assert folder.name not in [s.entry.id for s in snips.scan()]  # locked for a moment (antivirus, a sync)
+    assert folder.name in [s.entry.id for s in snips.scan()]  # back as soon as it can be read
+
+
+def test_a_folder_listed_just_after_it_changed_is_listed_again(snips, monkeypatch):
+    """A second change in the same tick of a coarse clock wouldn't move the folder's time, so a
+    listing taken within a few seconds of a change isn't trusted later."""
+    folder = sorted(snips.root.iterdir())[0]
+    os.utime(folder, None)  # changed just now
+    snips.scan()
+    later = time.time() + 60
+    monkeypatch.setattr(library_module.time, "time", lambda: later)  # long after: still not trusted
+    listed = counting(monkeypatch)
+    snips.scan()
+    assert listed == [folder.name]
+    listed.clear()
+    snips.scan()
+    assert listed == []  # this listing came long after the change: trusted from now on
+
+
+def test_f5_reads_changes_made_outside_snipforge(snips, qapp):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from snipforge.home import HomeWindow
+    home = HomeWindow(snips, lambda: None, lambda _id: None)
+    home.show()
+    entry = home._items[0].entry
+    folder_time = os.stat(entry.path).st_mtime_ns
+    meta = entry.path / "meta.json"
+    meta.write_text(json.dumps({"app": "Edited by hand", "tags": []}), encoding="utf-8")  # in place, no rename
+    os.utime(entry.path, ns=(folder_time, folder_time))  # the folder's time as it was (a restore, say)
+    home.refresh()
+    assert next(i for i in home._items if i.entry.id == entry.id).meta.app == "Contoso Analytics"  # not seen
+    home.activateWindow()
+    assert QTest.qWaitForWindowActive(home)  # window shortcuts need the window in front
+    QTest.keyClick(home, Qt.Key_F5)
+    assert next(i for i in home._items if i.entry.id == entry.id).meta.app == "Edited by hand"
+    home.close()
+
+
+def test_starring_a_snip_shows_after_the_library_reopens(snips, qapp):
+    from snipforge.home import HomeWindow
+    home = HomeWindow(snips, lambda: None, lambda _id: None)
+    home.show()
+    entry = home._items[7].entry
+    home.hide()
+    snips.update_meta(entry, favorite=True)  # from the editor, say
+    home.show()  # opening it again refreshes
+    assert next(i for i in home._items if i.entry.id == entry.id).meta.favorite
+    home.close()
 
 
 def test_the_library_window_reads_every_snips_details(snips, qapp):

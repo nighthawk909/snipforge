@@ -28,8 +28,10 @@ EXCLUDES = [
     # would otherwise bundle it (~27 MB, and the YAML and charset modules it brings).
     "numpy",
     # Python's own TLS and OpenSSL hashes (~6 MB with their OpenSSL): SnipForge goes online only
-    # through Qt's network stack, which brings its own; hashlib falls back to Python's built-in
-    # SHA-256, and asyncio (Windows OCR) runs without ssl. tests/test_packaging.py keeps it that way.
+    # through Qt's network stack (QNetworkAccessManager), whose TLS back-ends are separate (OpenSSL
+    # where the build finds it, else Windows' Schannel or macOS's Secure Transport; the self-test's
+    # "tls" check proves one works); hashlib falls back to Python's built-in SHA-256, and asyncio
+    # (Windows OCR) runs without ssl. tests/test_packaging.py keeps it that way.
     "ssl", "_ssl", "_hashlib",
     # zstd archives: zipfile (Report a problem) only writes deflate.
     "compression.zstd", "_zstd",

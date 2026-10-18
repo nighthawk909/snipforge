@@ -14,7 +14,6 @@ import argparse
 import json
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,5 +63,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    tempfile.tempdir = None
     sys.exit(main())

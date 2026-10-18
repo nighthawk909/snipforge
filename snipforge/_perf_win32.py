@@ -17,7 +17,7 @@ class _Counters(ctypes.Structure):
 def private_bytes() -> int:
     counters = _Counters()
     counters.cb = ctypes.sizeof(counters)
-    psapi = ctypes.WinDLL("psapi")
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32")
     kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]

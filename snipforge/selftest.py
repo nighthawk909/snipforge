@@ -311,8 +311,9 @@ def _recorder_process() -> str:
 
 
 def _startup_imports() -> str:
-    """Starting SnipForge loaded only what it needs: the editor, recording, text recognition and
-    the like load when they're first used (docs/PERFORMANCE.md). First, before other checks load them."""
+    """Importing SnipForge loaded only what it needs: the editor, recording, text recognition and
+    the like load when they're first used (docs/PERFORMANCE.md). First, before other checks load
+    them. (The test suite checks a whole start-up, windows and all; this checks the frozen app's.)"""
     from . import perf
 
     heavy = perf.heavy_modules()
@@ -324,18 +325,31 @@ def _startup_imports() -> str:
     return f"{len(sys.modules)} modules at start (budget {budget or 'none here'}), none of the heavy ones"
 
 
+SPEED_SNIPS = 500  # enough to show a slow Library, few enough for a CI machine's antivirus
+
+
 def _speed() -> str:
-    """A snip's editor, and the Library window over 1,000 snips, open within their budgets."""
+    """A snip's editor, and the Library window over SPEED_SNIPS snips, open within their budgets."""
     from . import perf
 
     editor = perf.open_editor_s()
-    library = perf.big_library(1000)
+    library = perf.big_library(SPEED_SNIPS)
     measured = {"snip_to_editor_s": editor, "library_open_s": library["open_s"],
                 "library_refresh_s": library["refresh_s"]}
     problems = perf.over_budget(measured)
     if problems:
         raise RuntimeError("; ".join(problems))
     return ", ".join(f"{name} {value}" for name, value in measured.items())
+
+
+def _tls() -> str:
+    """Updates download over https through Qt's network stack: it has a TLS back-end to do it with
+    (Python's own TLS isn't packaged; see packaging/snipforge.spec)."""
+    from PySide6.QtNetwork import QSslSocket
+
+    if not QSslSocket.supportsSsl():
+        raise RuntimeError(f"no TLS back-end (available: {QSslSocket.availableBackends()})")
+    return f"https via {QSslSocket.activeBackend()} (available: {', '.join(QSslSocket.availableBackends())})"
 
 
 def run(report_path: str) -> int:
@@ -358,6 +372,7 @@ def run(report_path: str) -> int:
     _check(results, "video", _video)
     _check(results, "video_editor", _video_editor)
     _check(results, "recorder_process", _recorder_process, required=windows)
+    _check(results, "tls", _tls)
     _check(results, "speed", _speed)
     passed = all(r["ok"] for r in results.values() if r["required"])
     report = {"version": __version__, "platform": sys.platform, "passed": passed, "checks": results}

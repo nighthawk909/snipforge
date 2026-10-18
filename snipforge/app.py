@@ -580,8 +580,12 @@ def about_text() -> str:
 
 
 def _load_editor() -> None:
-    """The editor's code, loaded once SnipForge is up rather than before it shows anything."""
-    from .editor import window  # noqa: F401
+    """The editor's code, loaded once SnipForge is up rather than before it shows anything. A
+    problem is logged now (the first snip would meet it again and say so)."""
+    try:
+        from .editor import window  # noqa: F401
+    except Exception:
+        log.exception("The editor couldn't be loaded")
 
 
 def _command_from_args(argv: list[str]) -> str:

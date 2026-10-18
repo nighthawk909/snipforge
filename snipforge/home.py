@@ -197,7 +197,7 @@ class HomeWindow(QMainWindow):
         return main
 
     def _build_shortcuts(self) -> None:
-        for keys, slot in ((QKeySequence.Find, self._focus_search),
+        for keys, slot in ((QKeySequence.Find, self._focus_search), (QKeySequence.Refresh, self.reload),
                            (QKeySequence.Delete, lambda: self._trash(self.grid.selected_ids())),
                            (QKeySequence.Copy, self._copy_current)):
             QShortcut(keys, self, slot)
@@ -229,6 +229,12 @@ class HomeWindow(QMainWindow):
             items.append(Item(snap.entry, created, meta, snap.edited_at, duration))
         self._items = items
         self._after_change()
+
+    def reload(self) -> None:
+        """F5: read the whole Library folder again, changes made outside SnipForge included."""
+        self._library.forget_listings()
+        self._meta_cache.clear()
+        self.refresh()
 
     def update_entry(self, entry_id: str) -> None:
         """One snip changed (taken, edited, starred, tagged or removed): read just that one again."""
