@@ -163,9 +163,14 @@ class RemoteRecorder(QObject):
         else:
             self._send("cancel")
 
-    def _send(self, kind: str) -> None:
+    def move_bubble(self, rect, shape: str) -> None:
+        """The webcam's bubble moved, changed shape or size (rect in physical pixels): the recording
+        draws the camera there from now on."""
+        self._send("bubble", rect=list(rect), shape=shape)
+
+    def _send(self, kind: str, **fields) -> None:
         if self.channel is not None and self.state not in OVER:
-            self.channel.send(kind)
+            self.channel.send(kind, **fields)
             self.channel.flush()  # a stop sent as SnipForge quits must leave before it does
 
     # --- the channel -----------------------------------------------------------------------------

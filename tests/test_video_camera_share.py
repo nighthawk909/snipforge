@@ -143,3 +143,66 @@ def test_a_closed_writer_leaves_a_reader_with_its_last_picture(qapp):
 
     assert reader.latest().pixelColor(0, 0).name() == "#445566"
     reader.close()
+
+
+# --- in the recording -----------------------------------------------------------------------------
+
+def test_with_the_camera_on_the_recordings_overlay_draws_it_under_the_pointer(writer, qapp, tmp_path):
+    from pathlib import Path
+
+    from snipforge.video.camera_share import BubbleState
+    from snipforge.video.recorder import Settings, _real_overlay
+    from snipforge.video.webcam_layer import CompositeOverlay, WebcamLayer
+
+    settings = Settings((0, 0, 640, 360), Path(tmp_path) / "r.mp4", camera_share=writer.name,
+                        camera_bubble=(400, 200, 160, 120), camera_shape="rectangle")
+    bubble = BubbleState(settings.camera_bubble, settings.camera_shape)
+    overlay = _real_overlay(settings, bubble)
+    writer.write(picture(color="#00ff00"))
+
+    assert isinstance(overlay, CompositeOverlay) and isinstance(overlay.overlays[0], WebcamLayer)
+    frame = picture(640, 360, "#000000").convertToFormat(QImage.Format.Format_RGB32)
+    overlay.draw(frame, 0.0)
+    assert frame.pixelColor(480, 260).name() == "#00ff00"  # the camera, in the bubble
+    assert frame.pixelColor(100, 100).name() == "#000000"  # nothing elsewhere
+    bubble.update((0, 0, 100, 100), "rectangle")  # SnipForge moved it
+    overlay.draw(frame, 0.0)
+    assert frame.pixelColor(50, 50).name() == "#00ff00"
+
+
+def test_without_the_camera_the_overlay_is_just_the_pointer(qapp, tmp_path):
+    from pathlib import Path
+
+    from snipforge.video.cursor import PointerOverlay
+    from snipforge.video.recorder import Settings, _real_overlay
+
+    assert isinstance(_real_overlay(Settings((0, 0, 640, 360), Path(tmp_path) / "r.mp4")), PointerOverlay)
+
+
+@pytest.mark.parametrize("change, reason", [
+    ({"camera_share": "not-a-share"}, "camera"),
+    ({"camera_bubble": (1, 2, 3)}, "camera"),
+    ({"camera_shape": "star"}, "camera"),
+])
+def test_camera_settings_that_make_no_sense_are_refused(change, reason, tmp_path):
+    from pathlib import Path
+
+    from snipforge.video.recorder import Settings
+
+    values = {"area": (0, 0, 320, 240), "output": Path(tmp_path) / "r.mp4",
+              "camera_share": "SnipForge-camera-" + "a" * 32, "camera_bubble": (0, 0, 100, 100), **change}
+    with pytest.raises(ValueError, match=reason):
+        Settings(**values)
+
+
+def test_camera_settings_go_through_the_channel(tmp_path):
+    from pathlib import Path
+
+    from snipforge.video.channel import settings_from_message, settings_to_message
+    from snipforge.video.recorder import Settings
+
+    settings = Settings((0, 0, 320, 240), Path(tmp_path).resolve() / "r.mp4",
+                        camera_share="SnipForge-camera-" + "b" * 32, camera_bubble=(10, 20, 160, 160),
+                        camera_shape="rounded")
+
+    assert settings_from_message(settings_to_message(settings)) == settings

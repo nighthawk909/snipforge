@@ -156,3 +156,49 @@ def test_settings_that_cant_be_recorded_are_refused(change, reason):
 
     with pytest.raises(ValueError, match=reason):
         Settings(**values)
+
+
+def test_a_camera_picture_that_cant_be_reached_is_left_out_with_a_warning(tmp_path, qapp):
+    from snipforge.video import recorder as recorder_module
+
+    def frames(area, fps, clock, overlay):
+        return ScreenFrames(area, fps, clock, overlay, open_screen=lambda a: StillScreen(), first_image=grey)
+
+    recorder = Recorder(Settings(AREA, tmp_path / "rec.mp4", fps=FPS, camera_share="SnipForge-camera-" + "c" * 32,
+                                 camera_bubble=(0, 0, 100, 100)),
+                        screen_frames=frames, capture=sound_maker(), free_space=lambda folder: 10**12,
+                        overlay=lambda s: recorder_module._real_overlay(s))  # SnipForge's share isn't there
+    warnings, outcome = [], {}
+    recorder.warning.connect(warnings.append)
+    loop = QEventLoop()
+    recorder.finished.connect(lambda r: (outcome.update(result=r), loop.quit()))
+    recorder.failed.connect(lambda m: (outcome.update(failure=m), loop.quit()))
+    recorder.state_changed.connect(lambda state: state == "recording" and QTimer.singleShot(600, recorder.stop))
+    recorder.start()
+    QTimer.singleShot(20_000, loop.quit)
+    loop.exec()
+
+    assert warnings[0].startswith("The camera can't be recorded, so it's left out") and "result" in outcome
+
+
+def test_a_camera_that_cant_be_drawn_is_left_out_and_the_pointer_stays(tmp_path, qapp):
+    from snipforge.video.webcam_layer import CompositeOverlay
+
+    class WebcamLayer:  # named as the real one, so the warning can say which part failed
+        def draw(self, frame, now):
+            raise ValueError("no picture format")
+
+    drawn = []
+
+    class Pointer:
+        def draw(self, frame, now):
+            drawn.append(now)
+
+    def frames(area, fps, clock, _overlay):
+        return ScreenFrames(area, fps, clock, CompositeOverlay(WebcamLayer(), Pointer()),
+                            open_screen=lambda a: StillScreen(), first_image=grey)
+
+    _recorder, outcome, warnings = record(tmp_path, [(0.8, "stop")], screen_frames=frames)
+
+    assert warnings == ["The camera can't be drawn, so it's left out: no picture format"]
+    assert "result" in outcome and len(drawn) > 10  # the pointer went on being drawn

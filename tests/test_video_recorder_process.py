@@ -471,3 +471,24 @@ def test_progress_that_makes_no_sense_is_ignored(tmp_path, qapp):
     wait_for(lambda: False, 0.2)
 
     assert remote.media_time() >= before and remote.levels() == {}
+
+
+def test_moving_the_bubble_moves_it_in_the_recording(tmp_path, qapp):
+    from snipforge.video.recorder import Settings as RecordingSettings
+
+    process = InProcess()
+    share = "SnipForge-camera-" + "d" * 32
+    remote = RemoteRecorder(RecordingSettings(area=(0, 0, 320, 240), output=Path(tmp_path).resolve() / "rec.mp4",
+                                              camera_share=share, camera_bubble=(10, 10, 100, 100)), launch=process)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+    child = process.children[0]
+    assert child.bubble.snapshot().rect == (10, 10, 100, 100)
+
+    remote.move_bubble((200, 120, 160, 90), "rounded")
+
+    assert wait_for(lambda: child.bubble.snapshot().rect == (200, 120, 160, 90))
+    assert child.bubble.snapshot().shape == "rounded"
+    remote.move_bubble((1, 2, 3), "star")  # makes no sense: ignored there
+    wait_for(lambda: False, 0.2)
+    assert child.bubble.snapshot().rect == (200, 120, 160, 90)
