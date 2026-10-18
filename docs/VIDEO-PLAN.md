@@ -375,6 +375,19 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    control bar (`power.py` listens with `WTSRegisterSessionNotification`). The screen turning off anyway (a closed lid set to do
    nothing, say) is mentioned: the video shows the last picture until it's back
    (`RegisterPowerSettingNotification`, `GUID_CONSOLE_DISPLAY_STATE`).
+   Soak test (`scripts/soak_recording.py`): one long recording through the real recorder and
+   Qt's encoder, by default of a made-up screen (a moving band, a white box flashing every 5 s)
+   with two made-up sound cards whose clocks run 0.1% fast and 0.1% slow, beeping in turn on the
+   flashes and stamping their packets as Windows does. Each beep must stay within 50 ms of its
+   flash (uncorrected, they'd wander 3.6 s an hour), and memory must stay level; samples every
+   30 s go to `samples.jsonl`. It runs below normal priority and records nothing real unless
+   asked to (`--real-screen`, `--real-sound`: ask before using those on someone's PC). A short
+   run is in the stress tests, with one where the flashes are 0.2 s late, which it must catch.
+   Memory found on the way: a 1080p recording holds ~0.65 GB more than a 360p one while it runs,
+   all of it from the moment frames reach Qt's encoder (whose FFmpeg has two H.264 encoders here:
+   `h264_mf`, Windows' Media Foundation one, and `h264_d3d12va`; no x264, being LGPL); it stays
+   level and is let go when the recording ends. `QT_FFMPEG_ENCODING_HW_DEVICE_TYPES` doesn't
+   change it.
 
 Later, not in Phase 4: following a moving or covered window (Windows.Graphics.Capture), editing the
 pointer effects after recording (by saving the pointer's path separately), noise suppression.
