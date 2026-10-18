@@ -66,6 +66,7 @@ class MicrophoneBlocked(AudioUnavailable):
 
 class WAVEFORMATEX(Structure):
     _pack_ = 1
+    _layout_ = "ms"  # Windows' own packing, said outright (an error from Python 3.19 elsewhere if not)
     _fields_ = [("wFormatTag", c_ushort), ("nChannels", c_ushort), ("nSamplesPerSec", c_uint32),
                 ("nAvgBytesPerSec", c_uint32), ("nBlockAlign", c_ushort), ("wBitsPerSample", c_ushort),
                 ("cbSize", c_ushort)]
