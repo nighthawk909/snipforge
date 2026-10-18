@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QObject, QRect, Signal
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtTest import QTest
 
 from snipforge.settings import app_settings
 from snipforge.video import video_prefs
@@ -321,6 +322,14 @@ class FakeBubble(QObject):
     def shape(self):
         return self._shape
 
+    def bubble_size(self):
+        return self.size
+
+    def snapshot(self):
+        from snipforge.video.webcam_bubble import BubbleSnapshot
+
+        return None if self.closed else BubbleSnapshot(self.rect.getRect(), self._shape)
+
     def move_physical(self, x, y):
         self.rect.moveTo(x, y)
 
@@ -413,3 +422,59 @@ def test_the_camera_goes_when_the_recording_ends(tmp_path, qapp):
     made["recorders"][0].finish(2)
 
     assert made["webcams"][0].calls[-1] == "stop" and made["bubbles"][0].closed
+
+
+def test_a_bubble_placed_before_recording_is_remembered(tmp_path, qapp):
+    flow, made, *_ = camera_flow(tmp_path, RecordingChoices(webcam=True, countdown=0))
+    bubble = made["bubbles"][0]
+    bubble.rect.moveTo(700, 400)
+    bubble.moved.emit(bubble.area_rect())  # dragged while getting ready
+    bubble._shape = "rounded"
+    bubble.shape_changed.emit("rounded")
+
+    record_with(flow, flow.panel.choices)  # the panel's copy of the choices predates the drag
+
+    saved = video_prefs.load()
+    assert (saved.bubble_x, saved.bubble_y, saved.bubble_shape) == (700, 400, "rounded")
+
+
+def test_the_camera_isnt_switched_on_by_itself_next_time(tmp_path, qapp):
+    flow, made, *_ = camera_flow(tmp_path, RecordingChoices(webcam=True, webcam_id="{cam}", countdown=0))
+
+    record_with(flow, flow.panel.choices)
+
+    assert video_prefs.load().webcam is False and video_prefs.load().webcam_id == "{cam}"
+
+
+def test_a_camera_that_fails_mid_recording_is_hidden_from_it_at_once(tmp_path, qapp):
+    flow, made, *_ = camera_flow(tmp_path, RecordingChoices(webcam=True, countdown=0))
+    record_with(flow, flow.panel.choices)
+    recorder = made["recorders"][0]
+    moves = []
+    recorder.move_bubble = lambda rect, shape: moves.append(rect)
+
+    made["webcams"][0].failed.emit("The camera was unplugged")
+
+    assert moves == [None] and made["bubbles"][0].closed
+
+
+def test_the_recording_follows_the_bubble_while_it_is_dragged(tmp_path, qapp):
+    flow, made, *_ = camera_flow(tmp_path, RecordingChoices(webcam=True, countdown=0))
+    record_with(flow, flow.panel.choices)
+    recorder, bubble = made["recorders"][0], made["bubbles"][0]
+    moves = []
+    recorder.move_bubble = lambda rect, shape: moves.append(tuple(rect) if rect else None)
+
+    bubble.rect.moveTo(300, 250)  # mid-drag: no "moved" yet
+    QTest.qWait(150)
+
+    assert (300, 250, 192, 192) in moves
+
+
+def test_the_camera_light_goes_off_as_soon_as_recording_stops(tmp_path, qapp):
+    flow, made, *_ = camera_flow(tmp_path, RecordingChoices(webcam=True, countdown=0))
+    record_with(flow, flow.panel.choices)
+
+    made["recorders"][0].state_changed.emit("finishing")
+
+    assert made["webcams"][0].calls[-1] == "stop"

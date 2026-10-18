@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
-from PySide6.QtCore import QObject, QRect, Signal
+from PySide6.QtCore import QObject, QRect, QTimer, Signal
 
 from . import video_prefs
 from .video_prefs import RecordingChoices
@@ -18,6 +18,7 @@ from .video_prefs import RecordingChoices
 log = logging.getLogger(__name__)
 
 MARGIN = 16  # physical pixels between a new bubble and the area's corner
+FOLLOW_MS = 33  # while recording, the bubble's place goes to the recorder this often (if it changed)
 
 
 class FlowCamera(QObject):
@@ -32,6 +33,9 @@ class FlowCamera(QObject):
         self.webcam = self.bubble = self.writer = None
         self._device: str | None = None
         self._recorder = None
+        self._sent = None  # the bubble's place last told to the recorder
+        self._follow = QTimer(self, interval=FOLLOW_MS)
+        self._follow.timeout.connect(self._tell_recorder)
 
     @property
     def on(self) -> bool:
@@ -61,11 +65,14 @@ class FlowCamera(QObject):
         self.webcam.start(choices.webcam_id)  # a camera that can't start says why through `failed`
 
     def _place(self, choices: RecordingChoices) -> None:
-        """Where it was left last time, or inside the area at its bottom right."""
-        if choices.bubble_x is not None and choices.bubble_y is not None:
-            self.bubble.move_physical(choices.bubble_x, choices.bubble_y)
-            return
+        """Where it was left last time if that's over the area (or the camera would be left out of
+        the recording), else inside the area at its bottom right."""
         size = self.bubble.area_rect()
+        if choices.bubble_x is not None and choices.bubble_y is not None:
+            left = QRect(choices.bubble_x, choices.bubble_y, size.width(), size.height())
+            if left.intersects(self.area):
+                self.bubble.move_physical(choices.bubble_x, choices.bubble_y)
+                return
         a = self.area
         self.bubble.move_physical(a.x() + a.width() - size.width() - MARGIN,
                                   a.y() + a.height() - size.height() - MARGIN)
@@ -82,39 +89,66 @@ class FlowCamera(QObject):
                 "camera_shape": self.bubble.shape()}
 
     def follow(self, recorder) -> None:
-        """From now on, tell `recorder` when the bubble moves (RemoteRecorder.move_bubble)."""
+        """From now on, tell `recorder` where the bubble is (RemoteRecorder.move_bubble): as it's
+        dragged, not just where it's dropped."""
         self._recorder = recorder
+        if self.on:
+            self._sent = (self.bubble.area_rect().getRect(), self.bubble.shape())
+            self._follow.start()
+
+    def remembered(self, choices: RecordingChoices) -> RecordingChoices:
+        """`choices` with the bubble as it was left (moved, reshaped or resized since the choices were
+        read); saved straight away when that happens, so read back here."""
+        saved = video_prefs.load()
+        return replace(choices, bubble_shape=saved.bubble_shape, bubble_size=saved.bubble_size,
+                       bubble_x=saved.bubble_x, bubble_y=saved.bubble_y)
 
     def _moved(self, rect: QRect) -> None:
-        video_prefs.save(replace(video_prefs.load(), bubble_x=rect.x(), bubble_y=rect.y()))
         self._tell_recorder()
+        video_prefs.save(replace(video_prefs.load(), bubble_x=rect.x(), bubble_y=rect.y()))
 
     def _changed(self, _value: str) -> None:
-        video_prefs.save(replace(video_prefs.load(), bubble_shape=self.bubble.shape(),
-                                 bubble_size=getattr(self.bubble, "bubble_size", lambda: "medium")()))
         self._tell_recorder()
+        video_prefs.save(replace(video_prefs.load(), bubble_shape=self.bubble.shape(),
+                                 bubble_size=self.bubble.bubble_size()))
 
     def _tell_recorder(self) -> None:
-        if self._recorder is not None and self.bubble is not None:
-            try:
-                self._recorder.move_bubble(self.bubble.area_rect().getRect(), self.bubble.shape())
-            except Exception:  # the recording goes on with the bubble where it was
-                log.exception("Couldn't tell the recorder where the camera's bubble went")
+        if self._recorder is None or self.bubble is None:
+            return
+        place = (self.bubble.area_rect().getRect(), self.bubble.shape())
+        if place == self._sent:
+            return
+        self._sent = place
+        try:
+            self._recorder.move_bubble(*place)
+        except Exception:  # the recording goes on with the bubble where it was
+            log.exception("Couldn't tell the recorder where the camera's bubble went")
 
     def _failed(self, message: str) -> None:
         self.close()
         self.failed.emit(message)
 
     def close(self) -> None:
-        if self.webcam is not None:
-            self.webcam.failed.disconnect(self._failed)
-            self.webcam.stop()
-        if self.bubble is not None:
-            self.bubble.close()
-        if self.writer is not None:
-            self.writer.close()  # the recorder keeps the last picture it read
-        self.webcam = self.bubble = self.writer = self._recorder = None
+        """Camera off, bubble gone, pictures no longer shared, the recording told to leave the camera
+        out. Every step is tried whatever the others do: the camera must never be left on."""
+        self._follow.stop()
+        webcam, bubble, writer, recorder = self.webcam, self.bubble, self.writer, self._recorder
+        self.webcam = self.bubble = self.writer = self._recorder = self._sent = None
         self._device = None
+        steps = []
+        if recorder is not None and bubble is not None:
+            steps.append(lambda: recorder.move_bubble(None, bubble.shape()))  # hide it in the recording now
+        if webcam is not None:
+            steps += [lambda: webcam.failed.disconnect(self._failed), webcam.stop]
+        if bubble is not None:
+            steps.append(bubble.close)
+        if writer is not None:
+            steps.append(writer.close)
+        for step in steps:
+            try:
+                step()
+            except Exception:
+                log.exception("Closing the camera: a step failed; going on with the rest")
 
 
 def _webcam():

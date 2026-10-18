@@ -182,10 +182,11 @@ def test_a_camera_picture_that_cant_be_reached_is_left_out_with_a_warning(tmp_pa
 
 
 def test_a_camera_that_cant_be_drawn_is_left_out_and_the_pointer_stays(tmp_path, qapp):
-    from snipforge.video.webcam_layer import CompositeOverlay
+    from snipforge.video.camera_share import BubbleState
+    from snipforge.video.webcam_layer import CompositeOverlay, WebcamLayer
 
-    class WebcamLayer:  # named as the real one, so the warning can say which part failed
-        def draw(self, frame, now):
+    class BrokenCamera:
+        def latest(self):
             raise ValueError("no picture format")
 
     drawn = []
@@ -195,7 +196,8 @@ def test_a_camera_that_cant_be_drawn_is_left_out_and_the_pointer_stays(tmp_path,
             drawn.append(now)
 
     def frames(area, fps, clock, _overlay):
-        return ScreenFrames(area, fps, clock, CompositeOverlay(WebcamLayer(), Pointer()),
+        camera = WebcamLayer(area, BrokenCamera(), BubbleState((0, 0, 50, 50), "circle"))
+        return ScreenFrames(area, fps, clock, CompositeOverlay(camera, Pointer()),
                             open_screen=lambda a: StillScreen(), first_image=grey)
 
     _recorder, outcome, warnings = record(tmp_path, [(0.8, "stop")], screen_frames=frames)

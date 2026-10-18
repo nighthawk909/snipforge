@@ -374,8 +374,12 @@ class Recorder(QObject):
 
     def _warn_overlay_failures(self, frames) -> None:
         failures = getattr(getattr(frames, "overlay", None), "failures", ())
+        if len(failures) <= self._overlay_failures:
+            return
+        from .webcam_layer import WebcamLayer
+
         for overlay, exc in failures[self._overlay_failures:]:
-            what = "camera" if type(overlay).__name__ == "WebcamLayer" else "pointer"
+            what = "camera" if isinstance(overlay, WebcamLayer) else "pointer"
             self.warning.emit(f"The {what} can't be drawn, so it's left out: {exc}")
         self._overlay_failures = len(failures)
 

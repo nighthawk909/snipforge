@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRect, Signal
@@ -74,7 +75,7 @@ class RecordFlow(QObject):
         self.camera.show(choices)
 
     def _choices_changed(self, choices: video_prefs.RecordingChoices) -> None:
-        self.camera.show(choices)  # the camera switched on or off, or another camera chosen
+        self.camera.show(self.camera.remembered(choices))  # switched on or off, or another camera chosen
 
     def _camera_failed(self, message: str) -> None:
         self._notify(message)
@@ -104,7 +105,8 @@ class RecordFlow(QObject):
 
     def _record(self, choices: video_prefs.RecordingChoices) -> None:
         self.panel = None
-        video_prefs.save(choices)
+        choices = self.camera.remembered(choices)  # the bubble as it was left, not as the panel read it
+        video_prefs.save(replace(choices, webcam=False))  # the camera comes on only when switched on
         try:
             settings = self._settings(choices)
             self.recorder = recorder = self._make_recorder(settings)
@@ -113,7 +115,7 @@ class RecordFlow(QObject):
             recorder.failed.connect(self._failed)
             recorder.cancelled.connect(lambda: self._end(None))
             recorder.warning.connect(self._notify)
-            recorder.state_changed.connect(lambda state: self._show_bar(settings) if state == "recording" else None)
+            recorder.state_changed.connect(lambda state: self._state(state, settings))
             recorder.start(hold=choices.countdown > 0)
         except (OSError, ValueError, RecordingError) as exc:
             log.warning("The recording couldn't start: %s", exc)
@@ -135,6 +137,12 @@ class RecordFlow(QObject):
                         system_audio=choices.system_audio,
                         effects=PointerEffects(choices.pointer, choices.highlight, choices.clicks),
                         **(self.camera.share() if choices.webcam else {}))
+
+    def _state(self, state: str, settings: Settings) -> None:
+        if state == "recording":
+            self._show_bar(settings)
+        elif state == "finishing":
+            self.camera.close()  # the camera's light off as soon as the recording stops
 
     def _show_bar(self, settings: Settings) -> None:
         if self.bar is None and self.state != "ended":
@@ -177,7 +185,10 @@ class RecordFlow(QObject):
         self.state = "ended"
         self._drop_countdown()
         self._levels.close()
-        self.camera.close()
+        try:
+            self.camera.close()
+        except Exception:  # never stop the rest of the ending
+            log.exception("Closing the camera failed")
         if self.bar is not None:
             self.bar.close()
             self.bar = None

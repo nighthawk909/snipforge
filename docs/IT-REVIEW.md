@@ -65,8 +65,9 @@ camera is opened only while that switch is on, for the bubble that shows it and 
 Windows shows its camera light. Before opening it, SnipForge reads Windows' camera privacy setting
 (`...\CapabilityAccessManager\ConsentStore\webcam` under `HKLM` and `HKCU`, read only) so it can say
 "blocked by your privacy settings" rather than fail vaguely. SnipForge passes each picture to its
-recorder process through a block of shared memory named `SnipForge-camera-<random>` (in the user's
-session, freed when both processes let go); nothing is saved apart from the recording itself.
+recorder process through a block of shared memory named `sfcam-<random>` (in the user's session,
+freed when both processes let go); nothing is saved apart from the recording itself. The Camera
+switch isn't remembered as on: it's off each time until the user switches it on.
 
 **Startup entry** (optional). Written to the `Run` key so the hotkey works after sign-in.
 

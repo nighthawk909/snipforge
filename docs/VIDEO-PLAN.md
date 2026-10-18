@@ -339,9 +339,11 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    ready; it's remembered with its shape, size and place. All of it is SnipForge's
    (`flow_camera.py`): a window showing live video in the recorder process would starve its frame
    thread. The recorder gets the camera's newest picture through shared memory (`camera_share.py`,
-   guarded by a sequence number so a picture is never read half written) and the bubble's place over
-   the channel ("bubble"), and draws the camera under the pointer (`CompositeOverlay`). A camera
-   that can't be reached or drawn is left out with a warning; the recording goes on. Recordings show
+   guarded by a sequence number so a picture being written isn't read; a camera that stops is dropped
+   after 2 s, never frozen into the video) and the bubble's place over the channel ("bubble", as it's
+   dragged), and draws the camera under the pointer (`CompositeOverlay`). A camera that can't be
+   reached or drawn is left out with a warning; the recording goes on. The Camera switch is off each
+   time until switched on. Recordings show
    the camera mirrored, as the bubble does (`mirror=False` in `WebcamLayer` changes it).
 8. **Video editor and Library**. Recordings in the Library with a thumbnail and length; a player
    built on `QMediaPlayer` and `QVideoSink` (no `QtMultimediaWidgets`); a timeline with thumbnails;
