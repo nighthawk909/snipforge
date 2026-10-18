@@ -292,7 +292,7 @@ class SnipForgeApp:
     def show_home(self) -> None:
         if self._home is None:
             self._home = HomeWindow(self.library, self.capture, self.open_entry, indexer=self.indexer,
-                                    on_settings=self.show_settings)
+                                    on_settings=self.show_settings, on_combine=self.combine)
         if self._home.isVisible():
             self._home.refresh()  # already open: pick up anything new (opening it refreshes by itself)
         self._home.showNormal()
@@ -491,6 +491,33 @@ class SnipForgeApp:
             return
         self._note(f"Saved to {path} ({preset.name}).")
 
+    def combine(self, entry_ids: list[str], parent=None) -> None:
+        """Combine snips into one (the Library's selection, or an editor's snip and others): the
+        result is a new snip, with any step numbers and captions as markup, opened in the editor."""
+        from . import combine_dialog
+
+        combined = combine_dialog.open_combine(self.library, entry_ids, parent)
+        if combined is None:
+            return
+        entry = None
+        QApplication.setOverrideCursor(Qt.WaitCursor)  # a big combined image takes a moment to save
+        try:
+            entry = self.library.create(combined.image)
+            if combined.items:  # step numbers and captions: editable markup, drawn into its preview
+                self.library.save(entry, *combined.finished())
+        except Exception as exc:  # never a half-made snip: one without its steps goes again
+            log.exception("Couldn't add the combined snip to the Library")
+            if entry is not None:
+                self.library.move_to_trash(entry)
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(None, "SnipForge", f"Couldn't save the combined snip: {exc}")
+            return
+        QApplication.restoreOverrideCursor()
+        self.indexer.index(entry)
+        if self._home is not None and self._home.isVisible():
+            self._home.update_entry(entry.id)
+        self.open_entry(entry.id)
+
     def open_entry(self, entry_id: str) -> None:
         for window in self._windows:
             if getattr(window, "_entry", None) is not None and window._entry.id == entry_id:  # an editor
@@ -524,7 +551,8 @@ class SnipForgeApp:
 
         editor = EditorWindow(image, self.library, entry, document, on_new_snip=self.capture,
                               on_open_entry=self.open_entry, on_pin=self.pin, autosave=autosave,
-                              on_open_library=self.show_home, beautify_on=beautify_on)
+                              on_open_library=self.show_home, beautify_on=beautify_on,
+                              on_combine=lambda entry_id, window: self.combine([entry_id], window))
         self._track(editor)
         editor.show()
         self._bring_to_front(editor)
