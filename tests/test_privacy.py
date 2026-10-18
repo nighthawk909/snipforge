@@ -209,3 +209,10 @@ def test_the_app_does_not_sweep_again_once_done(qapp, tmp_path, monkeypatch, no_
     finally:
         forge.indexer.close()
         forge._shortcuts.close()
+
+
+def test_a_long_private_title_keeps_its_marker_when_read():
+    from snipforge import winrects
+    title = "A very long page title " * 20 + "- Google Chrome (Incognito)"  # about 490 characters
+    assert len(title) < winrects.TITLE_MAX  # read whole, so the marker at the end is still there
+    assert privacy.is_private_window(title, "Chrome")

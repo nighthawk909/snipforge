@@ -19,7 +19,7 @@ DWMWA_CLOAKED = 14
 MIN_SIZE = 40
 SKIP_CLASSES = {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-TITLE_MAX = 260
+TITLE_MAX = 1024  # whole titles: browsers put a private window's marker at the very end
 APP_NAMES = {
     "excel": "Excel", "winword": "Word", "powerpnt": "PowerPoint", "outlook": "Outlook", "olk": "Outlook",
     "onenote": "OneNote", "msedge": "Edge", "chrome": "Chrome", "firefox": "Firefox", "ms-teams": "Teams",

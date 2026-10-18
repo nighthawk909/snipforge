@@ -403,3 +403,12 @@ def test_a_saved_shortcut_that_fails_can_still_be_cleared(qapp, tmp_path):
     finally:
         w.close()
         keys.close()
+
+
+def test_win_and_a_number_pad_digit_keep_the_number_pad(qapp):
+    edit = editor()
+    _focus(edit.edit, True)
+    _key(edit.edit, Qt.Key_5, Qt.MetaModifier | Qt.KeypadModifier, "5")
+    assert edit.got == ["Meta+Num+5"]
+    assert shortcuts.check("Meta+Num+5") is None
+    assert shortcuts.parse("Meta+Num+5") == (MOD_WIN, 0x65)  # VK_NUMPAD5, not the top row's 5
