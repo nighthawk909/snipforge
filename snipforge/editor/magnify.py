@@ -12,7 +12,7 @@ shows up enlarged.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QTransform
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
 from .items import HIT_SLOP, BoxItem, make_pen, stroke_band
@@ -94,6 +94,7 @@ class MagnifyItem(BoxItem):
         self._source = QRectF()
         self._source_origin = QRectF()
         self._grab: QPointF | None = None  # where a drag inside the source started
+        self._picture: tuple[tuple, QImage] | None = None  # (key, the source as the snip shows it)
         super().__init__(style)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
 
@@ -222,30 +223,47 @@ class MagnifyItem(BoxItem):
         p.save()
         p.setClipPath(lens, Qt.IntersectClip)
         p.fillRect(self._rect, QColor("#ffffff"))  # past the snip's edge
-        p.drawImage(self._rect, self._base, self._source)
-        self._paint_redactions(p)
+        picture, inside = self._source_picture()
+        if not picture.isNull():
+            p.drawImage(self._rect, picture, inside)
         p.restore()
         p.setPen(make_pen(color, max(1.0, self.style.width), self.style.dash))
         p.setBrush(Qt.NoBrush)
         p.drawPath(lens)
 
-    def _paint_redactions(self, p: QPainter) -> None:
-        """Blurs and pixelations over the source, drawn into the lens the way they are on the snip."""
+    def _source_picture(self) -> tuple[QImage, QRectF]:
+        """The source as the snip shows it, at its own size: the snip's pixels with its blurs,
+        pixelations and smart erases drawn in. Enlarging that finished picture (not the snip with the
+        redactions enlarged on top) keeps what a redaction hides from blending in at its edges.
+        Returns the picture and where the source is in it."""
+        area = self._source.toAlignedRect().adjusted(-1, -1, 1, 1).intersected(self._base.rect())
+        if area.isEmpty():
+            return QImage(), QRectF()
+        hiding = self._redactions()
+        key = (area.getRect(), self._base.cacheKey(),
+               tuple((id(i), i.sceneBoundingRect().getRect(), i.zValue(), i.kind, i.style.width) for i in hiding))
+        if self._picture is None or self._picture[0] != key:
+            picture = self._base.copy(area).convertToFormat(QImage.Format_ARGB32_Premultiplied)
+            painter = QPainter(picture)
+            painter.translate(-area.x(), -area.y())
+            for item in hiding:
+                painter.save()
+                painter.translate(item.pos())
+                item.paint(painter, None, None)
+                painter.restore()
+            painter.end()
+            self._picture = (key, picture)
+        return self._picture[1], self._source.translated(-area.x(), -area.y())
+
+    def _redactions(self) -> list:
+        """Blurs, pixelations and smart erases over the source, bottom first."""
         scene = self.scene()
         if scene is None:
-            return
-        to_lens = QTransform()
-        to_lens.translate(self._rect.x(), self._rect.y())
-        to_lens.scale(self._rect.width() / self._source.width(), self._rect.height() / self._source.height())
-        to_lens.translate(-self._source.x(), -self._source.y())
+            return []
         # scene.items() and not items(rect): the rect query comes back empty while the scene paints.
-        for item in sorted(scene.items(), key=lambda i: i.zValue()):
-            if (getattr(item, "hides_content", False) and item.isVisible()
-                    and item.sceneBoundingRect().intersects(self._source)):
-                p.save()
-                p.setTransform(QTransform().translate(item.pos().x(), item.pos().y()) * to_lens, True)
-                item.paint(p, None, None)
-                p.restore()
+        return [item for item in sorted(scene.items(), key=lambda i: i.zValue())
+                if getattr(item, "hides_content", False) and item.isVisible()
+                and item.sceneBoundingRect().intersects(self._source)]
 
     def _paint_connector(self, p: QPainter, source: QRectF, lens: QPainterPath, color: QColor) -> None:
         """A faint line from the source to the lens, so it's clear which area is enlarged."""

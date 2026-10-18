@@ -43,8 +43,10 @@ class InputMixin:
         if self.picking() and e.key() == Qt.Key_Escape:
             self.stop_picking()
             return
+        if self.picking() and self._pick_key(e):
+            return
         if self.picking() and e.key() != Qt.Key_Space and e.key() not in TOOL_KEYS:
-            return  # Delete, Enter, arrows... wait until you've picked (a tool key ends picking)
+            return  # Delete, Backspace... wait until you've picked (a tool key ends picking)
         if self.editing_text_item() is not None:
             if e.key() == Qt.Key_Escape:
                 self.commit_text()

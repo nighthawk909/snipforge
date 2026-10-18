@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
@@ -61,7 +62,9 @@ TOOLS = [
     ("crop", "Crop (C)"), ("cutout", "Cut out: remove a strip and join the rest (U)"),
 ]
 AUTOSAVE_MS = 700
-PICK_HINT = "Click anywhere on the snip to pick its color. Esc or a right-click cancels."
+META_TRIES, META_RETRY_S = 4, 0.05  # reading a snip's details: tries, and the first wait between them
+PICK_HINT = ("Click anywhere on the snip to pick its color, or move with the arrow keys and press Enter. "
+             "Esc cancels.")
 
 
 def load_tool_styles(settings: QSettings) -> dict[str, Style]:
@@ -323,12 +326,29 @@ class EditorWindow(QMainWindow):
         """The App name and date stamp, from what the Library recorded when the snip was taken."""
         if self._entry is None:
             return
-        meta = self._library.meta(self._entry)
-        where, time = stamp_parts(meta.title, meta.app, self._entry.created)
+        meta = self._read_meta()
+        where, time = stamp_parts(meta.title if meta else "", meta.app if meta else "", self._entry.created)
         self.canvas.add_text_stamp(where, time)
-        self.statusBar().showMessage("Added where and when you took this snip. It's text: edit or move it."
-                                     if where else "Added when you took this snip (no app was recorded)", 5000)
+        if meta is None:
+            message = ("Added when you took this snip. Where it came from couldn't be read just now (another "
+                       "program had the file open): delete the stamp and try again in a moment.")
+        elif where:
+            message = "Added where and when you took this snip. It's text: edit or move it."
+        else:
+            message = "Added when you took this snip (no app was recorded)"
+        self.statusBar().showMessage(message, 8000 if meta is None else 5000)
         self.canvas.setFocus()
+
+    def _read_meta(self):
+        """The Library's details for this snip. The search indexer or antivirus can hold meta.json for a
+        moment, so a failed read is tried again briefly; None if it still can't be read."""
+        for attempt in range(META_TRIES):
+            try:
+                return self._library.read_meta(self._entry)
+            except OSError:
+                if attempt < META_TRIES - 1:
+                    time.sleep(META_RETRY_S * (attempt + 1))
+        return None
 
     def _toggle_picking(self) -> None:
         if self.canvas.picking():

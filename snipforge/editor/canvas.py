@@ -5,7 +5,7 @@ those gestures draw, and canvas_view.py zoom, fit and the background.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QUndoStack
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
@@ -95,6 +95,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         self._unparsed: list[dict] = []  # saved items this version couldn't load; written back untouched
         self._pick_source: QImage | None = None  # the snip as you see it, while the eyedropper is on
         self._just_picked = False
+        self._pick_point: QPointF | None = None  # the pixel the loupe shows (the arrow keys move it)
         self._loupe = Loupe(self.viewport())
 
         self._scene.selectionChanged.connect(self._on_selection_changed)

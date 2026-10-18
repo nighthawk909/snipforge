@@ -3,17 +3,24 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QCursor
 
 from .eyedropper import sample
 
+PICK_KEYS = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
+
 
 class PickMixin:
-    """For the Canvas. While picking, mouse moves show the loupe and a click picks. Esc, a
+    """For the Canvas. While picking, mouse moves show the loupe and a click picks; without a mouse,
+    the arrow keys move the pixel the loupe shows (Shift: 10 at a time) and Enter picks it. Esc, a
     right-click, choosing a tool, picking, leaving the window or any change to the snip (undo, a
     turn...) ends it. Picks come from a picture of the snip taken when picking starts, so moving
     the pointer stays cheap; ending on every change keeps that picture true."""
+
+    def pick_point(self) -> QPointF | None:
+        """The middle of the pixel the loupe shows, or None before the pointer or a key moved it."""
+        return QPointF(self._pick_point) if self._pick_point is not None else None
 
     def picking(self) -> bool:
         return self._pick_source is not None
@@ -29,6 +36,7 @@ class PickMixin:
         if source.isNull():
             return  # out of memory for the picture: no eyedropper rather than wrong colors
         self._pick_source = source
+        self._pick_point = None
         self._overlay.set_hover(None)
         self.viewport().setCursor(Qt.CrossCursor)
         self.picking_changed.emit(True)
@@ -68,9 +76,38 @@ class PickMixin:
             self._loupe.hide()
 
     def _pick_hover(self, view_pos, scene_pos: QPointF) -> None:
+        x, y = math.floor(scene_pos.x()), math.floor(scene_pos.y())
+        self._pick_point = QPointF(x + 0.5, y + 0.5)
         color = self.color_at(scene_pos)
-        pixels = sample(self._pick_source, math.floor(scene_pos.x()), math.floor(scene_pos.y()))
-        self._loupe.show_at(view_pos, pixels, color.name().upper() if color is not None else "")
+        self._loupe.show_at(view_pos, sample(self._pick_source, x, y), color.name().upper() if color else "")
+
+    def _pick_key(self, e) -> bool:
+        """Arrow keys move the pixel the loupe shows, Enter picks it. True if the key was used."""
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if self._pick_point is None:
+                self._pick_move(0, 0)  # show where Enter would pick, first
+            else:
+                self._pick_press(self._pick_point)
+            return True
+        if e.key() not in PICK_KEYS:
+            return False
+        step = 10 if e.modifiers() & Qt.ShiftModifier else 1
+        dx, dy = PICK_KEYS[e.key()]
+        self._pick_move(dx * step, dy * step)
+        return True
+
+    def _pick_move(self, dx: int, dy: int) -> None:
+        """Move the keyboard's pixel, starting from the middle of the snip you can see, never off it."""
+        crop = self._crop_rect
+        if self._pick_point is None:
+            visible = self.mapToScene(self.viewport().rect()).boundingRect().intersected(crop)
+            middle = (visible if not visible.isEmpty() else crop).center()
+            self._pick_point = QPointF(math.floor(middle.x()) + 0.5, math.floor(middle.y()) + 0.5)
+        x = min(max(self._pick_point.x() + dx, crop.left() + 0.5), crop.right() - 0.5)
+        y = min(max(self._pick_point.y() + dy, crop.top() + 0.5), crop.bottom() - 0.5)
+        point = QPointF(x, y)
+        self.ensureVisible(QRectF(point.x() - 0.5, point.y() - 0.5, 1, 1), 40, 40)
+        self._pick_hover(self.mapFromScene(point), point)
 
     def _pick_press(self, scene_pos: QPointF) -> None:
         color = self.color_at(scene_pos)
