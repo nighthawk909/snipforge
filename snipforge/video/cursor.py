@@ -5,7 +5,7 @@ DXGI's frames never contain the pointer (video/dxgi.py), so the recorder draws i
 lets it add a highlight and click rings. Each can be switched off.
 
 Clicks are read by polling the mouse buttons once per frame (GetAsyncKeyState), and only while
-click rings are on: no mouse hook, as docs/IT-REVIEW.md promises.
+click rings are on: no mouse hook, as the IT review section of docs/VIDEO-PLAN.md promises.
 
 The pointer's image is made the way snips make it (snipforge.pointer: drawn on black and on white,
 pointer.with_alpha works out the transparency). That's a per-pixel Python loop, too slow for every
@@ -27,6 +27,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 
 from .. import pointer
+from .dpi import physical_pixels
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +42,9 @@ SHAPE_CACHE_SIZE = 64  # apps that make a new pointer for every brush size can't
 RETRY_SECONDS = 1.0  # a pointer that couldn't be drawn is tried again after this long, not every frame
 
 _KEY_DOWN = 0x8000  # GetAsyncKeyState: the button is down now
-_KEY_PRESSED = 0x0001  # pressed since the last poll (a click that fell between two frames)
+# Pressed since the last poll: catches a click that fell between two frames, when Windows still has
+# it (best effort: Microsoft keeps this bit for old programs, and another reader can take it first).
+_KEY_PRESSED = 0x0001
 
 # The standard pointers (IDC_ARROW first, then I-beam, busy, cross, up arrow, the resize arrows,
 # "no", hand, working in the background and help), made before recording starts.
@@ -222,6 +225,7 @@ class PointerOverlay:
         scale_x, scale_y = frame.width() / ratio / width, frame.height() / ratio / height
         if (scale_x, scale_y) != (1.0, 1.0):
             painter.scale(scale_x, scale_y)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)  # a shrunken pointer stays legible
         painter.translate(-x, -y)
 
 
@@ -294,8 +298,9 @@ class _Win32Source:
 
     def state(self) -> PointerState | None:
         info = self._win.CURSORINFO(cbSize=ctypes.sizeof(self._win.CURSORINFO))
-        if not self._user32.GetCursorInfo(ctypes.byref(info)):
-            return None  # e.g. while the secure desktop (UAC prompt) is up
+        with physical_pixels():  # otherwise a thread that isn't per-monitor DPI aware gets scaled positions
+            if not self._user32.GetCursorInfo(ctypes.byref(info)):
+                return None  # e.g. while the secure desktop (UAC prompt) is up
         handle = int(info.hCursor or 0)
         visible = bool(info.flags & self._win.CURSOR_SHOWING) and handle != 0
         return PointerState(info.ptScreenPos.x, info.ptScreenPos.y, visible, handle)
@@ -312,8 +317,9 @@ class _Win32Source:
             log.debug("Pointer %#x is gone", handle)
             return None
         try:
-            hotspot, size = self._win._geometry(icon)
-            on_black, on_white = (self._win._draw(icon, size, fill) for fill in (0x00, 0xFF))
+            with physical_pixels():  # the pointer's size for the monitor, as Windows draws it
+                hotspot, size = self._win._geometry(icon)
+                on_black, on_white = (self._win._draw(icon, size, fill) for fill in (0x00, 0xFF))
         except (OSError, ValueError) as exc:
             log.warning("Couldn't draw pointer %#x: %s", handle, exc)
             return None

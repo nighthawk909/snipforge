@@ -126,6 +126,18 @@ def test_a_smaller_frame_gets_everything_scaled_to_fit(qapp):
     assert is_white(at(image, 30, 29))  # where it would be unscaled
 
 
+def test_a_scaled_down_pointer_is_smoothed(qapp):
+    stripes = QImage(4, 4, QImage.Format_ARGB32_Premultiplied)
+    for x in range(4):
+        for y in range(4):
+            stripes.setPixelColor(x, y, QColor("black" if x % 2 else "white"))
+    source = FakeSource()
+    source.shapes[7] = cursor.PointerShape(stripes, (0, 0))
+    image = frame("#ff0000", size=(40, 30))
+    overlay(source, highlight=False, clicks=False).draw(image, 1.0)
+    assert 60 < at(image, 15, 15).green() < 200  # grey, not one stripe or the other
+
+
 def test_pointers_that_invert_the_screen_do_so(qapp):
     clear = QImage(1, 1, QImage.Format_ARGB32_Premultiplied)
     clear.fill(QColor(0, 0, 0, 0))

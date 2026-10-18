@@ -5,8 +5,8 @@ Run with the rest of the desktop suite:
     QT_QPA_PLATFORM=windows python -m pytest -m desktop
 
 They open small coloured windows, copy their area with DXGI and check the pixels. Two tests move
-the mouse pointer onto their own window (one presses the left button there, after checking that
-window is what's under the pointer) and put it back afterwards. Where Windows can't duplicate the
+the mouse pointer onto their own window (one presses the left button there, right after checking
+that window is what's under the pointer) and put it back afterwards. Where Windows can't duplicate the
 screen (Remote Desktop, a session without a display, a basic display driver), they skip.
 """
 import ctypes
@@ -120,15 +120,19 @@ def close_to(found: set, colour: str, tolerance: int = 6) -> bool:
 
 
 def grab_until(dup: dxgi.AreaDuplicator, colour: str, seconds: float = 3.0):
-    """Grabs frames (keeping Qt painting) until the whole area shows `colour`; the last frame grabbed."""
+    """Grabs frames until the whole area shows `colour`; the last frame grabbed. The test windows are
+    repainted meanwhile: Windows only hands over an image when something on the monitor changes."""
     end, last = time.perf_counter() + seconds, None
     while time.perf_counter() < end:
+        for window in QApplication.topLevelWidgets():
+            window.update()
         QApplication.processEvents()
         grabbed = dup.grab(50)
         if grabbed is not None:
             last = grabbed
             if close_to(colours(grabbed, dup.width, dup.height), colour):
                 break
+    assert last is not None, f"no frame from the duplicator in {seconds} s"
     return last
 
 
@@ -137,9 +141,9 @@ def test_a_windows_area_is_copied_with_its_pixels(coloured_window):
     area = physical_rect(window, inset=20)
     with open_or_skip(area) as dup:
         grabbed = grab_until(dup, "#ff00ff")
-        assert grabbed is not None, "no frame in 3 s"
         data, stride = grabbed
         assert stride >= area[2] * 4 and len(data) >= stride * area[3]
+        assert isinstance(data, bytearray)  # the recorder's own copy, to draw the pointer into
         assert close_to(colours(grabbed, *area[2:]), "#ff00ff"), colours(grabbed, *area[2:])
 
         # The window changes colour: the next frames follow it.
@@ -176,27 +180,73 @@ def test_areas_off_one_monitor_are_refused():
         dxgi.AreaDuplicator(-10**6, -10**6, 100, 100)
 
 
+def test_restarting_the_duplication_keeps_copying(coloured_window):
+    # What grab() does after Windows takes the duplication away (UAC prompt, lock screen), which a
+    # test can't trigger: a new duplication on the same graphics device, or on a new device.
+    window = coloured_window("#c08000")
+    area = physical_rect(window, inset=10)
+    with open_or_skip(area) as dup:
+        grab_until(dup, "#c08000")
+        for new_device in (False, True, False):
+            started = time.perf_counter()
+            dup._session.restart(new_device=new_device)
+            took = time.perf_counter() - started
+            assert close_to(colours(grab_until(dup, "#c08000"), *area[2:]), "#c08000")
+            print(f"restart (new device: {new_device}): {took * 1000:.0f} ms")
+
+
+def test_opening_and_closing_again_and_again_leaves_nothing_behind(coloured_window):
+    area = physical_rect(coloured_window("#008080"), inset=10)
+    for _ in range(8):
+        with open_or_skip(area) as dup:
+            grab_until(dup, "#008080")
+
+
+def test_an_unaware_thread_still_works_in_physical_pixels(coloured_window):
+    # Qt makes the process per-monitor DPI aware, but a thread (or a process started some other
+    # way) may not be: DuplicateOutput1 would be refused and pointer positions scaled.
+    area = physical_rect(coloured_window("#8000c0"), inset=10)
+    where = cursor.system_source().state()
+    set_context = user32.SetThreadDpiAwarenessContext
+    set_context.argtypes, set_context.restype = [ctypes.c_void_p], ctypes.c_void_p
+    previous = set_context(ctypes.c_void_p(-1))  # DPI_AWARENESS_CONTEXT_UNAWARE
+    try:
+        with open_or_skip(area) as dup:
+            data = grab_until(dup, "#8000c0")
+        unaware_where = cursor.system_source().state()
+    finally:
+        set_context(ctypes.c_void_p(previous))
+    assert close_to(colours(data, *area[2:]), "#8000c0")
+    if where is not None and unaware_where is not None:
+        assert abs(unaware_where.x - where.x) <= 2 and abs(unaware_where.y - where.y) <= 2
+
+
+def under_pointer(window: QWidget) -> bool:
+    """Whether the window is what a click would land on right now."""
+    now = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(now))
+    return user32.GetAncestor(user32.WindowFromPoint(now), 2) == int(window.winId())  # GA_ROOT
+
+
 @pytest.fixture
 def pointer_on(coloured_window):
-    """Moves the pointer to the middle of a new window (and back afterwards); its physical rect."""
+    """Moves the pointer to the middle of a new window (and back afterwards): (physical rect, window)."""
     window = coloured_window("#3366cc")
     area = physical_rect(window)
     saved = wintypes.POINT()
     user32.GetCursorPos(ctypes.byref(saved))
-    middle = wintypes.POINT(area[0] + area[2] // 2, area[1] + area[3] // 2)
-    user32.SetCursorPos(middle.x, middle.y)
+    user32.SetCursorPos(area[0] + area[2] // 2, area[1] + area[3] // 2)
     pump(0.2)
     try:
-        under = user32.GetAncestor(user32.WindowFromPoint(middle), 2)  # GA_ROOT
-        if under != int(window.winId()):
+        if not under_pointer(window):
             pytest.skip("something else is on top of the test window")
-        yield area
+        yield area, window
     finally:
         user32.SetCursorPos(saved.x, saved.y)
 
 
 def test_the_pointer_is_drawn_into_a_frame_where_it_is(pointer_on):
-    area = pointer_on
+    area, _window = pointer_on
     effects = cursor.PointerEffects(highlight=False, clicks=False)
     overlay = cursor.PointerOverlay(area, effects)
     state = cursor.system_source().state()
@@ -214,7 +264,7 @@ def test_the_pointer_is_drawn_into_a_frame_where_it_is(pointer_on):
 
 
 def test_a_real_click_becomes_a_ring(pointer_on):
-    area = pointer_on
+    area, window = pointer_on
     overlay = cursor.PointerOverlay(area, cursor.PointerEffects(pointer=False, highlight=False))
     frame = QImage(area[2], area[3], QImage.Format_RGB32)
     frame.fill(QColor("#3366cc"))
@@ -224,11 +274,15 @@ def test_a_real_click_becomes_a_ring(pointer_on):
         sent = INPUT(INPUT_MOUSE, MOUSEINPUT(0, 0, 0, flags, 0, 0))
         assert user32.SendInput(1, ctypes.byref(sent), ctypes.sizeof(INPUT)) == 1
 
+    if not under_pointer(window):  # checked again just before: the click lands wherever the pointer is
+        pytest.skip("the pointer left the test window")
     press(MOUSEEVENTF_LEFTDOWN)
-    pump(0.05)
-    clicked = time.perf_counter()
-    overlay.draw(frame.copy(), clicked)
-    press(MOUSEEVENTF_LEFTUP)
+    try:
+        pump(0.05)
+        clicked = time.perf_counter()
+        overlay.draw(frame.copy(), clicked)
+    finally:
+        press(MOUSEEVENTF_LEFTUP)  # never leave the button down
     pump(0.05)
     assert overlay.clicks_seen == 1
 
