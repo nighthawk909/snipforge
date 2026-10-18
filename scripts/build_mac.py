@@ -22,9 +22,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import universal  # noqa: E402 - sibling script: universal2 builds of single-architecture dependencies
-
 import build  # noqa: E402 - sibling script: version stamping, license files, checksums
+import universal  # noqa: E402 - sibling script: universal2 builds of single-architecture dependencies
 
 ROOT, DIST, BUILD = build.ROOT, build.DIST, build.BUILD
 APP_NAME = "SnipForge.app"
