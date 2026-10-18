@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from . import __version__, project, updates
 from .icons import icon
 from .widgets import Segmented, SettingRow, ToggleSwitch, stack
+from .wording import this_computer
 
 MODES = (
     ("auto", "Automatically",
@@ -162,7 +163,7 @@ class UpdatesPage(QWidget):
         self._title.setText(titles.get(kind, "Updates"))
         message = state.message or (f"You have SnipForge {self._current}." if kind in ("idle", "current") else "")
         if kind == "disabled":
-            message = "Your IT team turned off update checks on this PC."
+            message = f"Your IT team turned off update checks on {this_computer()}."
         if blocker and kind in ("available", "ready") and blocker not in message:
             message = f"{message} {blocker}".strip()
         self._message.setText(message)

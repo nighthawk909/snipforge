@@ -8,14 +8,18 @@ Coworkers on work Macs have asked for SnipForge. This is what it takes to give t
 version, using only free tools: no Apple Developer Program ($99 a year), so no Developer ID
 signature and no notarization. Macs only (not iPhone or iPad).
 
-**Where it stands:** SnipForge starts on a Mac and the editor and Library work. The
-[macOS build](../.github/workflows/mac.yml) workflow (run by hand: Actions > macOS build > Run
-workflow) runs the tests on macOS, builds `SnipForge.app` into `SnipForge-<version>.dmg`, installs
-it from the .dmg, runs the packaged app's `--self-test`, starts the real app and launches it a second
-time, then uploads the .dmg as the `snipforge-macos` artifact. Snipping should work once macOS's
-Screen Recording permission is given (CI can't grant it, so a tester confirms it). The Windows
-integrations (shortcut, OCR, window picking, share, start at sign-in, updates) each need a Mac
-version, listed below with the macOS API for each.
+**Where it stands:** phase 1 is done: SnipForge is a Mac app people can try. It starts, the editor
+and Library work, it checks for the Screen Recording permission before a snip (and explains how to
+give it), it speaks the Mac's language (Trash, menu bar, Finder, ⌘, Match macOS), opening it again
+from Finder or the Dock brings up the Library, and it finds its own files in
+`Contents/Resources` and keeps its cache in `~/Library/Caches`. The
+[macOS build](../.github/workflows/mac.yml) workflow runs for every pull request (and by hand:
+Actions > macOS build > Run workflow): it runs the tests on macOS, builds `SnipForge.app` into
+`SnipForge-<version>.dmg`, installs it from the .dmg, runs the packaged app's `--self-test`, starts
+the real app and launches it a second time, then uploads the .dmg as the `snipforge-macos` artifact.
+Snipping should work once macOS's Screen Recording permission is given (CI can't grant it, so a
+tester confirms it). The Windows integrations (shortcut, OCR, window picking, share, start at
+sign-in, updates) each need a Mac version, listed below with the macOS API for each.
 
 **What it costs:** nothing. macOS runners are free for public repositories, and every macOS API
 below comes with macOS. The price of skipping the paid Apple account is the first-launch step in
@@ -24,22 +28,26 @@ below comes with macOS. The price of skipping the paid Apple account is the firs
 ## What works today
 
 **Checked by CI** (the macOS build workflow): the unit tests on macOS (with Qt's offscreen
-platform), and on the packaged app, with the real macOS platform: `--self-test` builds the theme,
-the editor (drawing an arrow and rendering it), the Library window listing a snip and the SVG icons,
-on both the Apple silicon and the Intel half; then SnipForge starts, keeps running, and a second
-launch hands over to it.
+platform), including tests marked `mac` that call macOS itself (Quartz's Screen Recording check
+answers without prompting; shortcuts read the way Qt's own Mac menus write them). On the packaged
+app, with the real macOS platform: `--self-test` builds the theme, the editor (drawing an arrow and
+rendering it), the Library window listing a snip and the SVG icons, asks Quartz (PyObjC, bundled)
+for the Screen Recording permission, finds the license texts in `Contents/Resources` and the cache
+in `~/Library/Caches`, and resolves the interface font and Menlo (fixed-width), on both the Apple
+silicon and the Intel half; then SnipForge starts, keeps running, and a second launch hands over
+to it.
 
 **Expected from the same code, to confirm with the [test plan](#test-plan-for-a-coworker-with-a-mac)**
 (CI can't click menus, grant Screen Recording or drag between apps):
 
 | On a Mac | Notes |
 |---|---|
-| Starting, the menu bar icon, one SnipForge at a time | A second start hands its command to the running SnipForge and exits, as on Windows (Qt's local socket works the same on macOS; CI checks it). Opened again from Finder or the Dock, macOS just activates the running SnipForge, which doesn't bring up its Library yet (phase 1). |
-| Library: browse, open, favorites, tags, delete, Open library folder | Deleted snips go to the Trash. Open folder opens Finder. Text search finds titles and tags, but not words inside snips until OCR has its Mac version. |
-| Editor: every markup tool, crop, Beautify, undo, copy, save, Drag out, Pin | Same code as Windows. Keyboard shortcuts written Ctrl+... become ⌘ on a Mac (Qt does this). |
-| Settings, themes (light, dark, follow the system), accents | Start at sign-in reads as off and explains it isn't available yet. |
-| Snipping an area or a full screen | Needs Screen Recording permission (below). Qt 6.12's screen grab on macOS uses ScreenCaptureKit, Apple's current capture API ([`qcocoascreen.mm`](https://code.qt.io/cgit/qt/qtbase.git/tree/src/plugins/platforms/cocoa/qcocoascreen.mm?h=6.12)). |
-| Share > Send in Teams, Save and show in folder | Teams opens through its `msteams:` link as on Windows; Show in folder uses Finder. Email copies the snip and opens the default mail app to paste it into, the fallback Windows uses without classic Outlook. |
+| Starting, the menu bar icon, one SnipForge at a time | A second start hands its command to the running SnipForge and exits, as on Windows (Qt's local socket works the same on macOS; CI checks it). Opened again from Finder or the Dock, macOS just activates the running SnipForge; it brings up the Library when it's reactivated while already in front (a Dock click) or activated with no window to show (`reopen.py`: Qt passes the Dock's reopen on as the app becoming active again). |
+| Library: browse, open, favorites, tags, delete, Open library folder | Deleted snips go to the Trash (the sidebar and menus say Trash; ⌘⌫ moves the selection there, as in Finder). Open folder opens Finder. Text search finds titles and tags, but not words inside snips until OCR has its Mac version. |
+| Editor: every markup tool, crop, Beautify, undo, copy, save, Drag out, Pin | Same code as Windows. Keyboard shortcuts written Ctrl+... become ⌘ on a Mac (Qt does this), and tooltips and messages say so (⌘C, ⇧⌘S, ⌘-scroll: `wording.keys()`). Labels use the system font, and Grab text's box uses Menlo (`fonts.py`). |
+| Settings, themes (light, dark, Match macOS), accents | The Windows-only switches (Win+Shift+S, Print Screen) are hidden. Open folder opens Finder. Start at sign-in reads as off and explains it isn't available yet. |
+| Snipping an area or a full screen | Needs Screen Recording permission (below): without it SnipForge explains how to turn it on instead of snipping (Open System Settings adds SnipForge to the list and opens the page; Snip anyway goes ahead). Qt 6.12's screen grab on macOS uses ScreenCaptureKit, Apple's current capture API ([`qcocoascreen.mm`](https://code.qt.io/cgit/qt/qtbase.git/tree/src/plugins/platforms/cocoa/qcocoascreen.mm?h=6.12)). |
+| Share > Send in Teams, Email, Save and show in folder | Teams opens through its `msteams:` link as on Windows; Show in folder uses Finder. Email copies the snip and opens the default mail app to paste it into (⌘V), the fallback Windows uses without classic Outlook. The Windows share sheet item is hidden until the Mac's (phase 5). |
 
 The app is one universal build (Apple silicon and Intel) and needs **macOS 14 Sonoma or later**,
 the oldest macOS that PySide6 6.12's wheels support (`LSMinimumSystemVersion` in the bundle, so an
@@ -57,7 +65,7 @@ Windows-only.
 | Feature | Windows today | macOS version | Permission it needs |
 |---|---|---|---|
 | Global shortcut | Low-level keyboard hook on Win+Shift+S and Print Screen (`hotkey.py`) | Carbon `RegisterEventHotKey`: registers exactly the chosen combination, sees no other keys. macOS keeps ⌘⇧3/4/5 for its own screenshots, so the default would be a free combination such as ⌘⇧2, with the option of taking ⌘⇧4 once the person turns off macOS's own in System Settings > Keyboard > Keyboard Shortcuts > Screenshots. | None. (A `CGEventTap` would need Input Monitoring; `RegisterEventHotKey` doesn't.) |
-| Screen capture | Qt `grabWindow` | Should already work: Qt 6.12 uses ScreenCaptureKit (`SCScreenshotManager`). Missing piece: check `CGPreflightScreenCaptureAccess()` before snipping and, if it's off, explain and offer to open the setting (`CGRequestScreenCaptureAccess()` adds SnipForge to the list). What a snip shows without it (an error, a blank screen or just the desktop) is for the first tester to find out. | Screen Recording (called Screen & System Audio Recording from macOS 15). macOS 15 and later may also ask the person from time to time (reported as monthly) to confirm an app may keep capturing the screen; that prompt is macOS's and the app can't turn it off. |
+| Screen capture | Qt `grabWindow` | Should already work: Qt 6.12 uses ScreenCaptureKit (`SCScreenshotManager`). **Done in phase 1:** `screen_access.py` checks `CGPreflightScreenCaptureAccess()` before every snip, Repeat last snip and Record (`_screen_access_mac.py`) and, if it's off, explains; Open System Settings calls `CGRequestScreenCaptureAccess()` (adds SnipForge to the list, and macOS prompts the first time) and opens `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`; Snip anyway goes ahead regardless. What a snip shows without it (an error, a blank screen or just the desktop) is for the first tester to find out. | Screen Recording (called Screen & System Audio Recording from macOS 15). macOS 15 and later may also ask the person from time to time (reported as monthly) to confirm an app may keep capturing the screen; that prompt is macOS's and the app can't turn it off. |
 | Window list (click a window to snip it, and the app name and title the Library shows) | `EnumWindows` + DWM frame bounds (`winrects.py`) | Quartz `CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly \| kCGWindowListExcludeDesktopElements, kCGNullWindowID)`: front to back, with `kCGWindowBounds` (points, so multiply by the screen's scale for pixels), `kCGWindowOwnerName`, `kCGWindowOwnerPID`, `kCGWindowLayer` (0 for normal windows) and `kCGWindowName`. | Bounds and app names need none; window titles need Screen Recording. |
 | OCR (Grab Text, and Library search reading the words in snips) | Windows.Media.Ocr through WinRT (`ocr.py`) | Vision framework: `VNRecognizeTextRequest` (accurate level, automatic language) on a `VNImageRequestHandler`; each `VNRecognizedTextObservation` gives a line, and `boundingBoxForRange:` gives word boxes (normalized, origin bottom-left, so flip them). Offline and built in, like Windows OCR. | None. |
 | Share | Explorer right-click commands (OneDrive copy link and share, the Windows share sheet) and Outlook through COM (`share.py`) | `NSSharingServicePicker` shown under the Share button (the button's `NSView` comes from `QWidget.winId()`): Mail, Messages, AirDrop, Notes and any app's share extension. Email: `NSSharingService` named `NSSharingServiceNameComposeEmail` with the snip attached (check in this phase whether it opens Outlook when Outlook is the default mail app, or only Apple Mail; if only Mail, open the snip with Outlook directly). OneDrive: sync folders are under `~/Library/CloudStorage/OneDrive-*`; saving there and showing it in Finder gives OneDrive's own Share and Copy Link commands. Teams already works. | None. |
@@ -66,7 +74,7 @@ Windows-only.
 | Scrolling capture (in progress for Windows) | `SendInput` wheel turns and `SetCursorPos` (`_scroll_win32.py`) | `CGEventCreateScrollWheelEvent` + `CGEventPost(kCGHIDEventTap)` to scroll, `CGWarpMouseCursorPosition` to place the pointer, `CGEventGetLocation(CGEventCreate(None))` to read it. | Accessibility (posting input to other apps). Check with `AXIsProcessTrustedWithOptions`. |
 | Updates | Downloads the verified `SnipForge-<version>-setup.exe` and runs it silently (`update_platform.py`) | The update engine already knows `SnipForge-<version>.dmg` assets. Install: verify the download's SHA-256 (as today), `hdiutil attach -nobrowse -readonly`, `ditto` the new `SnipForge.app` beside the running one, check it with `codesign --verify`, swap the two, `hdiutil detach`, reopen with `open -n`. Files SnipForge downloads itself aren't quarantined, so no Gatekeeper step after an update. If the app's folder isn't writable, or macOS is running it from a read-only copy because it was never moved out of Downloads ("App Translocation": its path contains `/AppTranslocation/`), say so and open the .dmg instead. | None. |
 | Policy (IT settings) | `HKLM`/`HKCU\Software\Policies\SnipForge` | Managed preferences: read the same names with `CFPreferencesCopyAppValue` for the bundle identifier; IT sets them with a configuration profile. `CFPreferencesAppValueIsForced` says which are locked. | None. |
-| Smaller things | | Mac wording ("Trash", "menu bar", ⌘ instead of Ctrl in messages, the Library's "Press Win+Shift+S" hint, the About text says "for Windows"); bring up the Library when SnipForge is opened again from Finder or the Dock (macOS reactivates the running app instead of starting a second one); Settings > Open folder still uses `os.startfile` (`settings_window.py`); license files and organization theme packs are in `SnipForge.app/Contents/Resources`, but the app looks next to the executable; the theme cache goes to the temp folder instead of `~/Library/Caches`. | |
+| Smaller things (**done in phase 1**) | | Mac wording through `wording.py` (Trash, menu bar icon, Finder, this Mac, Match macOS, ⌘ in messages and tooltips, the Library's hint and the About text); the Library on reopen (`reopen.py`); Open folder through `QDesktopServices` on both platforms; license files and theme packs found in `Contents/Resources` and the theme cache in `~/Library/Caches` (`bundle.py`); the system font and Menlo instead of Segoe UI and Consolas (`fonts.py`). Still open: Dock icon or menu bar only, decided after the first tester. | |
 
 ## Gatekeeper: the first launch
 
@@ -132,11 +140,11 @@ Gatekeeper, but on a work Mac that goes around IT's controls: only with IT's OK.
 
 ## Test plan for a coworker with a Mac
 
-Getting the build: open the latest successful [macOS build](../.github/workflows/mac.yml) run in the
-repository's Actions tab, download the `snipforge-macos` artifact (GitHub asks you to sign in for
-artifacts) and unzip it. It holds `SnipForge-<version>.dmg`, `SHA256SUMS.txt` and the CI's
-`selftest.json`. Until the .dmg is attached to preview releases (phase 1), a tester without a
-GitHub account gets the .dmg from someone who has one.
+Getting the build: every release has `SnipForge-<version>.dmg` and `SHA256SUMS.txt` on its GitHub
+release page (no account needed), and the download page offers it as Download for Mac. For a
+build of a change that isn't released yet, open its [macOS build](../.github/workflows/mac.yml) run
+in the repository's Actions tab and download the `snipforge-macos` artifact (GitHub asks you to
+sign in for artifacts); it also holds the CI's `selftest.json`.
 
 Write down as you go: the Mac model and chip (Apple menu > About This Mac), the macOS version,
 whether it's managed (above), and a screenshot of anything unexpected. To capture SnipForge's log,
@@ -149,23 +157,43 @@ start it from Terminal: `~/Applications/SnipForge.app/Contents/MacOS/SnipForge` 
    exact message, then follow the Gatekeeper steps. Note whether Open Anyway was there, whether it
    asked for an administrator, and whether anything else (an IT tool) blocked it.
 3. **Library.** SnipForge opens to its Library, with an icon in the menu bar and the Dock. Click the
-   menu bar icon: its menu opens (it shouldn't also start a snip). Close the Library, then open
-   SnipForge again from Applications: note what happens (expected for now: no second copy starts,
-   but the Library may not come back; use the menu bar icon > Library).
-4. **Screen Recording.** Menu bar icon > New snip. macOS asks for Screen Recording: allow it, quit
-   SnipForge (menu bar icon > Quit), open it again and snip. Note whether the frozen screen shows your
-   other apps' windows (not just the desktop) and whether it's sharp on a Retina screen.
+   menu bar icon: its menu opens (it shouldn't also start a snip). Close the Library, then:
+   - open SnipForge again from Applications (Finder): the Library comes back, and no second copy
+     starts;
+   - close it again and click SnipForge's Dock icon: the Library comes back;
+   - with the Library open behind another app, click the Library window itself: it just comes to
+     the front (no second Library, nothing else opens);
+   - quit SnipForge and start it with `--background` from Terminal
+     (`.../SnipForge.app/Contents/MacOS/SnipForge --background`): no Library opens.
+4. **Screen Recording.** Menu bar icon > New snip. Instead of the snip, SnipForge explains that it
+   needs Screen Recording, with Open System Settings, Snip anyway and Cancel. Note:
+   - Open System Settings: macOS may show its own prompt, and System Settings opens at Privacy &
+     Security > Screen & System Audio Recording (Screen Recording on macOS 14) with SnipForge in the
+     list. Turn it on, quit SnipForge (menu bar icon > Quit), open it again and snip: no explanation
+     this time;
+   - before allowing it, Snip anyway: what the frozen screen shows (an error, a blank screen or just
+     the desktop);
+   - after allowing it, whether the frozen screen shows your other apps' windows (not just the
+     desktop), and whether it's sharp on a Retina screen;
+   - Repeat last snip asks the same way when the permission is off.
 5. **Snipping.** Snip an area, then a full screen (from the toolbar at the top). With two monitors,
    snip on each. Esc cancels.
 6. **Editor.** Draw an arrow, a box, text, a highlight, blur something, crop, undo and redo, then
    Copy and paste into Outlook or Teams; Save; Drag out into a Finder window and into an email; Pin.
+   Hover over the toolbar buttons: shortcuts read ⌘Z, ⇧⌘Z, ⌘C, ⌘-scroll (no "Ctrl"). The text,
+   step numbers, crop size label and the capture overlay's hint use the Mac's own font; Grab text's
+   box (once OCR works) uses a fixed-width font.
 7. **Library again.** The new snip is there with a thumbnail. Open it, star it, tag it, search for
-   its tag, delete it (it goes to the Trash; the Trash button opens it), Open library folder (Finder).
-8. **Share.** Send in Teams; Email (expected for now: the snip is copied and your mail app opens);
-   Save and show in folder (Finder opens with the file selected).
-9. **Settings.** Every page opens. Turn on Start when I sign in (expected for now: it says it isn't
-   available yet). Switch Light, Dark and System, and an accent; change macOS's appearance with
-   System on.
+   its tag. Right-click it: Move to Trash (with ⌘⌫ beside it); select one and press ⌘⌫. It goes to
+   the Trash, and the Trash button in the sidebar opens it in Finder. Open library folder (Finder).
+8. **Share.** Send in Teams; Email (expected for now: the snip is copied and your mail app opens;
+   the message says ⌘V); Save and show in folder (Finder opens with the file selected). The menu has
+   no Windows share sheet item.
+9. **Settings.** Every page opens. Capture shows no Win+Shift+S or Print Screen switches. General >
+   Library > Open folder opens Finder. Turn on Start when I sign in (expected for now: it says it
+   isn't available yet). Appearance: Match macOS, Light, Dark, and an accent; change macOS's
+   appearance with Match macOS on. About > Third-party notices opens the notices from inside the app.
+   Menu bar icon > About SnipForge says "for Mac" and "this Mac".
 10. **Expected not to work yet:** a keyboard shortcut, clicking a window to snip just that window,
     Grab Text, finding words inside snips, Share > OneDrive or the share sheet, the mouse pointer in
     snips, scrolling capture, installing an update. Note anything else that fails.
@@ -179,11 +207,14 @@ Mac-only code that needs a real Mac to prove it gets a manual check from the tes
 0. **Groundwork** (this PR): Windows-only code behind platform checks, Windows-only dependencies
    marked, `windows` test marker, `.app` and `.dmg` build (`scripts/build_mac.py`), the manual
    macOS workflow, this plan.
-1. **A Mac app people can try:** Screen Recording check and explanation before snipping; Mac
-   wording (Trash, menu bar, ⌘, About); the Library on reopen; Settings > Open folder through
-   Finder; license files and theme packs found in `Contents/Resources`; caches in
-   `~/Library/Caches`; Dock icon or menu bar only, decided after the first tester. Attach the .dmg to preview releases (a macOS job in
-   `preview.yml`) so testers can download it without a GitHub account.
+1. **A Mac app people can try** (done): Screen Recording check and explanation before snipping
+   (`screen_access.py`, `_screen_access_mac.py`, PyObjC's Quartz); Mac wording (`wording.py`: Trash,
+   menu bar, Finder, ⌘, Match macOS, About); the Library on reopen (`reopen.py`); Open folder through
+   `QDesktopServices`; license files and theme packs found in `Contents/Resources` and caches in
+   `~/Library/Caches` (`bundle.py`); the system font and Menlo (`fonts.py`). The packaged self-test
+   requires the Screen Recording call, the files in `Contents/Resources` and a fixed-width font on a
+   Mac. Still open: Dock icon or menu bar only, decided after the first tester. Attaching the .dmg
+   to releases and previews came with the release work (#80).
 2. **Window picking** with `CGWindowListCopyWindowInfo` (`_winrects_mac.py`), so clicking a window
    snips it and the Library shows where each snip came from.
 3. **Keyboard shortcut** with `RegisterEventHotKey` (`_hotkey_mac.py`), with the Mac shortcuts in
@@ -209,8 +240,9 @@ Mac-only code that needs a real Mac to prove it gets a manual check from the tes
 
 ## Building it
 
-- **CI:** Actions > **macOS build** > Run workflow (optionally with a version such as
-  `0.9.0-preview.1`). It never runs on pull requests, so it can't block the required checks.
+- **CI:** every pull request and push to `main` runs the macOS build (the "macOS / Test, build and
+  self-test on macOS" job in `ci.yml`). By hand: Actions > **macOS build** > Run workflow
+  (optionally with a version such as `0.9.0-preview.1`).
 - **On a Mac:** Python 3.14 from python.org (universal2), then
   `python -m pip install -r requirements-dev.txt` and `python scripts/build_mac.py`. Output:
   `dist/SnipForge.app` and `dist/SnipForge-<version>.dmg` (about 64 MB: it carries both Apple

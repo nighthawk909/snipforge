@@ -36,8 +36,13 @@ def notifier() -> _Notifier:
 
 
 def fields_of(kind: str, style: Style) -> dict:
-    """The parts of `style` that `kind` shows: what a saved quick style keeps and applies."""
-    return {name: getattr(style, name) for name in STYLE_FIELDS.get(kind, ())}
+    """The parts of `style` that `kind` shows: what a saved quick style keeps and applies. A hollow
+    look leaves out the fill's color and opacity, which only show once Fill is on."""
+    found = {name: getattr(style, name) for name in STYLE_FIELDS.get(kind, ())}
+    if not found.get("fill", True):
+        found.pop("fill_color", None)
+        found.pop("fill_opacity", None)
+    return found
 
 
 def same_look(kind: str, a: Style, b: Style) -> bool:

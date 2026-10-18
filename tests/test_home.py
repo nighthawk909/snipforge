@@ -6,7 +6,7 @@ from PySide6.QtCore import QEvent, QObject, QPointF, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import QApplication, QMessageBox, QStyleOptionViewItem
 
-from snipforge.home import HomeWindow
+from snipforge.home import HomeWindow, snip_hint
 from snipforge.library import DOCUMENT, Library
 from snipforge.library_view import ROW_ROLE
 from snipforge.winrects import WindowInfo
@@ -133,7 +133,8 @@ def test_tags_can_be_edited(home, lib, monkeypatch):
 def test_empty_library_explains_how_to_snip(qapp, tmp_path):
     home = HomeWindow(Library(tmp_path), lambda: None, lambda _i: None)
     home.refresh()
-    assert home._stack.currentIndex() == 1 and "Win+Shift+S" in home._empty_hint.text()
+    # Win+Shift+S on Windows; the menu bar icon on a Mac (tests/test_platform_guards.py)
+    assert home._stack.currentIndex() == 1 and home._empty_hint.text() == snip_hint()
     assert not home._empty_button.isHidden()
 
 

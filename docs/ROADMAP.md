@@ -72,13 +72,13 @@ Software Center) and the SnagIt features people miss most. Built in this order:
 - [x] Privacy: private-window titles never kept, in many browsers and languages (#65, #70, #77)
 - [x] Windows and Mac parity rules, tracker and skill (#75)
 - [x] The Mac version is built, installed and started for every PR (#76)
-- [ ] Every release includes the Mac version, with a Mac download on the page (#80)
+- [x] Every release includes the Mac version, with a Mac download on the page (#80)
 - [x] Code-signing pipeline ready (#24); waiting on signing itself (below)
 
 ## Releases
 - [x] 0.4.0 to 0.10.0: the update engine, the new look, Settings, capture parity
 - [x] 0.11.0: Phase 3, recording, privacy
-- [ ] 0.11.1: polish, the crash fix (#77), the first release with a Mac .dmg (#72, after #80)
+- [x] 0.12.0: the first release with the Mac version (a .dmg), editor and privacy fixes (#72)
 - [ ] 1.0: when Phase 4's hand checks and the fix-it backlog are done
 
 ## Fix-it: feedback from testing
@@ -97,9 +97,10 @@ turns each item into an issue labelled `feedback`, a tested fix and a PR.
 
 ## Mac port (after Windows)
 The macOS API for each step is in [MAC-PLAN.md](MAC-PLAN.md); [PARITY.md](PARITY.md) tracks every
-feature. Today the Mac version has the shared core (editor, Library, Settings) and none of the
-operating-system pieces.
-- [ ] Phase 1: an app people can try: Screen Recording check, Mac wording and fonts, back when
+feature. Today the Mac version has the shared core (editor, Library, Settings), Area and Full
+screen snips with the Screen Recording check, and Mac wording; the other operating-system pieces
+come in the phases below. It's in every release as a .dmg.
+- [x] Phase 1: an app people can try: Screen Recording check, Mac wording and fonts, back when
   reopened (#90)
 - [ ] Phase 2: click a window to snip it, and where each snip came from
 - [ ] Phase 3: the snip shortcut and shortcuts of your own

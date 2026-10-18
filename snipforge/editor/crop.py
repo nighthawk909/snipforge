@@ -14,10 +14,11 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsItem
 
 from .. import theme
+from ..fonts import ui_font
 from .beautify import BeautifyStyle, backdrop_image, paint_backdrop
 
 HANDLE_PX = 10
@@ -245,7 +246,7 @@ class CropMask(QGraphicsItem):
         p.save()
         p.translate(self.crop.topLeft())
         p.scale(1 / scale, 1 / scale)  # constant on-screen size at any zoom
-        font = QFont("Segoe UI", 9)
+        font = ui_font(9)
         p.setFont(font)
         w = p.fontMetrics().horizontalAdvance(text) + 14
         h = p.fontMetrics().height() + 8

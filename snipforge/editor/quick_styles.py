@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .style import STYLE_FIELDS
+from .style import STYLE_FIELDS, USUAL_OPACITY
 
 
 @dataclass(frozen=True)
@@ -13,7 +13,8 @@ class QuickStyle:
     fill_on: bool  # filled shapes and callouts; outline otherwise
 
     def changes(self) -> dict:
-        return {"color": self.color, "fill": self.fill_on}
+        """Its exact look: a fill color or opacity you'd set goes back to the usual."""
+        return {"color": self.color, "fill": self.fill_on, "fill_color": "", "fill_opacity": USUAL_OPACITY}
 
 
 QUICK_STYLES: tuple[QuickStyle, ...] = (
