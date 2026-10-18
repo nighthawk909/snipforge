@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMenu, QMessageBox
 from .. import share
 from ..icons import icon
 from ..wording import keys
-from .teams_dialog import TeamsDialog, chat_link
+from .teams_dialog import CHAT, SHARE, TeamsDialog, chat_link
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class ShareController(QObject):
                            lambda a=account: self.onedrive(a, share.ONEDRIVE_SHARE_VERB))
         menu.addSeparator()
         if windows:  # the Windows share sheet; a Mac's share sheet is still to come (docs/PARITY.md)
-            menu.addAction(icon("share"), "Teams chat, Outlook and more apps…", self.windows_share)
+            menu.addAction(icon("share"), "Share to another app…", self.windows_share)
         menu.addAction(icon("folder"), "Save and show in folder", self.show_in_folder)
 
     # ------------------------------------------------------------------ helpers
@@ -124,13 +124,16 @@ class ShareController(QObject):
         QMessageBox.information(self._window, "SnipForge", str(error))
 
     def teams(self) -> None:
-        dialog = TeamsDialog(self._window)
-        result = dialog.exec()
-        if result == QDialog.Rejected:
+        dialog = TeamsDialog(self._window, can_share=share.windows_shell_available())
+        if dialog.exec() == QDialog.Rejected or not dialog.choice:
+            return
+        message = dialog.message.text().strip()
+        if dialog.choice == SHARE:
+            self._teams_share(message)
             return
         QGuiApplication.clipboard().setImage(self._window.final_image())
-        if result == QDialog.Accepted:
-            opened = QDesktopServices.openUrl(QUrl(chat_link(dialog.recipients, dialog.message.text().strip())))
+        if dialog.choice == CHAT:
+            opened = QDesktopServices.openUrl(QUrl(chat_link(dialog.recipients, message)))
             done = f"Chat opened in Teams. Click in the message box, press {keys('Ctrl+V')}, then {keys('Enter')}."
         else:
             opened = share.open_teams()
@@ -140,6 +143,36 @@ class ShareController(QObject):
         else:
             QMessageBox.information(self._window, "SnipForge", "The image is copied, but Teams didn't open. "
                                     f"Open Teams and paste it into a chat ({keys('Ctrl+V')}).")
+
+    def _teams_share(self, message: str) -> None:
+        """The share window with the snip attached: you pick Teams and the person there. A link can't
+        carry a picture and Windows' share command can't carry text, so the message goes on the
+        clipboard for you to paste."""
+        try:
+            image, path = self._export_temp()
+        except share.ShareError as exc:
+            QMessageBox.warning(self._window, "SnipForge", str(exc))
+            return
+        if message:
+            QGuiApplication.clipboard().setText(message)
+        QApplication.setOverrideCursor(Qt.WaitCursor)  # the share window takes a moment to open
+        try:
+            opened = share.invoke_shell_verb(path, share.WINDOWS_SHARE_VERB, self._hwnd())
+        except Exception:  # shell extensions raise assorted COM errors
+            log.exception("The share window didn't open")
+            opened = False
+        finally:
+            QApplication.restoreOverrideCursor()
+        if opened:
+            self._status("Pick Teams, then who to send it to." + (
+                f" Your message is copied: paste it into Teams' message box ({keys('Ctrl+V')})." if message else ""),
+                15000)
+            return
+        QGuiApplication.clipboard().setImage(image)  # no share window: paste into Teams, as before
+        where = (f"Teams is opening: paste it into a chat ({keys('Ctrl+V')})." if share.open_teams()
+                 else f"Open Teams and paste it into a chat ({keys('Ctrl+V')}).")
+        QMessageBox.information(self._window, "SnipForge",
+                                f"The share window didn't open, so the snip is copied instead. {where}")
 
     def onedrive(self, account: share.OneDriveAccount, verb: str) -> None:
         if self._pending is not None:

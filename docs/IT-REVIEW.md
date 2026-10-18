@@ -143,7 +143,7 @@ the exported image.
 | Update download: in the background in Automatic and Ask modes, otherwise only after the user chooses to install | `github.com/nighthawk909/snipforge/releases/download/...` (redirects to GitHub's file storage), or the feed's folder | Downloads the installer and checksum file |
 | Share → OneDrive | The user's own signed-in OneDrive client | The PNG is saved into the OneDrive folder; OneDrive syncs it |
 | Share → Outlook | Classic Outlook via COM on the same PC | Opens a draft; nothing is sent until the user clicks Send |
-| Share → Teams | The Teams desktop app (`msteams:` link with the chosen recipients) | Opens the chat; the user pastes and sends |
+| Share → Send in Teams | The Windows share window (Explorer's Share command on the exported PNG in `%TEMP%\SnipForge\share`); or, for work and school accounts, the Teams desktop app (`msteams:` link with the chosen recipients) | The user picks Teams and who to send to, or the chat opens; the user pastes the message or snip and sends |
 | Report a problem → Open the bug report form | The default browser opens `github.com/nighthawk909/snipforge/issues/new` | Nothing from SnipForge: the user fills in the form and attaches the report if they choose |
 
 Update traffic is https only, and redirects can't downgrade to http. GitHub downloads must come from

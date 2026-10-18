@@ -79,7 +79,8 @@ shows through them.
 
 **Share.** Copy (Ctrl+C), save (Ctrl+S) as PNG, JPG, WebP or PDF (choose in Settings › Saving, or
 pick in Save as), or use **Share**: a new Outlook email with the snip inline,
-open a Teams chat with the people you pick, get a OneDrive link, or the Windows share sheet.
+send to Teams through the Windows share window (or open a chat with work addresses), get a OneDrive link, or
+share to another app.
 **Drag out** drops the image straight into Teams, Outlook, PowerPoint or a folder.
 
 **Record a video.** Choose **Record video** in the tray (or switch on **Record** in the capture
