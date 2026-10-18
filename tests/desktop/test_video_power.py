@@ -27,6 +27,15 @@ def send(window: int, message: int, wparam: int) -> int:
     return user32.SendMessageW(window, message, wparam, 0)
 
 
+def top_level_windows() -> list[int]:
+    """Every top-level window, hidden ones too (EnumWindows leaves out message-only windows)."""
+    found = []
+    each = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(
+        lambda hwnd, _param: found.append(hwnd or 0) or True)
+    ctypes.WinDLL("user32").EnumWindows(each, 0)
+    return found
+
+
 def test_sleep_and_session_end_are_signalled_while_windows_waits(qapp):
     watch = power.SessionWatch()
     heard = []
@@ -34,7 +43,7 @@ def test_sleep_and_session_end_are_signalled_while_windows_waits(qapp):
     watch.ending_soon.connect(lambda: heard.append("ending?"))
     watch.not_ending.connect(lambda: heard.append("not ending"))
     try:
-        assert watch.window_id
+        assert watch.window_id in top_level_windows()  # not message-only: Windows' broadcasts reach it
 
         send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_APMSUSPEND)
         assert heard == ["sleep"]  # handled before SendMessage returned

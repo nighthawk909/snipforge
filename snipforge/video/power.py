@@ -14,6 +14,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+from ctypes import wintypes
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject, Signal
 from PySide6.QtGui import QWindow
@@ -24,6 +25,7 @@ WM_QUERYENDSESSION = 0x0011
 WM_ENDSESSION = 0x0016
 WM_POWERBROADCAST = 0x0218
 PBT_APMSUSPEND = 0x0004
+WATCHED = (WM_QUERYENDSESSION, WM_ENDSESSION, WM_POWERBROADCAST)
 
 
 def classify(message: int, wparam: int) -> str | None:
@@ -44,12 +46,10 @@ class _Filter(QAbstractNativeEventFilter):
         self.watch = watch
 
     def nativeEventFilter(self, event_type, message):  # noqa: N802 - Qt API
-        if bytes(event_type) != b"windows_generic_MSG":
-            return False, 0
-        from ctypes import wintypes
-
+        # Every window message in the process passes through here (Windows only ever passes MSGs):
+        # let the others go quickly.
         msg = wintypes.MSG.from_address(int(message))
-        if msg.hWnd != self.watch.window_id:
+        if msg.message not in WATCHED or msg.hWnd != self.watch.window_id:
             return False, 0
         event = classify(msg.message, msg.wParam)
         if event is None:
@@ -95,9 +95,12 @@ class SessionWatch(QObject):
             ctypes.windll.user32.ShutdownBlockReasonDestroy(ctypes.c_void_p(self.window_id))
 
     def close(self) -> None:
-        if self._filter is not None:
-            QCoreApplication.instance().removeNativeEventFilter(self._filter)
-            self._filter = None
+        """Stop watching. Not while Windows is telling the window something (from one of the signals):
+        Qt goes on using the window after its filters."""
+        app = QCoreApplication.instance()
+        if self._filter is not None and app is not None:
+            app.removeNativeEventFilter(self._filter)
+        self._filter = None
         if self._window is not None:
             self.allow_shutdown()
             self._window.destroy()

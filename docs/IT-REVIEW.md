@@ -68,8 +68,8 @@ recording is made by its own copy of `SnipForge.exe`, started by SnipForge and e
 recording does, so nothing else SnipForge does can stall or lose a recording. The two talk over a
 local named pipe, `\\.\pipe\SnipForge-recorder-<user>-<random>`, that only the signed-in user can
 open, and only about the recording (its settings, pause/stop, how it went). It listens for Windows'
-sleep, shutdown and sign-out notices to finish the video file first; if Windows waits on it,
-Windows shows "Saving your screen recording" as the reason. The packaged self-test starts one and
+sleep, shutdown and sign-out notices to finish the video file first (that takes well under a
+second); if Windows ever has to wait on it, the reason it can show is "Saving your screen recording". The packaged self-test starts one and
 has it answer.
 
 **Explorer right-click commands** (`snipforge/share.py`). The Share menu invokes the same

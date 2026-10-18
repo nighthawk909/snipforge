@@ -1,31 +1,37 @@
 """The channel between SnipForge and its recorder process: one JSON object per line over a local
 socket (a named pipe on Windows), and the recording's settings as such an object.
 
-Each recording gets a socket name of its own, with a random part, that only this Windows user can
-open (QLocalServer.UserAccessOption). Whatever arrives is checked before it's used: a line that
-isn't a JSON object with a "type" is logged and skipped, and one longer than MAX_LINE closes the
-channel, since nothing either side sends comes near it.
+Each recording gets a random socket name of its own (no user name in it: any local user can list
+pipe names) that only this Windows user can open (QLocalServer.UserAccessOption). Whatever arrives
+is checked before it's used: a line that isn't a JSON object with a "type" is logged and skipped,
+and one longer than MAX_LINE closes the channel, since nothing either side sends comes near it.
 """
 from __future__ import annotations
 
-import getpass
 import json
 import logging
+import re
 import secrets
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 log = logging.getLogger(__name__)
 
 MAX_LINE = 64 * 1024
 WRITE_TIMEOUT_MS = 2000
+NAME = re.compile(r"SnipForge-recorder-[0-9a-f]{32}")
 
 
 def new_name() -> str:
     """A socket name for one recording."""
-    return f"SnipForge-recorder-{getpass.getuser()}-{secrets.token_hex(8)}"
+    return f"SnipForge-recorder-{secrets.token_hex(16)}"
+
+
+def is_name(text: str) -> bool:
+    """Whether `text` is a socket name new_name() makes."""
+    return bool(NAME.fullmatch(text))
 
 
 def listen(name: str) -> QLocalServer:
@@ -52,8 +58,8 @@ class Channel(QObject):
         self._open = True
         socket.readyRead.connect(self._read)
         socket.disconnected.connect(self._gone)
-        if socket.bytesAvailable():  # sent before we were listening
-            self._read()
+        if socket.bytesAvailable():  # sent before we were listening: read once the caller has connected
+            QTimer.singleShot(0, self, self._read)
 
     @property
     def is_open(self) -> bool:
@@ -80,6 +86,8 @@ class Channel(QObject):
         self._gone()
 
     def _read(self) -> None:
+        if not self._open:
+            return
         self._buffer += bytes(self.socket.readAll())
         *lines, self._buffer = self._buffer.split(b"\n")
         if len(self._buffer) > MAX_LINE or any(len(line) > MAX_LINE for line in lines):
@@ -92,6 +100,8 @@ class Channel(QObject):
                 self.message.emit(message)
 
     def _gone(self) -> None:
+        if self._open and self.socket.bytesAvailable():
+            self._read()  # its last words: a "cancel" sent just before closing must still count
         if self._open:
             self._open = False
             self.closed.emit()
@@ -102,7 +112,7 @@ def _parse(line: bytes) -> dict | None:
         return None
     try:
         message = json.loads(line)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (ValueError, RecursionError):  # not UTF-8 or JSON; absurdly long numbers; deep nesting
         message = None
     if not isinstance(message, dict) or not isinstance(message.get("type"), str):
         log.warning("The recorder channel skipped something that isn't a message: %.80r", line)
@@ -138,11 +148,10 @@ def settings_from_message(data) -> object:
 
     if not isinstance(data, dict):
         raise ValueError("The recording's settings are missing")
-    output = data.get("output")
-    if not isinstance(output, str) or "://" in output or not Path(output).is_absolute() \
-            or Path(output).suffix.lower() != ".mp4":
-        raise ValueError(f"A recording can't be saved as {output!r}")
+    output = _output_path(data.get("output"))
     effects = data.get("effects") or {}
+    if not isinstance(effects, dict):
+        raise ValueError("The recording's pointer settings must be on or off")
     flags = {name: effects.get(name, True) for name in ("pointer", "highlight", "clicks")}
     for name, value in [*flags.items(), ("microphone", data.get("microphone")),
                         ("system_audio", data.get("system_audio"))]:
@@ -154,8 +163,19 @@ def settings_from_message(data) -> object:
     area, max_size = data.get("area"), data.get("max_size")
     if not isinstance(area, list) or not (max_size is None or isinstance(max_size, list)):
         raise ValueError("The recording's area must be a list of numbers")
-    return Settings(area=tuple(area), output=Path(output), fps=data.get("fps"),
+    return Settings(area=tuple(area), output=output, fps=data.get("fps"),
                     max_size=tuple(max_size) if max_size is not None else None,
                     microphone=data["microphone"], microphone_id=data.get("microphone_id"),
                     system_audio=data["system_audio"], speakers_id=data.get("speakers_id"),
                     effects=PointerEffects(**flags))
+
+
+def _output_path(output) -> Path:
+    """The recording's file: an .mp4 on a local or mapped drive, named plainly. Not a network share
+    or a device or extended path (anything starting with two slashes), not climbing out with "..",
+    and no ":" after the drive (that names an alternate data stream on NTFS)."""
+    path = Path(output) if isinstance(output, str) and len(output) <= 1024 else None
+    if path is None or output.startswith(("\\\\", "//")) or "://" in output or ".." in path.parts \
+            or ":" in output[len(path.drive):] or not path.is_absolute() or path.suffix.lower() != ".mp4":
+        raise ValueError(f"A recording can't be saved as {output!r}")
+    return path

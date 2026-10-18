@@ -3,6 +3,8 @@ process, here played inside the test (a RecorderChild on a real channel, with a 
 everything said between SnipForge and the recorder is checked. The desktop suite runs the real
 process."""
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 
 from snipforge import __version__
-from snipforge.video import recorder_process
+from snipforge.video import recorder_process, remote_recorder
 from snipforge.video.channel import Channel, connect, listen, new_name
 from snipforge.video.recorder import ACTIVE, RecordingError, Result, Settings
 from snipforge.video.recorder_process import RecorderChild, channel_name
@@ -42,6 +44,8 @@ class FakeRecorder(QObject):
         self.calls.append("start")
         if self.settings.output.stem == "refuse":
             raise RecordingError("No screen to record")
+        if self.settings.output.stem == "slow":
+            return  # opening the devices takes a while: nothing said yet
         self._set("starting")
         QTimer.singleShot(0, self, lambda: (self._set("recording"), self.warning.emit("No microphone here")))
 
@@ -72,9 +76,10 @@ class FakeRecorder(QObject):
         return True
 
     def _finish(self):
-        if self.state == "finishing":
+        if self.state == "finishing" and self.settings.output.stem != "stuck":
             self._set("finished")
-            self.finished.emit(Result(self.settings.output, 1.25, {"frames_made": 37}))
+            stats = {"odd": {1, 2}} if self.settings.output.stem == "badstats" else {"frames_made": 37}
+            self.finished.emit(Result(self.settings.output, 1.25, stats))
 
     def _set(self, state):
         self.state = state
@@ -158,7 +163,8 @@ def test_a_recording_made_in_the_recorder_process(tmp_path, qapp):
     assert process.recorder.settings == remote.settings  # the settings arrived as sent
     assert process.recorder.calls == ["start", "pause", "resume", "stop"]
     assert (remote.pid, remote.window_id) == (os.getpid(), 4242)
-    assert process.exits == [0] and process.watch.closed
+    assert process.exits == [0] and process.watch.blocked is None
+    assert not process.watch.closed  # main() closes it, once Windows' callbacks are over
 
 
 def test_a_recorder_that_cant_start_says_why(tmp_path, qapp):
@@ -299,11 +305,16 @@ def test_a_ping_nobody_answers_raises(qapp):
         ping(launch=lambda args: True, timeout_ms=200)
 
 
+GOOD_NAME = "SnipForge-recorder-" + "0123456789abcdef" * 2
+
+
 @pytest.mark.parametrize("argv, expected", [
-    (["SnipForge.exe", "--record", "SnipForge-recorder-josh-0123abcd"], "SnipForge-recorder-josh-0123abcd"),
+    (["SnipForge.exe", "--record", GOOD_NAME], GOOD_NAME),
     (["SnipForge.exe", "--record"], None),
     (["SnipForge.exe", "--record", "SomethingElse"], None),
-    (["SnipForge.exe", "--record", "SnipForge-recorder-../../x"], None),
+    (["SnipForge.exe", "--record", "SnipForge-recorder-josh-0123abcd"], None),  # old style, with a user name
+    (["SnipForge.exe", "--record", GOOD_NAME.upper()], None),
+    (["SnipForge.exe", "--record", GOOD_NAME + "/x"], None),
     (["SnipForge.exe"], None),
 ])
 def test_the_recorder_only_takes_channel_names_snipforge_makes(argv, expected):
@@ -312,3 +323,87 @@ def test_the_recorder_only_takes_channel_names_snipforge_makes(argv, expected):
 
 def test_the_recorder_needs_its_channel_name():
     assert recorder_process.main(["SnipForge.exe", "--record"]) == 2
+
+
+def test_stopping_during_the_handshake_cancels_the_recorder_too(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path, name="slow")
+    remote.start()
+    assert wait_for(lambda: process.children and process.recorder is not None)
+    assert remote.state == "launching"  # connected, told to start, nothing heard yet
+
+    remote.stop()
+
+    assert seen["cancelled"] == [True] and seen["failures"] == []
+    assert wait_for(lambda: process.exits == [0])
+    assert process.recorder.calls == ["start", "cancel"]  # the recorder didn't carry on alone
+
+
+def test_a_recorder_that_breaks_while_reporting_still_exits(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path, name="badstats")
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+
+    remote.stop()
+
+    assert wait_for(lambda: process.exits == [0])  # the report couldn't be written; it ended anyway
+    assert wait_for(lambda: seen["failures"] == ["SnipForge's recorder stopped unexpectedly"])
+
+
+def test_a_ping_while_recording_is_ignored(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+
+    remote.channel.send("ping")
+    wait_for(lambda: False, 0.2)
+
+    assert process.exits == [] and process.recorder.state == "recording"
+
+
+def test_a_recorder_that_never_finishes_fails_the_recording(tmp_path, qapp, monkeypatch):
+    monkeypatch.setattr(remote_recorder, "FINISH_DEADLINE_MS", 300)
+    remote, process, seen = remote_for(tmp_path, name="stuck")
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+
+    remote.stop()
+
+    assert wait_for(lambda: seen["failures"] == ["SnipForge's recorder didn't finish the recording"])
+
+
+def test_a_recorder_that_dies_before_calling_back_is_noticed(tmp_path, qapp):
+    gone = subprocess.Popen([sys.executable, "-c", ""])
+    gone.wait()
+    remote = RemoteRecorder(settings(tmp_path), launch=lambda args: gone.pid)
+    failures = []
+    remote.failed.connect(failures.append)
+
+    remote.start()
+
+    assert wait_for(lambda: failures == ["SnipForge's recorder stopped before it started"], 3.0)
+
+
+def test_settings_the_recorder_would_refuse_stop_the_start_before_launching(qapp):
+    launched = []
+    remote = RemoteRecorder(Settings(area=(0, 0, 320, 240), output=Path("relative.mp4")),
+                            launch=lambda args: launched.append(args) or True)
+
+    with pytest.raises(RecordingError, match="can't be saved"):
+        remote.start()
+    assert launched == []
+
+
+def test_a_launch_that_raises_is_a_recording_error(tmp_path, qapp):
+    def explode(args):
+        raise OSError("no such program")
+
+    with pytest.raises(RecordingError, match="no such program"):
+        RemoteRecorder(settings(tmp_path), launch=explode).start()
+
+
+def test_a_process_that_has_exited_isnt_alive():
+    gone = subprocess.Popen([sys.executable, "-c", ""])
+    gone.wait()
+
+    assert remote_recorder.process_alive(os.getpid())
+    assert not remote_recorder.process_alive(gone.pid)

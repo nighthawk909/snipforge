@@ -1,11 +1,12 @@
 """The recorder process: `SnipForge.exe --record <channel>`, started by SnipForge for each recording.
 
 Recording in a process of its own means nothing else SnipForge does (an editor busy with a big
-image, a crash) can stall or lose a recording. It connects back to SnipForge over the channel
-(channel.py), says hello, gets the recording's settings, records, reports how it's going, and
-exits once the file is finished. Windows going to sleep or ending the session finishes the file
-there and then (power.py), and so does SnipForge going away: until the recording controls live in
-this process (step 6), SnipForge is the only way to stop it.
+image, a stall on its main thread) can hold up a recording. It connects back to SnipForge over the
+channel (channel.py), says hello, gets the recording's settings, records, reports how it's going,
+and exits once the recording has ended. Windows going to sleep or ending the session finishes the
+file there and then (power.py), and so does SnipForge going away: until the recording controls live
+in this process (step 6), SnipForge is the only way to stop it. Whatever makes this process quit, a
+recording in progress is finished first, so the file is kept.
 
     SnipForge                              recorder process
       start ─► launches it ──────────────► hello {pid, window, version}
@@ -24,29 +25,28 @@ import sys
 from PySide6.QtCore import QCoreApplication, QObject, QTimer
 
 from .. import __version__
-from .channel import Channel, connect, settings_from_message
+from .channel import Channel, connect, is_name, settings_from_message
 from .power import SessionWatch
 from .recorder import ACTIVE, Recorder, RecordingError
 
 log = logging.getLogger(__name__)
 
 RECORD_FLAG = "--record"
-NAME_PREFIX = "SnipForge-recorder-"
 CONNECT_TIMEOUT_MS = 10_000
 START_TIMEOUT_MS = 15_000  # from hello to being told what to record
 SLEEP_FINISH_SECONDS = 1.5  # Windows allows about 2 s before it sleeps
 END_FINISH_SECONDS = 4.0  # and about 5 s before it offers to end an app that holds up shutdown
+EXIT_FINISH_SECONDS = 10.0  # quitting for any other reason: finish the file first
 COMMANDS = ("pause", "resume", "stop", "cancel")
 
 
 def channel_name(argv: list[str]) -> str | None:
-    """The channel name after --record, if it looks like one SnipForge makes."""
+    """The channel name after --record, if it's one SnipForge makes."""
     try:
         name = argv[argv.index(RECORD_FLAG) + 1]
     except (ValueError, IndexError):
         return None
-    ok = name.startswith(NAME_PREFIX) and len(name) <= 256 and not any(c in name for c in '\\/:*?"<>|')
-    return name if ok else None
+    return name if is_name(name) else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -65,8 +65,12 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         log.error("%s", exc)
         return 3
-    _child = RecorderChild(Channel(socket), SessionWatch())  # noqa: F841 - lives until the app exits
-    return app.exec()
+    watch = SessionWatch()
+    child = RecorderChild(Channel(socket), watch)
+    sys.excepthook = child.unexpected  # an error in a slot ends the recording cleanly, not silently
+    code = app.exec()
+    watch.close()  # here, not while Windows is still telling its hidden window something
+    return code
 
 
 class RecorderChild(QObject):
@@ -89,21 +93,31 @@ class RecorderChild(QObject):
         channel.send("hello", pid=os.getpid(), window=watch.window_id, version=__version__)
         QTimer.singleShot(START_TIMEOUT_MS, self, self._check_told)
 
+    def unexpected(self, kind, error, trace) -> None:
+        """sys.excepthook: log it, keep what was recorded, and end."""
+        log.error("The recorder hit an unexpected problem", exc_info=(kind, error, trace))
+        if not self._done:
+            self.channel.send("warning", message=f"The recorder hit an unexpected problem: {error}")
+            self._finish(1)
+
     # --- from SnipForge --------------------------------------------------------------------------
 
     def _on_message(self, message: dict) -> None:
         kind = message["type"]
-        if kind == "start" and self.recorder is None:
-            self._start(message.get("settings"))
-        elif kind in COMMANDS and self.recorder is not None:
+        if self.recorder is None:
+            if kind == "start":
+                self._start(message.get("settings"))
+            elif kind == "ping":
+                self.channel.send("pong", version=__version__)
+                self._finish(0)
+            elif kind in ("quit", "stop", "cancel"):  # called off before it began
+                self._finish(0)
+            else:
+                log.warning("The recorder ignored %r before starting", kind)
+        elif kind in COMMANDS:
             getattr(self.recorder, kind)()
-        elif kind == "ping":
-            self.channel.send("pong", version=__version__)
-            self._finish(0)
-        elif kind == "quit" and self.recorder is None:
-            self._finish(0)
         else:
-            log.warning("The recorder ignored %r", kind)
+            log.warning("The recorder ignored %r while recording", kind)
 
     def _start(self, data) -> None:
         try:
@@ -142,7 +156,8 @@ class RecorderChild(QObject):
     def _sleep(self) -> None:
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
             self.ended_by = self.ended_by or "sleep"
-            self.recorder.finish_now(SLEEP_FINISH_SECONDS)
+            if not self.recorder.finish_now(SLEEP_FINISH_SECONDS):
+                self._late("Windows went to sleep before the recording was finished; it finishes on waking")
 
     def _ending_soon(self) -> None:
         if self.recorder is not None and self.recorder.state in ACTIVE:
@@ -150,29 +165,45 @@ class RecorderChild(QObject):
 
     def _ending(self) -> None:
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
-            self.ended_by = "session end"
-            self.recorder.finish_now(END_FINISH_SECONDS)
+            self.ended_by = self.ended_by or "session end"
+            if not self.recorder.finish_now(END_FINISH_SECONDS):
+                self._late("Windows ended the session before the recording was finished")
         self.watch.allow_shutdown()
+
+    def _late(self, message: str) -> None:
+        log.warning(message)
+        self.channel.send("warning", message=message)
 
     # --- to SnipForge ----------------------------------------------------------------------------
 
     def _finished(self, result) -> None:
-        self.channel.send("finished", path=str(result.path), duration=result.duration, stats=result.stats,
-                          ended_by=self.ended_by)
-        self._finish(0)
+        try:
+            self.channel.send("finished", path=str(result.path), duration=result.duration, stats=result.stats,
+                              ended_by=self.ended_by)
+        finally:
+            self._finish(0)
 
     def _report_failure(self, message: str) -> None:
-        self.channel.send("failed", message=message)
-        self._finish(1)
+        try:
+            self.channel.send("failed", message=message)
+        finally:
+            self._finish(1)
 
     def _cancelled(self) -> None:
-        self.channel.send("cancelled")
-        self._finish(0)
+        try:
+            self.channel.send("cancelled")
+        finally:
+            self._finish(0)
 
     def _finish(self, code: int) -> None:
+        """End this process, finishing a recording still in progress first. The hidden window
+        stays until the event loop has returned (main() closes it): this can run while Windows is
+        telling it something, and Qt goes on using it after its filters."""
         if self._done:
             return
         self._done = True
+        if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
+            self.recorder.finish_now(EXIT_FINISH_SECONDS)  # reports "finished" on the way
         self.channel.close()
-        self.watch.close()
+        self.watch.allow_shutdown()
         self._quit(code)

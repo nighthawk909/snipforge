@@ -1,5 +1,6 @@
 """snipforge/video/channel.py: messages between SnipForge and its recorder process."""
 import json
+import os
 import time
 from pathlib import Path
 
@@ -108,10 +109,62 @@ def test_only_this_user_can_open_a_recording_channel(qapp):
         server.close()
 
 
-def test_each_recording_gets_a_channel_of_its_own():
+def test_each_recording_gets_a_channel_of_its_own_without_the_user_name_in_it():
     first, second = ch.new_name(), ch.new_name()
 
-    assert first != second and first.startswith("SnipForge-recorder-")
+    assert first != second and ch.is_name(first) and ch.is_name(second)
+    assert os.environ.get("USERNAME", "nobody") not in first  # any local user can list pipe names
+
+
+def test_messages_sent_before_the_channel_was_made_arrive_once_connected(qapp):
+    name = ch.new_name()
+    server = ch.listen(name)
+    far_socket = ch.connect(name, 2000)
+    assert server.waitForNewConnection(2000)
+    near_socket = server.nextPendingConnection()
+    far_socket.write(b'{"type": "hello"}\n')
+    far_socket.flush()
+    assert wait_for(lambda: near_socket.bytesAvailable() > 0)
+
+    near = ch.Channel(near_socket)
+    got = received(near)  # connected after the channel was made, before Qt's events ran
+
+    assert wait_for(lambda: got == [{"type": "hello"}])
+    near.close()
+    far_socket.disconnectFromServer()
+    server.close()
+
+
+def test_hostile_json_is_skipped_and_what_follows_still_arrives(pair):
+    near, far, _server = pair
+    at_far = received(far)
+
+    near.socket.write(b"[" * 60_000 + b"\n" + b"9" * 5_000 + b"\n" + b'{"type": "stop"}\n')
+    near.socket.flush()
+
+    assert wait_for(lambda: at_far == [{"type": "stop"}]) and far.is_open
+
+
+def test_a_long_line_with_its_newline_still_closes_the_channel(pair):
+    near, far, _server = pair
+    closed = []
+    far.closed.connect(lambda: closed.append(True))
+
+    near.socket.write(b"x" * (ch.MAX_LINE + 10) + b"\n")
+    near.socket.flush()
+
+    assert wait_for(lambda: closed == [True])
+
+
+def test_a_last_message_sent_just_before_closing_still_counts(pair):
+    near, far, _server = pair
+    at_far = received(far)
+
+    near.send("cancel")
+    near.close()
+
+    assert wait_for(lambda: not far.is_open)
+    assert at_far == [{"type": "cancel"}]
 
 
 def test_settings_arrive_as_they_were_sent():
@@ -133,6 +186,11 @@ def test_settings_arrive_as_they_were_sent():
     ({"effects": {"pointer": "no"}}, "pointer setting"),
     ({"microphone_id": 5}, "isn't a device id"),
     ({"speakers_id": "x" * 600}, "isn't a device id"),
+    ({"output": "\\\\server\\share\\rec.mp4"}, "can't be saved"),
+    ({"output": "\\\\?\\C:\\rec.mp4"}, "can't be saved"),
+    ({"output": str(Path(OUTPUT).parent / ".." / "rec.mp4")}, "can't be saved"),
+    ({"output": str(Path(OUTPUT).parent / "notes.txt:hidden.mp4")}, "can't be saved"),
+    ({"effects": ["pointer"]}, "pointer settings"),
     ({"area": "0,0,320,240"}, "area must be a list"),
     ({"area": [0, 0, 320]}, "four whole numbers"),
     ({"fps": "30"}, "frames a second"),
