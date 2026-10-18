@@ -3,6 +3,24 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.14.0](https://github.com/nighthawk909/snipforge/compare/v0.13.0...v0.14.0) (2026-10-18)
+
+
+### Features
+
+* **combine:** put snips together side by side, stacked, in a grid or as numbered steps with captions ([#109](https://github.com/nighthawk909/snipforge/issues/109)) ([8a015dd](https://github.com/nighthawk909/snipforge/commit/8a015dd57c251a09d8a2f8897461d69be8b0ee93))
+
+
+### Performance
+
+* SnipForge starts in half the time, the Library reopens instantly, and the download is smaller ([#106](https://github.com/nighthawk909/snipforge/issues/106)) ([ff26c38](https://github.com/nighthawk909/snipforge/commit/ff26c38704da224a1404e08d143e75cd96881276))
+
+
+### Documentation
+
+* capture presets and 0.13.0 ticked off on the roadmap ([#104](https://github.com/nighthawk909/snipforge/issues/104)) ([d69d9d1](https://github.com/nighthawk909/snipforge/commit/d69d9d1cf152c80ef718a785bee904fd4efd387d))
+* speed and footprint, and Combine images, ticked off on the roadmap ([#110](https://github.com/nighthawk909/snipforge/issues/110)) ([24b9ebb](https://github.com/nighthawk909/snipforge/commit/24b9ebbdd0b2b2d38c4889084040cdc6f418d03a))
+
 ## [0.13.0](https://github.com/nighthawk909/snipforge/compare/v0.12.0...v0.13.0) (2026-10-18)
 
 
