@@ -3,6 +3,18 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.15.0](https://github.com/nighthawk909/snipforge/compare/v0.14.0...v0.15.0) (2026-10-18)
+
+
+### Features
+
+* **editor:** edit text in a screenshot, and Smart Move part of it somewhere else ([#111](https://github.com/nighthawk909/snipforge/issues/111)) ([8685ee0](https://github.com/nighthawk909/snipforge/commit/8685ee0e52d0a465961819789f590559a02d2a0f))
+
+
+### Documentation
+
+* Edit text and Smart Move, and 0.14.0, ticked off on the roadmap ([#113](https://github.com/nighthawk909/snipforge/issues/113)) ([d503148](https://github.com/nighthawk909/snipforge/commit/d5031481ab339c37ac316785ddd2507e3e305fe2))
+
 ## [0.14.0](https://github.com/nighthawk909/snipforge/compare/v0.13.0...v0.14.0) (2026-10-18)
 
 
