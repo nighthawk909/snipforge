@@ -286,7 +286,7 @@ def test_untouched_documents_have_no_image_entry(marked):
 
 @pytest.mark.parametrize("doc", [
     {"image": {"turns": 9, "size": [10, 10]}},  # damaged
-    {"image": {"turns": 1, "size": [100, 200], "crop_mode": "new"}, "version": 2},  # from a newer version
+    {"image": {"turns": 1, "size": [100, 200], "crop_mode": "new"}, "version": 99},  # from a newer version
 ])
 def test_markup_from_a_document_this_version_cant_draw_is_left_alone(marked, doc):
     from snipforge.editor.canvas import UnsupportedDocument

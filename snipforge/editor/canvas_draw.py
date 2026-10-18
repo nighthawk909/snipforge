@@ -34,7 +34,7 @@ TEXT_STAMP_STYLE = Style(color="#1c1c1e", fill=True, font_size=12, shadow=False)
 STAMP_INSET = 10.0
 MIN_STAMP_FONT, MAX_STAMP_FONT = 8, 28  # it grows with the snip: about 1 point per 100 px across
 # Tools made to go over things: a drag on markup draws with them unless that markup is selected.
-DRAW_OVER_TOOLS = {"highlight", "pixelate", "blur", "spotlight", "magnify", "erase"}
+DRAW_OVER_TOOLS = {"highlight", "pixelate", "blur", "spotlight", "magnify", "erase", "move"}
 UNDERLAY_Z = -100  # highlighter strokes and spotlights sit at or below this, under other markup
 
 
@@ -132,6 +132,8 @@ class DrawMixin:
             item = EffectItem(style, self.base_image, tool)
         elif tool == "erase":
             item = EraseItem(style, self.base_image)
+        elif tool == "move":  # Smart Move: the area dragged out is shown as it will be erased
+            item = EraseItem(self.tool_styles.get("erase", style), self.base_image)
         elif tool == "spotlight":
             item = SpotlightItem(style, self._image_rect)
         elif tool == "callout":
@@ -194,11 +196,34 @@ class DrawMixin:
             item.reset_tail()
         if item.is_degenerate():
             return
+        if self.tool == "move":
+            self._pick_up(item)
+            return
         self.undo_stack.push(AddItemsCommand(self._scene, [item]))
         self._select([item])
         if isinstance(item, CalloutItem):
             self.setFocus()
             item.start_text_editing()
+
+    def _pick_up(self, erase: EraseItem) -> None:
+        """Smart Move: the area becomes a piece you can drag anywhere, and Smart erase fills in where
+        it was (one undo step). The piece is the snip there as shown, so hidden parts stay hidden."""
+        from .piece import PieceItem, default_style
+
+        area = erase.scene_rect().toAlignedRect().intersected(self._image_rect.toAlignedRect())
+        if area.isEmpty():
+            return
+        try:
+            piece = PieceItem(default_style(), self.shown_pixels(area))
+        except ValueError:  # no memory for its picture
+            self.notice.emit("Couldn't pick that up: there isn't the memory for it.")
+            return
+        piece.set_scene_rect(QRectF(area))
+        piece.setZValue(erase.zValue() + 1)  # over its erase (they'd tie: neither is in the scene yet)
+        self.undo_stack.push(AddItemsCommand(self._scene, [erase, piece], "Smart Move"))
+        self.set_tool("select")
+        self._select([piece])
+        self.notice.emit("Drag the piece where you want it. Smart erase has filled in where it was.")
 
     def _commit_moves(self, befores: dict) -> None:
         records = [(i, before, i.get_state()) for i, before in befores.items()

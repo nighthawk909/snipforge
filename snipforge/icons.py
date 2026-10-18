@@ -122,6 +122,9 @@ _PATHS = {
         '<line x1="8" y1="11" x2="14" y2="11"/>'),
     "strip_vertical": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',  # Lucide columns-2
     "strip_horizontal": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18"/>',  # Lucide rows-2
+    # Lucide "move"
+    "move": ('<path d="M12 2v20"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/>'
+             '<path d="m5 9-3 3 3 3"/><path d="m9 5 3-3 3 3"/>'),
     "cutout": (
         '<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/>'
         '<circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>'),

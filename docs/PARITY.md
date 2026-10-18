@@ -41,6 +41,8 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | **Editor** | Markup tools, crop, undo, Beautify, quick styles | ✅ | ✅ CI self-test draws and renders | |
 | | Rotate, eyedropper, Magnify, edges, Cut out, Smart erase, stamp | ✅ | 🟡 | |
 | | Grab text, redaction suggestions | ✅ | ❌ | Phase 4: Vision |
+| | Edit text (retype a line in the snip) | ✅ | ❌ explains, as Grab text does | Phase 4: Vision |
+| | Smart Move | ✅ | 🟡 same code | |
 | | Save PNG, JPG, WebP, PDF | ✅ | 🟡 | |
 | | Copy, Drag out, Pin | ✅ | 🟡 | |
 | | Combine snips (side by side, stacked, grid, numbered steps) | ✅ | 🟡 same code; its shortcut is ⌘G there, which Mac apps use for Find Next | Mac port: pick a Mac shortcut |

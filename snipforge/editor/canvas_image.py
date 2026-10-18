@@ -112,8 +112,9 @@ class ImageMixin:
         self._overlay.set_bounds(self._image_rect.adjusted(-SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN))
 
     def _finish_gestures(self) -> None:
-        """Typing, a drag, a crop or the eyedropper in progress ends before the image changes under it."""
+        """Typing, a drag, a crop, the eyedropper or Edit text in progress ends before the image changes under it."""
         self.stop_picking()
+        self.stop_choosing()
         self.commit_text()
         self._cancel_drag()
         if self.tool == "crop":

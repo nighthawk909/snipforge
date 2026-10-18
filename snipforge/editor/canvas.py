@@ -5,12 +5,13 @@ those gestures draw, and canvas_view.py zoom, fit and the background.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QUndoStack
 from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
 from .. import theme
 from .beautify import BeautifyStyle
+from .canvas_choose import ChooseMixin
 from .canvas_clipboard import ClipboardMixin
 from .canvas_draw import DrawMixin
 from .canvas_image import ImageMixin
@@ -28,22 +29,41 @@ from .handles import HandleOverlay, OwnRubberBand
 from .image_ops import ImageGeometry
 from .items import Annotation, EffectItem
 from .style import DEFAULT_TOOL_STYLES, Style
-from .text_items import EditableText
+from .text_items import EditableText, TextItem
 
 DUPLICATE_OFFSET = 16.0
-DOCUMENT_VERSION = 1  # documents from newer versions are opened read-only (see load_document)
+DOCUMENT_VERSION = 2  # documents from newer versions are opened read-only (see load_document)
+# 2: moved pieces (Smart Move) and regular-weight text (Edit text), which version 1 can't show
 
 
 class UnsupportedDocument(ValueError):
     """Saved by a newer SnipForge, in a way this version can't show correctly."""
 
 
-class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsView):
+def document_version(states: list[dict]) -> int:
+    """The oldest document version that shows these items right: older SnipForges still open
+    every snip that doesn't need a newer one."""
+    for state in states:
+        if not isinstance(state, dict):  # kept unread from a damaged document
+            continue
+        style = state.get("style")
+        if state.get("kind") == "piece" or (isinstance(style, dict) and style.get("bold") is False):
+            return 2
+    return 1
+
+
+def _shows_snip(item) -> bool:
+    """Part of how the snip itself looks (what hides parts of it, and moved pieces of it)."""
+    return getattr(item, "hides_content", False) or getattr(item, "is_snip", False)
+
+
+class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, ImageMixin, ViewMixin, QGraphicsView):
     tool_changed = Signal(str)
     selection_changed = Signal()
     zoom_changed = Signal(float)
     document_changed = Signal()
     picking_changed = Signal(bool)  # the eyedropper started or ended
+    choosing_changed = Signal(bool)  # Edit text started or stopped offering lines to click
     color_picked = Signal(str)  # "#rrggbb", now the selection's or the tool's color
     notice = Signal(str)  # something to tell you in the status bar
     copy_requested = Signal()  # the right-click menu's Copy: the window copies (the snip, with Beautify)
@@ -122,6 +142,13 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewM
     def selected_annotations(self) -> list[Annotation]:
         return [i for i in self._scene.selectedItems() if isinstance(i, Annotation)]
 
+    def bottom_up(self, items) -> list[Annotation]:
+        """`items` in the order they're drawn, bottom first. Items on the same layer are drawn in
+        the order they were added, so saving, copying or duplicating them in this order keeps what's
+        on top on top (an Edit text's text over its erase, say)."""
+        order = {id(item): n for n, item in enumerate(reversed(self._scene.items()))}
+        return sorted(items, key=lambda item: order.get(id(item), -1))
+
     def editing_text_item(self) -> EditableText | None:
         item = self._scene.focusItem()
         return item if isinstance(item, EditableText) and item.is_editing() else None
@@ -145,6 +172,7 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewM
     # ------------------------------------------------------------------ tools and style
     def set_tool(self, tool: str) -> None:
         self.stop_picking()
+        self.stop_choosing()
         self.commit_text()
         if tool == "crop" and self.tool == "crop" and self._mask.editing:
             return  # re-choosing Crop mid-crop keeps your adjustments
@@ -197,15 +225,16 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewM
             self.undo_stack.push(RemoveItemsCommand(self._scene, items))
 
     def duplicate_selection(self) -> None:
-        sources = self.selected_annotations()
+        sources = self.bottom_up(self.selected_annotations())
         if not sources:
             return
-        copies = []
+        copies, top = [], self._next_z()
         for src in sources:
             state = src.get_state()
             state["pos"] = [state["pos"][0] + DUPLICATE_OFFSET, state["pos"][1] + DUPLICATE_OFFSET]
             if src.zValue() > -100:  # spotlights/highlighters keep their layer below annotations
-                state["z"] = self._next_z()
+                state["z"] = top
+                top += 1  # each copy over the one below it, as the originals are
             copies.append(self._adopt(create_item(state, self.base_image, self._image_rect)))
         self.undo_stack.push(AddItemsCommand(self._scene, copies, "Duplicate"))
         self._select(copies)
@@ -330,10 +359,11 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewM
 
     # ------------------------------------------------------------------ document
     def to_document(self) -> dict:
-        items = sorted(self.annotations(), key=lambda i: i.zValue())
+        items = self.bottom_up(self.annotations())
         r = self._crop_rect
         states = [i.get_state() for i in items if not i.is_degenerate()]
-        doc = {"version": 1, "crop": [r.x(), r.y(), r.width(), r.height()], "items": states + self._unparsed}
+        states += self._unparsed
+        doc = {"version": document_version(states), "crop": [r.x(), r.y(), r.width(), r.height()], "items": states}
         if not self._geometry.is_original(self.original_image):
             doc["image"] = self._geometry.to_dict()  # items and crop are on the turned/resized image
         if not self._edges.is_plain():
@@ -383,11 +413,60 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewM
             if hidden and not draft:
                 self._edge_item.setVisible(False)
 
+    def shown_pixels(self, rect: QRect | None = None) -> QImage:
+        """The snip under `rect` (all of it by default) as it looks with what hides parts of it
+        (smart erase, blur, pixelate) and the pieces Smart Move moved, without other markup or
+        edges: what Smart Move picks up and Edit text matches, so nothing hidden comes back through
+        them. A null image if there isn't the memory for it."""
+        whole = self._image_rect.toAlignedRect()
+        rect = (rect or whole).intersected(whole)
+        items = [i for i in self.annotations() if i.isVisible()]
+        others = [i for i in items if not _shows_snip(i)]
+        if len(others) == len(items) and rect == whole and self._edges.is_plain():
+            return self.base_image  # nothing changes how it looks: the snip itself (shared, not copied)
+        opacities = [(item, item.opacity()) for item in others]
+        edges = self._edge_item.isVisible()
+        for item, _ in opacities:
+            item.setOpacity(0.0)  # rather than hidden: hiding an item deselects it
+        self._edge_item.setVisible(False)
+        try:
+            return self._render_rect(rect)
+        finally:
+            for item, opacity in opacities:
+                item.setOpacity(opacity)
+            self._edge_item.setVisible(edges)
+
+    def edit_line(self, rect: QRectF, old_text: str, new_text: str) -> None:
+        """Edit text: smart-erase the line at `rect` and write `new_text` over it, matched in size
+        and colour, as one undo step. The new text is an ordinary text box (select it to change it)."""
+        from .edit_text import replacement, sample_area
+        from .erase import EraseItem
+
+        self.commit_text()
+        area = sample_area(rect).toAlignedRect().intersected(self._image_rect.toAlignedRect())
+        around = self.shown_pixels(area) if not area.isEmpty() else QImage()
+        if around.isNull():
+            self.notice.emit("Couldn't change that text: it isn't on the snip, or there isn't the memory for it.")
+            return
+        swap = replacement(around, QPointF(area.topLeft()), rect, old_text, self._image_rect)
+        erase = EraseItem(self.tool_styles.get("erase", Style()), self.base_image)
+        erase.set_scene_rect(swap.erase)
+        erase.setZValue(self._next_z())
+        if not new_text.strip():  # nothing typed: the line is just removed
+            self.undo_stack.push(AddItemsCommand(self._scene, [erase], "Edit text"))
+            self._select([erase])
+            return
+        text = self._adopt(TextItem(swap.style, new_text))
+        text.setPos(swap.pos)
+        text.setZValue(erase.zValue() + 1)  # over its erase (they'd tie: neither is in the scene yet)
+        self.undo_stack.push(AddItemsCommand(self._scene, [erase, text], "Edit text"))
+        self._select([text])
+
     def content_image(self) -> QImage:
-        """The snip with its smart erases filled in, without other markup: what Grab text and
-        Redact read, so text you erased isn't found again."""
-        from .erase import EraseItem, bake
-        return bake(self.base_image, [i for i in self.annotations() if isinstance(i, EraseItem)])
+        """The snip as it shows without markup (smart erases filled in, blurs blurred, moved pieces
+        where they were moved): what Grab text, Redact and Edit text read, so text that's hidden
+        isn't found again and moved text is found where it is now."""
+        return self.shown_pixels()
 
     def _render_rect(self, rect) -> QImage:
         """The snip and its markup inside `rect` (scene pixels), without crop shading or handles."""
@@ -450,6 +529,7 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewM
 
     def _on_undo_index(self, _index: int) -> None:
         self.stop_picking()  # the snip changed (undo, redo, a turn, a delete...): the eyedropper's picture is old
+        self.stop_choosing()  # and Edit text's lines may not be where they were
         self._overlay.update()
         self.selection_changed.emit()
         self.document_changed.emit()

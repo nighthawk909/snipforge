@@ -27,6 +27,7 @@ class PickMixin:
         return self._pick_source is not None
 
     def start_picking(self) -> None:
+        self.stop_choosing()
         self.commit_text()
         self._cancel_drag()
         if self.tool == "crop":

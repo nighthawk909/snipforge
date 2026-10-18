@@ -63,6 +63,7 @@ class Style:
     shape: str = "rounded"   # callout body
     tail: bool = True        # callout pointer
     stamp: str = "check"     # stamp artwork
+    bold: bool = True        # text boxes (Edit text writes regular weight, to match the snip)
 
     def to_dict(self) -> dict:
         return asdict(self)

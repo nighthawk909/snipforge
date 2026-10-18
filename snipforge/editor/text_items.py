@@ -99,7 +99,7 @@ class TextItem(Annotation, EditableText):
         self._apply_text_style()
 
     def _apply_text_style(self) -> None:
-        self.setFont(_font(self.style.font_size, QFont.Bold))
+        self.setFont(_font(self.style.font_size, QFont.Bold if self.style.bold else QFont.Normal))
         self.setDefaultTextColor(fill_ink(self.kind, self.style) if self.style.fill else QColor(self.style.color))
 
     def _geometry(self) -> dict:

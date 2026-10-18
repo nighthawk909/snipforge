@@ -29,7 +29,7 @@ TOOL_KEYS = {
     Qt.Key_E: "ellipse", Qt.Key_P: "pen", Qt.Key_H: "highlight", Qt.Key_T: "text",
     Qt.Key_K: "callout", Qt.Key_I: "stamp", Qt.Key_N: "step", Qt.Key_X: "pixelate",
     Qt.Key_B: "blur", Qt.Key_S: "spotlight", Qt.Key_M: "magnify", Qt.Key_C: "crop", Qt.Key_U: "cutout",
-    Qt.Key_W: "erase",
+    Qt.Key_W: "erase", Qt.Key_G: "move",
 }
 NUDGE_KEYS = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
 TEXT_TOOLS = {"text", "callout"}
@@ -51,6 +51,10 @@ class InputMixin:
             return  # Enter held down after a keyboard pick mustn't go on to edit the selection
         if self.picking() and e.key() == Qt.Key_Escape:
             self.stop_picking()
+            return
+        if self.choosing() and e.key() != Qt.Key_Space:  # Edit text: Esc stops choosing, Space pans,
+            if e.key() == Qt.Key_Escape:  # and other keys wait for the choice
+                self.stop_choosing()
             return
         if self.picking() and self._pick_key(e):
             return
@@ -141,9 +145,13 @@ class InputMixin:
 
     # ------------------------------------------------------------------ mouse
     def mousePressEvent(self, e) -> None:
-        self._skip_menu = self.picking() and e.button() == Qt.RightButton
+        self._skip_menu = (self.picking() or self.choosing()) and e.button() == Qt.RightButton
         if self._skip_menu:
             self.stop_picking()  # right-click cancels, as in most apps
+            self.stop_choosing()
+            return
+        if self.choosing() and e.button() == Qt.LeftButton and not self._panning:
+            self._choose_press(self.mapToScene(e.position().toPoint()))
             return
         if self._panning or e.button() != Qt.LeftButton:
             super().mousePressEvent(e)
@@ -210,6 +218,9 @@ class InputMixin:
         pos = self.mapToScene(view_pos)
         shift = bool(e.modifiers() & Qt.ShiftModifier)
         drag = self._drag
+        if self.choosing() and not self._panning:
+            self._choose_hover(pos)
+            return
         if self.picking():
             if self._panning:  # Space+drag still pans
                 self._loupe.hide()
@@ -258,6 +269,9 @@ class InputMixin:
             self._just_picked = False
             if self.picking():
                 self.mousePressEvent(e)
+            return
+        if self.choosing():  # Edit text: a double-click is a click, never typing into a text box
+            self.mousePressEvent(e)
             return
         view_pos = e.position().toPoint()
         hit = None if e.modifiers() & Qt.AltModifier else self._annotation_at(view_pos)
