@@ -130,6 +130,41 @@ def test_copying_a_recording_gives_windows_a_file_to_paste(qapp, tmp_path):
         home.close()
 
 
+_COPY_AND_QUIT = """
+import sys, tempfile
+from pathlib import Path
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication
+QSettings.setDefaultFormat(QSettings.IniFormat)
+QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, tempfile.mkdtemp())  # never the real settings
+app = QApplication([])
+from snipforge.home import HomeWindow
+from snipforge.library import Library, write_recording_details
+from snipforge.video import recordings
+lib = Library(Path(sys.argv[1]))
+video = recordings.new_recording(lib.root)
+video.write_bytes(b"not really a video")
+write_recording_details(video, 1.0, (320, 240))
+home = HomeWindow(lib, on_new_snip=lambda: None, on_open_entry=lambda entry_id: None)
+home._copy(video.parent.name)
+home.close()
+print("copied", flush=True)
+"""
+
+
+def test_the_app_quits_cleanly_after_copying_a_recording(tmp_path):
+    """The video file Copy leaves on the clipboard is let go of while Python is still there (offscreen,
+    it isn't: see conftest)."""
+    import subprocess
+    import sys
+
+    env = {**os.environ, "QT_QPA_PLATFORM": "windows"}
+    done = subprocess.run([sys.executable, "-c", _COPY_AND_QUIT, str(tmp_path / "Library")], env=env,
+                          capture_output=True, text=True, timeout=120, cwd=str(Path(__file__).parents[2]))
+
+    assert done.returncode == 0 and "copied" in done.stdout, done.stdout[-2000:] + done.stderr[-2000:]
+
+
 def test_title_bar_follows_the_theme(window):
     """Windows 11 accepts SnipForge's dark/light and caption colors for a real window."""
     import ctypes

@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 import shiboken6
 from PySide6.QtCore import QEvent, QSettings
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from snipforge.settings import app_settings
@@ -64,6 +64,18 @@ def _isolated_settings():
     assert os.path.normcase(os.path.normpath(probe.fileName())).startswith(
         os.path.normcase(os.path.normpath(_SETTINGS_DIR))), "tests must never touch real settings"
     yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _clipboard_let_go_before_python_exits():
+    """Offscreen, Qt keeps what's on the clipboard in a C++ static that's freed only after Python has
+    shut down. Something put there from Python (the QMimeData Copy makes for a recording) then
+    reaches into the dead interpreter as it's freed: a segfault on exit, exit code 139, whenever the
+    file that put it there runs last. Windows and macOS free the clipboard with the QApplication,
+    while Python is still there, so the app itself is fine (tests/desktop checks)."""
+    yield
+    if QApplication.instance() is not None and QGuiApplication.platformName() == "offscreen":
+        QGuiApplication.clipboard().clear()
 
 
 @pytest.fixture(autouse=True)
