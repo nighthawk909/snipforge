@@ -41,6 +41,7 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | Grab text, redaction suggestions | ✅ | ❌ | Phase 4: Vision |
 | | Save PNG, JPG, WebP, PDF | ✅ | 🟡 | |
 | | Copy, Drag out, Pin | ✅ | 🟡 | |
+| | Copy, cut and paste markup between snips; right-click menu | ✅ | 🟡 Qt's clipboard and menus; the private markup format needs a check on a real Mac | A tester confirms |
 | **Share** | Send in Teams | ✅ | 🟡 | |
 | | Email | ✅ Outlook draft with the snip | 🟡 copies, opens the mail app | Phase 5: compose-email service |
 | | OneDrive link, share sheet | ✅ | ❌ hidden | Phase 5: `NSSharingServicePicker` |

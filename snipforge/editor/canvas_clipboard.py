@@ -46,11 +46,6 @@ def wrap_text(text: str, metrics: QFontMetricsF, width: float) -> str:
     return "\n".join(lines)
 
 
-def key_text(shortcut: str) -> str:
-    """A shortcut as this platform writes it: Ctrl+V here, ⌘V on a Mac."""
-    return QKeySequence(shortcut).toString(QKeySequence.NativeText)
-
-
 def _no_constants(name: str):
     raise ValueError(f"{name} isn't a number a snip uses")
 

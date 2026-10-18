@@ -34,7 +34,7 @@ from . import beautify
 from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
-from .canvas_clipboard import MARKUP_MIME, key_text
+from .canvas_clipboard import MARKUP_MIME
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
 from .export import SAVE_FILTERS, ExportError, filter_for, save_image, with_suffix
 from .export import fits as export_fits
@@ -445,13 +445,13 @@ class EditorWindow(QMainWindow):
         QGuiApplication.clipboard().setMimeData(mime)
         message = "Copied to clipboard with Beautify" if self._beautify else "Copied to clipboard"
         if with_markup:
-            message += f". {key_text('Ctrl+V')} in a snip pastes the selected markup"
+            message += f". {keys('Ctrl+V')} in a snip pastes the selected markup"
         self.statusBar().showMessage(message, 5000 if with_markup else 2500)
 
     def cut(self) -> None:
         """Ctrl+X: the selected markup. (While you type, the text takes Ctrl+X, Ctrl+C and Ctrl+V itself.)"""
         if self.canvas.cut_selection():
-            self.statusBar().showMessage(f"Cut. {key_text('Ctrl+V')} in a snip pastes it", 4000)
+            self.statusBar().showMessage(f"Cut. {keys('Ctrl+V')} in a snip pastes it", 4000)
 
     def paste(self) -> None:
         """Ctrl+V: markup copied in any snip, or text as a text box."""
