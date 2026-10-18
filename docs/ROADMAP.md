@@ -97,9 +97,10 @@ turns each item into an issue labelled `feedback`, a tested fix and a PR.
 
 ## Mac port (after Windows)
 The macOS API for each step is in [MAC-PLAN.md](MAC-PLAN.md); [PARITY.md](PARITY.md) tracks every
-feature. Today the Mac version has the shared core (editor, Library, Settings) and none of the
-operating-system pieces.
-- [ ] Phase 1: an app people can try: Screen Recording check, Mac wording and fonts, back when
+feature. Today the Mac version has the shared core (editor, Library, Settings), Area and Full
+screen snips with the Screen Recording check, and Mac wording; the other operating-system pieces
+come in the phases below. It's in every release as a .dmg.
+- [x] Phase 1: an app people can try: Screen Recording check, Mac wording and fonts, back when
   reopened (#90)
 - [ ] Phase 2: click a window to snip it, and where each snip came from
 - [ ] Phase 3: the snip shortcut and shortcuts of your own
