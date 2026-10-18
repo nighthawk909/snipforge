@@ -124,11 +124,11 @@ def test_markup_follows_the_image(marked):
 
 def test_text_and_stamps_stay_upright_and_centred(marked):
     c = make_canvas(marked)
+    stamp = drag(c, "stamp", (100, 40), (140, 80))  # before the text: a drag starting on markup moves it
     text = TextItem(Style(), "Note")
     text.setPos(40, 30)
     c._scene.addItem(text)
     center = text.sceneBoundingRect().center()
-    stamp = drag(c, "stamp", (100, 40), (140, 80))
     c.rotate_image(True)
     moved = QTransform(0, 1, -1, 0, 100, 0).map(center)
     assert (text.sceneBoundingRect().center() - moved).manhattanLength() < 1
