@@ -1,6 +1,7 @@
 """snipforge/video/recorder.py: what a recording needs from the computer before it starts (support.py)
 and the drive while it runs (disk_space.py)."""
 import sys
+import weakref
 
 import pytest
 
@@ -60,7 +61,8 @@ def test_a_nearly_full_drive_stops_the_recording_and_keeps_it(tmp_path, qapp, mo
     monkeypatch.setattr(recorder_module, "DISK_CHECK_SECONDS", 0.05)
 
     def filling(recorder):  # full half a second into the recording itself, however long it took to start
-        recorder.free_space = lambda folder: (150 if recorder.media_time() > 0.5 else 5000) * MB
+        recording = weakref.ref(recorder)  # not the recorder itself: no cycle for the collector to free
+        recorder.free_space = lambda folder: (150 if recording().media_time() > 0.5 else 5000) * MB
 
     _recorder, outcome, warnings = record(tmp_path, [(10.0, "stop")], prepare=filling)
 
@@ -73,8 +75,10 @@ def test_a_drive_that_cant_be_read_mid_recording_doesnt_end_it(tmp_path, qapp, m
     monkeypatch.setattr(recorder_module, "DISK_CHECK_SECONDS", 0.05)
 
     def unplugged_and_back(recorder):
+        recording = weakref.ref(recorder)
+
         def read(folder):
-            if 0.2 < recorder.media_time() < 0.6:
+            if 0.2 < recording().media_time() < 0.6:
                 raise OSError(21, "The device is not ready")
             return 5000 * MB
         recorder.free_space = read

@@ -68,10 +68,12 @@ class Encoder(QObject):
         self._first_sent = False  # frame 0 must reach the encoder: Qt times everything from it
         self._ready_inputs: set[str] = set()
         self._inputs = {"video", "audio"} if audio else {"video"}
-        self.session = M.QMediaCaptureSession()
+        # Qt children of the encoder: freed with it, in a safe order (session first, which lets go of
+        # the rest), never one at a time in whatever order Python's cycle collector picks.
+        self.session = M.QMediaCaptureSession(self)
         video_format = M.QVideoFrameFormat(QSize(*frame_size), M.QVideoFrameFormat.PixelFormat.Format_BGRX8888)
         video_format.setStreamFrameRate(fps)
-        self.video = M.QVideoFrameInput(video_format)
+        self.video = M.QVideoFrameInput(video_format, self)
         self.session.setVideoFrameInput(self.video)
         self.sound = self.audio_format = None
         if audio:
@@ -79,9 +81,12 @@ class Encoder(QObject):
             self.audio_format.setSampleRate(SAMPLE_RATE)
             self.audio_format.setChannelCount(CHANNELS)
             self.audio_format.setSampleFormat(M.QAudioFormat.SampleFormat.Float)
-            self.sound = M.QAudioBufferInput(self.audio_format)
+            self.sound = M.QAudioBufferInput(self.audio_format, self)
             self.session.setAudioBufferInput(self.sound)
-        self.recorder = M.QMediaRecorder()
+        self.recorder = M.QMediaRecorder(self)
+        from . import ffmpeg
+
+        ffmpeg.quiet_logs()  # now Qt's FFmpeg plugin is loaded: its log lines could land in the file
         self.session.setRecorder(self.recorder)
         self._configure(output_size)
         self._connections = [(self.recorder.errorOccurred, self._on_error),
