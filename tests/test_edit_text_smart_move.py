@@ -124,7 +124,7 @@ def tight(text, size):
 
 def test_the_new_text_is_as_wide_as_the_old_unless_that_makes_it_far_taller(qapp):
     old = tight("Total due 120", 20)  # how the line looks at 20 px, in the font the editor uses
-    assert edit_text.fitted_size("Total due 120", old.width() + 0.5, old.height()) == 20
+    assert edit_text.fitted_size("Total due 120", old.width() + 0.25, old.height()) == 20
     squeezed = edit_text.fitted_size("Total due 120", old.width() / 3, old.height())  # recognition's width is off
     assert abs(tight("Total due 120", squeezed).height() - old.height()) <= 0.25 * old.height()
 
@@ -374,13 +374,22 @@ def test_moving_a_piece_keeps_what_was_selected_selected(page):
 
 
 # --- What the second review found --------------------------------------------------------------
-def stacked(pitch):
-    """Three lines of 13 px text, `pitch` apart; their letters as drawn, each line's on its own."""
+def stacked(gap):
+    """Three lines of 13 px text with `gap` blank rows between them (whatever the font is here);
+    their letters as drawn, each line's on its own."""
     img = QImage(320, 120, QImage.Format_ARGB32)
     img.fill(QColor("#ffffff"))
     font = QFont("Segoe UI")
     font.setPixelSize(13)
     texts = ["Total due by Friday 120", "Paid", "Questions? Ask the team"]
+    probe = QImage(img.size(), QImage.Format_ARGB32)
+    probe.fill(QColor("#ffffff"))
+    p = QPainter(probe)
+    p.setFont(font)
+    p.setPen(QColor("#222222"))
+    p.drawText(QPointF(20, 40), " ".join(texts))
+    p.end()
+    pitch = inked(probe, probe.rect()).height() + gap
     letters = []
     for n, text in enumerate(texts):
         alone = QImage(img.size(), QImage.Format_ARGB32)
@@ -395,9 +404,9 @@ def stacked(pitch):
     return img, texts, letters
 
 
-@pytest.mark.parametrize("pitch", [13, 16, 20])
-def test_a_box_between_two_lines_never_takes_in_the_other_line(qapp, pitch):
-    img, texts, letters = stacked(pitch)
+@pytest.mark.parametrize("gap", [3, 5, 8])
+def test_a_box_between_two_lines_never_takes_in_the_other_line(qapp, gap):
+    img, texts, letters = stacked(gap)
     middle = letters[1]
     for recognized in (middle, middle.adjusted(0, -0.72 * middle.height(), 0, -0.54 * middle.height())):
         swap = edit_text.replacement(img, QPointF(0, 0), recognized, texts[1], QRectF(img.rect()))

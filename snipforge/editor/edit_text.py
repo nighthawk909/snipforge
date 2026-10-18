@@ -175,7 +175,7 @@ def fitted_size(text: str, width: float, height: float) -> int:
                 high = middle - 1
         return max(FONT_RANGE[0], low)
 
-    by_width = largest(lambda m, _s: m.horizontalAdvance(sample) <= width)
+    by_width = largest(lambda m, _s: m.tightBoundingRect(sample).width() <= width)  # letters to letters
     letters = QFontMetricsF(_font(by_width)).tightBoundingRect(sample).height()
     if 0.75 * height <= letters <= 1.35 * height:
         return by_width
