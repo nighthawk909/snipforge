@@ -40,7 +40,7 @@ the Mac port measures it. The self-test also checks that Qt has a TLS back-end f
   listed is tried again next time. Changes made outside SnipForge that write a file in place (an
   editor, a restore that keeps folder times) show after **F5** in the Library, or the next start.
 - **The installer leaves out what SnipForge never uses:** Python's own OpenSSL (SnipForge goes online
-  only through Qt, which brings its own), Qt's translations of its dialogs (SnipForge never loads a
+  only through Qt's network stack, which has its own TLS), Qt's translations of its dialogs (SnipForge never loads a
   translator), the Direct2D, minimal and touch-over-network plugins, and zstd archives.
   `tests/test_packaging.py` fails if SnipForge starts needing one of them.
 
