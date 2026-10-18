@@ -216,3 +216,35 @@ def test_a_long_private_title_keeps_its_marker_when_read():
     title = "A very long page title " * 20 + "- Google Chrome (Incognito)"  # about 490 characters
     assert len(title) < winrects.TITLE_MAX  # read whole, so the marker at the end is still there
     assert privacy.is_private_window(title, "Chrome")
+
+
+def test_the_sweep_outlives_the_app_without_touching_qt(qapp, tmp_path, monkeypatch, no_dialogs, clean_sweep_pref):
+    """The sweep's thread used to signal a Qt object, which crashed the process when that object
+    went away first (between tests, or at quit). Now it only leaves a result for the GUI thread."""
+    import gc
+
+    from PySide6.QtCore import QEvent
+
+    from snipforge.library import Library
+    library = Library(tmp_path)
+    started, go_on, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def slow(stop):
+        started.set()
+        go_on.wait(5)
+        finished.set()
+        return 0, True
+
+    monkeypatch.setattr(library, "forget_private_titles", slow)
+    forge = _forge(qapp, library, monkeypatch)
+    assert started.wait(5)
+    forge.indexer.close()
+    forge._shortcuts.close()
+    forge._privacy_check.stop()
+    del forge
+    gc.collect()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    go_on.set()  # the worker finishes after the app is gone
+    assert finished.wait(5)
+    time.sleep(0.1)
+    QApplication.processEvents()
