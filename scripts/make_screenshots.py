@@ -221,8 +221,8 @@ def settings_shots(theme_manager) -> None:
 
     controller = FakeController()
     shortcuts = GlobalShortcuts(api=FakeApi())  # nothing is really registered for a screenshot
-    shortcuts.set("repeat", "Ctrl+Shift+R")
-    prefs.set_shortcut("repeat", "Ctrl+Shift+R")
+    shortcuts.set("repeat", "Ctrl+Shift+F9")
+    prefs.set_shortcut("repeat", "Ctrl+Shift+F9")
     window = SettingsWindow(theme_manager=theme_manager, update_controller=controller, shortcuts=shortcuts,
                             library_root=Path.home() / "Pictures" / "SnipForge" / "Library")
     window.resize(WIDTH, 1040)

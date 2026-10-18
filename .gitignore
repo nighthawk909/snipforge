@@ -11,3 +11,6 @@ dist/
 .coverage
 htmlcov/
 .claude/settings.local.json
+
+# Claude Code agents' worktrees (each a separate checkout)
+.claude/worktrees/
