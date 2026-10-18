@@ -3,6 +3,40 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.11.0](https://github.com/nighthawk909/snipforge/compare/v0.10.0...v0.11.0) (2026-10-18)
+
+
+### Features
+
+* **capture:** Repeat last snip, and shortcuts of your own ([#45](https://github.com/nighthawk909/snipforge/issues/45)) ([ee52786](https://github.com/nighthawk909/snipforge/commit/ee527861b1dcaf8f335f23d9c2ce3fa7e2bd0ceb))
+* **editor:** an "App name and date" stamp: where and when you took the snip ([#62](https://github.com/nighthawk909/snipforge/issues/62)) ([5744cad](https://github.com/nighthawk909/snipforge/commit/5744cadf0a9aa6ea2915e7d13bb6b5e1767173dd))
+* **editor:** an eyedropper to pick any color from your snip ([#52](https://github.com/nighthawk909/snipforge/issues/52)) ([5e809e3](https://github.com/nighthawk909/snipforge/commit/5e809e37b72e0a157d4867ccfb190d7f67e73db5))
+* **editor:** edge effects: a border, torn edges, and Cut out to remove a strip ([#59](https://github.com/nighthawk909/snipforge/issues/59)) ([7f8d512](https://github.com/nighthawk909/snipforge/commit/7f8d512d8774e22b3adea7790eb23a8498f99431))
+* **editor:** Magnify: a lens that shows part of your snip enlarged ([#58](https://github.com/nighthawk909/snipforge/issues/58)) ([e82af75](https://github.com/nighthawk909/snipforge/commit/e82af75b3692d48b72c6ed579d3173f85c0d291f))
+* **editor:** rotate, flip and resize the snip, with your markup following along ([#51](https://github.com/nighthawk909/snipforge/issues/51)) ([6d559e3](https://github.com/nighthawk909/snipforge/commit/6d559e314baa42656f33a08a6c1dc41eb6270292))
+* **editor:** save your own quick styles, kept for next time ([#54](https://github.com/nighthawk909/snipforge/issues/54)) ([790cda1](https://github.com/nighthawk909/snipforge/commit/790cda1f312164c1e95c81346396e1da4c263f7d))
+* **editor:** Smart erase: remove something and fill the area in from around it ([#64](https://github.com/nighthawk909/snipforge/issues/64)) ([5337b2c](https://github.com/nighthawk909/snipforge/commit/5337b2c856f3ada4ca3d5054aae1ba87ac127c76))
+* **library:** recordings in the Library, with a thumbnail and their length, opened in the video editor ([#60](https://github.com/nighthawk909/snipforge/issues/60)) ([e42e6a6](https://github.com/nighthawk909/snipforge/commit/e42e6a63dabe196013738759571ff33f07b1b89b))
+* **saving:** save snips as WebP or PDF ([#67](https://github.com/nighthawk909/snipforge/issues/67)) ([aeecfc4](https://github.com/nighthawk909/snipforge/commit/aeecfc443f21efaeb9c8ee5855a1c8632ba65a17))
+* **video:** a video editor to play a recording, trim it to the frame and export a GIF ([#47](https://github.com/nighthawk909/snipforge/issues/47)) ([cc32043](https://github.com/nighthawk909/snipforge/commit/cc320435111d6077cdf88ba2aef11b3aa2d513f2))
+* **video:** record a video of an area: Record on the capture toolbar, a ready panel with live sound meters, a countdown and a control bar ([#55](https://github.com/nighthawk909/snipforge/issues/55)) ([5b2e14c](https://github.com/nighthawk909/snipforge/commit/5b2e14c12ae45024733dc821a763e38347a09664))
+* **video:** recordings are made in a process of their own, which finishes the file before Windows sleeps, shuts down or signs out ([#50](https://github.com/nighthawk909/snipforge/issues/50)) ([8f0a9ec](https://github.com/nighthawk909/snipforge/commit/8f0a9ec9d05ff571320a64fc4f3ca36d75902cf2))
+* **video:** recordings keep Windows awake, pause when you lock it, and say if the screen went off ([#61](https://github.com/nighthawk909/snipforge/issues/61)) ([c907d1d](https://github.com/nighthawk909/snipforge/commit/c907d1deac68a3483678eed8fe88036d1ccaa4eb))
+* **video:** your webcam in recordings: a bubble you can move, drawn into the video ([#57](https://github.com/nighthawk909/snipforge/issues/57)) ([bf05081](https://github.com/nighthawk909/snipforge/commit/bf05081715f620d93181bcf00764c2f6a03d0810))
+
+
+### Bug fixes
+
+* **privacy:** private windows in more browsers and languages never keep their title ([#65](https://github.com/nighthawk909/snipforge/issues/65)) ([8d3e3fe](https://github.com/nighthawk909/snipforge/commit/8d3e3fe7ead76b40f7b59eb9966a4520a029ac1a))
+* **settings:** shortcuts of your own can't take Ctrl+Shift combinations apps rely on ([#53](https://github.com/nighthawk909/snipforge/issues/53)) ([864acd5](https://github.com/nighthawk909/snipforge/commit/864acd52e76a5bdc2c62794d6a5e351ab0fee824))
+* **video:** recording checks there's room on the drive, and stops in time to save the video when it fills up ([#48](https://github.com/nighthawk909/snipforge/issues/48)) ([1b6679c](https://github.com/nighthawk909/snipforge/commit/1b6679cd316c25abcfc45537bf5ece28510ad905))
+
+
+### Documentation
+
+* **readme:** screen recording: recording a video, the video editor, and recordings in the Library ([#63](https://github.com/nighthawk909/snipforge/issues/63)) ([0c44f01](https://github.com/nighthawk909/snipforge/commit/0c44f0119c531ffc7ce431061fea88daa4b6f321))
+* **readme:** screenshots and the download page show the new editor tools ([#68](https://github.com/nighthawk909/snipforge/issues/68)) ([5267df2](https://github.com/nighthawk909/snipforge/commit/5267df201bb26ade9d57b4a821b95f6c160fe355))
+
 ## [0.10.0](https://github.com/nighthawk909/snipforge/compare/v0.9.0...v0.10.0) (2026-10-17)
 
 
