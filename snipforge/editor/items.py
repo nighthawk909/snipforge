@@ -14,19 +14,26 @@ from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPaint
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsItem
 
 from ..fonts import ui_font
-from .style import Style
+from .style import Style, fill_qcolor
 
 FLAGS = QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable
 HIT_SLOP = 8.0
 
 
-def make_pen(color: QColor, width: float, dash: bool = False) -> QPen:
+def make_pen(color: QColor, width: float, dash: bool = False, dotted: bool = False) -> QPen:
     pen = QPen(color, width)
     pen.setCapStyle(Qt.RoundCap)
     pen.setJoinStyle(Qt.RoundJoin)
-    if dash:
-        pen.setDashPattern([2.2, 2.0])  # in units of pen width
+    if dash and dotted:
+        pen.setDashPattern([0.01, 2.0])  # in units of pen width; round caps turn each into a dot
+    elif dash:
+        pen.setDashPattern([2.2, 2.0])
     return pen
+
+
+def style_pen(style: Style, width: float | None = None) -> QPen:
+    """The outline pen for `style`: its color and line (solid, dashed or dotted)."""
+    return make_pen(QColor(style.color), style.width if width is None else width, style.dash, style.dotted)
 
 
 def constrain_45(origin: QPointF, point: QPointF) -> QPointF:
@@ -237,15 +244,9 @@ class _OutlineShape(BoxItem):
         return stroke_band(self._outline(), self.style.width + HIT_SLOP * 2)
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
-        color = QColor(self.style.color)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(make_pen(color, self.style.width, self.style.dash))
-        if self.style.fill:
-            tint = QColor(color)
-            tint.setAlpha(70)
-            p.setBrush(tint)
-        else:
-            p.setBrush(Qt.NoBrush)
+        p.setPen(style_pen(self.style))
+        p.setBrush(fill_qcolor(self.kind, self.style) if self.style.fill else Qt.NoBrush)
         p.drawPath(self._outline())
 
 
@@ -461,7 +462,7 @@ class LineItem(Annotation, QGraphicsItem):
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(make_pen(QColor(self.style.color), self.style.width, self.style.dash))
+        p.setPen(style_pen(self.style))
         p.drawLine(self._p1, self._p2)
 
 
@@ -484,7 +485,7 @@ class ArrowItem(LineItem):
         right = QPointF(tip.x() - head * math.cos(angle + wing), tip.y() - head * math.sin(angle + wing))
         neck = QPointF(tip.x() - head * 0.75 * math.cos(angle), tip.y() - head * 0.75 * math.sin(angle))
         p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(make_pen(color, self.style.width, self.style.dash))
+        p.setPen(style_pen(self.style))
         p.drawLine(self._p1, neck)
         p.setPen(make_pen(color, 1.5))
         p.setBrush(QBrush(color))

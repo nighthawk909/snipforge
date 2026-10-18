@@ -18,7 +18,7 @@ from .. import theme
 from . import saved_styles
 from .items import readable_on
 from .quick_styles import QUICK_STYLES, QuickStyle, changes_for
-from .style import COLOR_NAMES, STRENGTH_KINDS, Style
+from .style import COLOR_NAMES, STRENGTH_KINDS, USUAL_OPACITY, Style
 from .style_sample import paint_sample
 
 COLUMNS = 4
@@ -100,8 +100,14 @@ def describe(kind: str, style: Style) -> str:
         parts.append(f"strength {round(style.width)}" if kind in STRENGTH_KINDS else f"{round(style.width)} px")
     if "font_size" in found:
         parts.append(f"{style.font_size} pt")
-    parts += [label for name, label in (("fill", "filled"), ("dash", "dashed"), ("shadow", "shadow"))
-              if found.get(name)]
+    if found.get("fill"):
+        fill = COLOR_NAMES.get(style.fill_color.lower(), style.fill_color.upper()) if style.fill_color else ""
+        opacity = f"{style.fill_opacity}%" if style.fill_opacity != USUAL_OPACITY else ""
+        parts.append(" ".join(["filled", fill, opacity]).strip())
+    if found.get("dash"):
+        parts.append("dotted" if found.get("dotted") else "dashed")
+    if found.get("shadow"):
+        parts.append("shadow")
     return ", ".join(parts) or "Saved style"
 
 

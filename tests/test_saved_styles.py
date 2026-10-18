@@ -35,7 +35,7 @@ def test_saved_styles_keep_what_the_tool_shows_and_survive_a_reload(qapp):
     assert saved_styles.save("rect", MINE.with_changes(fill=True))
     loaded = saved_styles.load()
     assert saved_styles.fields_of("arrow", loaded["arrow"][0]) == {
-        "color": "#123456", "width": 9.0, "dash": True, "shadow": False}
+        "color": "#123456", "width": 9.0, "dash": True, "dotted": False, "shadow": False}
     assert loaded["rect"][0].fill is True
     saved_styles.delete("arrow", MINE)
     assert "arrow" not in saved_styles.load() and saved_styles.saved_for("rect")
@@ -68,7 +68,7 @@ def test_save_the_selected_style_and_apply_it(qapp):
     panel.changed.connect(seen.append)
     panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], has_selection=False)
     click(panel.saved_tile(0))
-    assert seen == [{"color": "#123456", "width": 9.0, "dash": True, "shadow": False}]
+    assert seen == [{"color": "#123456", "width": 9.0, "dash": True, "dotted": False, "shadow": False}]
     assert len([panel.quick_tile(i) for i in range(len(QUICK_STYLES))]) == 8  # built-ins stay
 
 
