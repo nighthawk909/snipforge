@@ -204,6 +204,13 @@ QLabel#CountdownText {{ font-weight: 600; padding-right: 6px; }}
     padding: 5px 12px; }}
 #Countdown QToolButton:hover {{ background: {p.hover}; }}
 QFrame#CaptureToolbarSeparator {{ background: {p.border}; }}
+QFrame#RecordPanel, QFrame#RecordBar {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 12px; }}
+#RecordPanel QToolButton, #RecordBar QToolButton {{ border-radius: 8px; padding: 6px 10px; color: {p.text2}; }}
+#RecordPanel QToolButton:checked {{ background: {a.soft}; color: {a.text}; font-weight: 600; }}
+QPushButton#RecordStart {{ background: {p.danger}; color: #ffffff; border: none; border-radius: 8px;
+    padding: 6px 16px; font-weight: 600; }}
+QLabel#RecordProblem {{ color: {p.danger}; padding: 2px 6px; }}
+QLabel#RecordTime {{ font-weight: 600; padding: 0 4px; }}
 
 QWidget#SettingsNav {{ background: {p.bg}; border-right: 1px solid {p.border}; }}
 QWidget#SettingsBody, QScrollArea#SettingsScroll {{ background: {p.bg}; border: none; }}
