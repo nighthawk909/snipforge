@@ -108,9 +108,20 @@ jobs:
       ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
       sign: true
 
+  # Every release carries the Mac version too (docs/CROSS-PLATFORM.md): built, installed and
+  # self-tested from the same tag, and the release is only published if it passes.
+  mac:
+    needs: release-please
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
+    uses: ./.github/workflows/mac.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
+
   publish:
-    needs: [release-please, build]
-    if: ${{ always() && needs.build.result == 'success' }}
+    needs: [release-please, build, mac]
+    if: ${{ always() && needs.build.result == 'success' && needs.mac.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -139,6 +150,21 @@ jobs:
           fi
           # [[:space:]]* also matches the CR of the CRLF lines build.py writes on Windows.
           grep -qE '  SnipForge-setup\.exe[[:space:]]*$' dist/SHA256SUMS.txt
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: snipforge-macos
+          path: dist-mac
+      # The Mac .dmg, plus SnipForge.dmg: the same file without the version, so
+      # <server>/<repo>/releases/latest/download/SnipForge.dmg is a permanent Mac download link.
+      # The in-app updater looks for the versioned name.
+      - name: Add the Mac version
+        run: |
+          dmg=$(ls dist-mac/SnipForge-*.dmg)
+          [ "$(echo "$dmg" | wc -l)" -eq 1 ] || { echo "::error::Expected one .dmg, found: $dmg"; exit 1; }
+          cp "$dmg" dist/
+          cp "$dmg" dist/SnipForge.dmg
+          (cd dist && sha256sum "$(basename "$dmg")" SnipForge.dmg >> SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
       - name: Build provenance
         # Artifact attestations are free for public repositories.
         if: ${{ !github.event.repository.private }}
@@ -148,13 +174,16 @@ jobs:
             dist/SnipForge-*-setup.exe
             dist/SnipForge-setup.exe
             dist/SnipForge-*-portable.zip
+            dist/SnipForge-*.dmg
+            dist/SnipForge.dmg
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_ENTERPRISE_TOKEN: ${{ github.token }}
         run: |
           gh release upload "$TAG" dist/SnipForge-*-setup.exe dist/SnipForge-setup.exe \
-            dist/SnipForge-*-portable.zip dist/SHA256SUMS.txt dist/sbom.cdx.json \
+            dist/SnipForge-*-portable.zip dist/SnipForge-*.dmg dist/SnipForge.dmg \
+            dist/SHA256SUMS.txt dist/sbom.cdx.json \
             --clobber --repo "$GITHUB_REPOSITORY"
       # release-please creates the release as a draft (release-please-config.json), so people, the
       # download links and the in-app updater only see it now that every file is attached.

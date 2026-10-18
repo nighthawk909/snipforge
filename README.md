@@ -16,6 +16,13 @@ editor with arrows, callouts, stamps, blur and more.
 3. To pin it to the taskbar: open Start, right-click **SnipForge**, choose **Pin to taskbar**.
    (Windows doesn't let apps pin themselves.)
 
+**On a Mac** (macOS 14 Sonoma or later, Apple silicon or Intel): every release includes a Mac version,
+an early one for now ([what works on a Mac](docs/PARITY.md)).
+[Download SnipForge for Mac](https://github.com/nighthawk909/snipforge/releases/latest/download/SnipForge.dmg),
+open the .dmg and drag SnipForge to **Applications**. It isn't notarized by Apple yet, so the first
+time macOS needs **System Settings > Privacy & Security > Open Anyway**; snipping needs
+**Screen & System Audio Recording** turned on for SnipForge there too.
+
 Each [release](https://github.com/nighthawk909/snipforge/releases) lists SHA-256 checksums so you
 can verify the download, and has a portable zip if you'd rather not install anything. Setting it up
 for a team, a SharePoint or network-share mirror, or Software Center? See
