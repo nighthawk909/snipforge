@@ -1,20 +1,20 @@
-"""Owns the active theme: reads the preferences, follows Windows' (or macOS's) light/dark, applies
-it app-wide."""
+"""Owns the active theme: reads the preferences, follows Windows' (or macOS's) light/dark and
+high-contrast settings, applies it app-wide."""
 from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
 from ..bundle import cache_dir
 from ..settings import app_settings
-from . import styles, titlebar
+from . import contrast, styles, titlebar
 from .packs import ThemePack, discover_packs, pack_folders
-from .tokens import BUILTIN_ACCENTS, DEFAULT_ACCENT, Accent, Band, Theme, resolve
+from .tokens import BUILTIN_ACCENTS, DEFAULT_ACCENT, Accent, Band, Theme, contrast_theme, resolve
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +57,9 @@ class ThemeManager(QObject):
         self._sync_color_scheme()
         self._theme = self._resolve()
         self._hints.colorSchemeChanged.connect(self._on_system_scheme)
+        self._contrast_hints = contrast.on_change(self.contrast_changed)
+        self._recolor = QTimer(self, singleShot=True, interval=0)  # every window hears a theme change: once
+        self._recolor.timeout.connect(self.refresh)
         app.installEventFilter(self)
 
     # ------------------------------------------------------------------ state
@@ -76,6 +79,12 @@ class ThemeManager(QObject):
 
     def accents(self) -> list[Accent]:
         return list(self._accents.values())
+
+    @property
+    def high_contrast(self) -> bool:
+        """The system's high-contrast setting is on, so its colors are used (and the light/dark and
+        accent choices wait until it's off)."""
+        return self._theme.contrast
 
     def set_mode_preference(self, preference: str) -> None:
         if preference not in PREFERENCES:
@@ -119,11 +128,19 @@ class ThemeManager(QObject):
             self._hints.colorSchemeChanged.disconnect(self._on_system_scheme)
         except (RuntimeError, TypeError):
             pass
+        contrast.stop(self._contrast_hints, self.contrast_changed)
+        self._recolor.stop()
         self._hints.unsetColorScheme()
+
+    def contrast_changed(self, *_args) -> None:
+        """The system's high-contrast setting was turned on or off (or its colors changed)."""
+        self.refresh()
 
     def eventFilter(self, obj, event) -> bool:
         if event.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow():
             self.style_window(obj)
+        elif event.type() == QEvent.Type.ThemeChange and self._theme.contrast:
+            self._recolor.start()  # one contrast theme for another: the setting stays on, the colors change
         return False
 
     # ------------------------------------------------------------------ internals
@@ -142,8 +159,14 @@ class ThemeManager(QObject):
         return "dark" if self._hints.colorScheme() == Qt.ColorScheme.Dark else "light"
 
     def _resolve(self) -> Theme:
+        mode = self._effective_mode()
+        if contrast.high():
+            try:
+                return contrast_theme(contrast.system_colors(dark=mode == "dark"))
+            except ValueError as exc:  # colors we can't use: the usual theme rather than none
+                log.warning("Couldn't use the system's contrast colors: %s", exc)
         accent_id = self.accent_id
-        return resolve(self._effective_mode(), self._accents[accent_id], self._bands.get(accent_id))
+        return resolve(mode, self._accents[accent_id], self._bands.get(accent_id))
 
     def _sync_color_scheme(self) -> None:
         """Tell Qt (and so native dialogs) which scheme we draw; 'system' hands control back to Windows."""

@@ -10,6 +10,7 @@ from PySide6.QtCore import QKeyCombination, Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QHBoxLayout, QKeySequenceEdit, QLineEdit, QToolButton, QWidget
 
+from . import widgets
 from .icons import icon
 from .shortcuts import label
 
@@ -107,7 +108,7 @@ class ShortcutEdit(QWidget):
 
     def setAccessibleName(self, name: str) -> None:  # noqa: N802 - Qt API
         super().setAccessibleName(name)
-        self.edit.setAccessibleName(name)
+        widgets.screen_reader_name(self.edit, name)  # and the text box inside Qt's shortcut box, which has the keyboard
 
     def _cancel(self) -> None:
         self.set_text(self._text)

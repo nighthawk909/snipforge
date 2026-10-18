@@ -43,16 +43,19 @@ class CaptureMode:
 
 MODES = {
     "area": CaptureMode("Area", "area", "A", "Drag to choose an area, or click a window",
-                        "Drag to choose an area  •  click a window  •  Enter for the whole screen  •  Esc to cancel"),
+                        "Drag to choose an area  •  click a window, or choose one with the arrow keys and Enter"
+                        "  •  Enter for the whole screen  •  Esc to cancel"),
     "window": CaptureMode("Window", "window", "W", "Click a window",
-                          "Click a window  •  Enter for the whole screen  •  Esc to cancel"),
+                          "Click a window, or choose one with the arrow keys and Enter  •  Enter for the whole screen"
+                          "  •  Esc to cancel"),
     "screen": CaptureMode("Full screen", "monitor", "F", "Click a monitor to take all of it",
                           "Click a monitor, or press Enter  •  Esc to cancel"),
     "fixed": CaptureMode("Fixed size", "fixed", "X", "A frame of an exact size: move it and click",
                          "Click or Enter to snip the frame  •  arrow keys nudge it  •  X again for its size"
                          "  •  Esc to cancel"),
     "scroll": CaptureMode("Scrolling", "scroll", "S", "A long page or list, captured as one image",
-                          "Drag over the part that scrolls, or click a window  •  SnipForge scrolls to the end"
+                          "Drag over the part that scrolls, or click a window (or arrow keys and Enter)"
+                          "  •  SnipForge scrolls to the end"
                           "  •  move the mouse to stop  •  Esc to cancel"),
 }
 

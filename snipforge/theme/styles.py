@@ -38,7 +38,7 @@ def build_palette(theme: Theme) -> QPalette:
     for role, color in roles.items():
         pal.setColor(role, QColor(color))
     for role in (QPalette.Text, QPalette.WindowText, QPalette.ButtonText):
-        pal.setColor(QPalette.Disabled, role, QColor(p.text3))
+        pal.setColor(QPalette.Disabled, role, QColor(p.off))
     return pal
 
 
@@ -56,7 +56,7 @@ def build_stylesheet(theme: Theme, assets: Mapping[str, str] | None = None) -> s
     down = f"image: url({_url(assets['down'])});" if "down" in assets else ""
     return f"""
 QWidget {{ color: {p.text}; }}
-QLabel:disabled, QCheckBox:disabled, QRadioButton:disabled, QToolButton:disabled {{ color: {p.text3}; }}
+QLabel:disabled, QCheckBox:disabled, QRadioButton:disabled, QToolButton:disabled {{ color: {p.off}; }}
 QMainWindow, QDialog {{ background: {p.bg}; }}
 QWidget[sfRole="surface"] {{ background: {p.surface}; }}
 QLabel {{ background: transparent; }}
@@ -71,10 +71,10 @@ QPushButton {{ background: {p.surface2}; color: {p.text}; border: 1px solid {p.b
 QPushButton:hover {{ background: {p.hover}; }}
 QPushButton:pressed {{ background: {p.select}; }}
 QPushButton:focus {{ border-color: {a.fill}; }}
-QPushButton:disabled {{ color: {p.text3}; }}
+QPushButton:disabled {{ color: {p.off}; }}
 QPushButton[variant="primary"] {{ background: {a.fill}; color: {a.on}; border-color: {a.fill}; font-weight: 600; }}
 QPushButton[variant="primary"]:hover {{ background: {a.fill_hover}; border-color: {a.fill_hover}; }}
-QPushButton[variant="primary"]:disabled {{ background: {p.surface2}; color: {p.text3}; border-color: {p.border}; }}
+QPushButton[variant="primary"]:disabled {{ background: {p.surface2}; color: {p.off}; border-color: {p.border}; }}
 QPushButton[variant="ghost"] {{ background: transparent; border-color: transparent; }}
 QPushButton[variant="ghost"]:hover {{ background: {p.hover}; }}
 
@@ -89,7 +89,7 @@ QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     padding: 4px 8px; selection-background-color: {a.fill}; selection-color: {a.on}; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
     border-color: {a.fill}; }}
-QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {{ color: {p.text3}; background: {p.surface2}; }}
+QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {{ color: {p.off}; background: {p.surface2}; }}
 QSpinBox, QDoubleSpinBox {{ padding-right: 22px; }}
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
     subcontrol-origin: border; width: 20px; border: none; background: transparent; }}
@@ -117,7 +117,7 @@ QRadioButton::indicator:checked {{
 QMenu {{ background: {p.surface}; color: {p.text}; border: 1px solid {p.border}; border-radius: 8px; padding: 4px; }}
 QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: 4px; background: transparent; }}
 QMenu::item:selected {{ background: {p.hover}; }}
-QMenu::item:disabled {{ color: {p.text3}; }}
+QMenu::item:disabled {{ color: {p.off}; }}
 QMenu::separator {{ height: 1px; background: {p.border}; margin: 4px 8px; }}
 
 QToolTip {{
@@ -227,4 +227,63 @@ QScrollArea#TrayThumbs, QScrollArea#TrayThumbs > QWidget > QWidget {{ background
 #Thumb {{ background: {p.surface2}; border: 1px solid {p.border}; border-radius: 6px; padding: 2px; }}
 #Thumb:hover {{ border-color: {a.fill}; }}
 #ZoomLabel {{ color: {h.text2}; }}
+""" + _focus_rules(theme) + (_contrast_rules(theme) if theme.contrast else "") + _focus_on_accent(theme)
+
+
+def _focus_rules(theme: Theme) -> str:
+    """Where the keyboard is, on every control it can reach: an accent border. Repeated with the
+    selectors above that set their own borders (an ID outranks a pseudo-state in Qt stylesheets)."""
+    a = theme.accent
+    return f"""
+QCheckBox, QRadioButton {{ border: 1px solid transparent; border-radius: 4px; }}
+QToolButton:focus, QPushButton:focus, QCheckBox:focus, QRadioButton:focus,
+#CommandBar QToolButton:focus, #CommandBar QPushButton:focus, #ToolRail QToolButton:focus,
+#Segmented QToolButton:focus, #Sidebar QPushButton:focus, QToolButton#Chip:focus, QToolButton#StampChoice:focus,
+QToolButton#PickColor:focus, QToolButton#CustomColor:focus, QToolButton#ImageAction:focus,
+QPushButton#AccentChoice:focus, #RecordPanel QToolButton:focus, #RecordBar QToolButton:focus,
+#Countdown QToolButton:focus {{ border: 1px solid {a.fill}; }}
+QListView:focus, QListWidget:focus, QTreeView:focus {{ border: 1px solid {a.fill}; border-radius: 6px; }}
+QListView#SnipGrid:focus {{ border: none; }}
+QListView::item:focus {{ border: 1px solid {a.fill}; }}
+QSlider:focus {{ border: 1px solid {a.fill}; border-radius: 4px; }}
+"""
+
+
+def _focus_on_accent(theme: Theme) -> str:
+    """Controls already filled or edged with the accent (primary buttons, chosen options; in high
+    contrast every checked control) show the keyboard in a color that stands out from it. Last, so
+    these win over the rules above."""
+    p, a, h = theme.palette, theme.accent, theme.header
+    checked_in_contrast = f"""
+QToolButton:checked:focus, #ToolRail QToolButton:checked:focus, #Segmented QToolButton:checked:focus,
+#CaptureToolbar QToolButton:checked:focus, #RecordPanel QToolButton:checked:focus,
+QToolButton#Chip:checked:focus, QPushButton#AccentChoice:checked:focus {{ border: 1px solid {a.on}; }}
+""" if theme.contrast else ""
+    return f"""
+QPushButton[variant="primary"]:focus {{ border: 1px solid {a.on}; }}
+#CommandBar QPushButton[variant="primary"]:focus, #Sidebar QPushButton[variant="primary"]:focus {{
+    border: 1px solid {h.primary_text}; }}
+QPushButton#RecordStart:focus {{ border: 1px solid {p.bg}; }}  /* on its red (its text color in contrast) */
+QPushButton#AccentChoice:checked:focus, QToolButton#Chip:checked:focus, QToolButton#StampChoice:checked:focus,
+QToolButton#PickColor:checked:focus {{ border: 1px solid {p.text}; }}
+""" + checked_in_contrast
+
+
+def _contrast_rules(theme: Theme) -> str:
+    """High contrast: the system's highlight marks what's hovered, checked or selected (its shades
+    are all one color in a contrast theme), and borders are the text color."""
+    p, a = theme.palette, theme.accent
+    return f"""
+QPushButton:hover, QToolButton:hover, #CommandBar QPushButton:hover, #CommandBar QToolButton:hover,
+QToolButton#Chip:hover, #Thumb:hover {{ border: 1px solid {a.fill}; }}
+QToolButton:checked, #Segmented QToolButton:checked, #CaptureToolbar QToolButton:checked,
+#RecordPanel QToolButton:checked, QToolButton#Chip:checked, QPushButton#AccentChoice:checked {{
+    background: {a.fill}; color: {a.on}; border: 1px solid {a.fill}; }}
+QMenu::item:selected, QListView::item:selected, QListView::item:hover,
+QComboBox QAbstractItemView {{ selection-background-color: {a.fill}; selection-color: {a.on}; }}
+QMenu::item:selected, QListView::item:selected {{ background: {a.fill}; color: {a.on}; }}
+QListView::item:hover {{ border: 1px solid {a.fill}; }}
+QCheckBox::indicator, QRadioButton::indicator {{ border-color: {p.text}; }}
+QScrollBar::handle {{ background: {p.text}; }}
+QSlider::groove:horizontal {{ background: {p.text}; }}
 """

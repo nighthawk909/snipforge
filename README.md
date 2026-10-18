@@ -129,6 +129,12 @@ location ([docs/IT-REVIEW.md](docs/IT-REVIEW.md)).
 **Extras.** Grab text (OCR, offline) · Redact (finds emails and phone/card numbers and blurs them) ·
 Pin a snip on top of other windows · Beautify (backdrop, rounded corners, shadow).
 
+**Accessible.** Snipping, markup, cropping, the Library and Settings work from the keyboard (F6
+moves between the editor's parts, Tab walks through the markup, Enter adds a tool's markup and
+Ctrl+arrow keys size it); drawing freehand, Smart Move and Cut out need a pointer. Every control has
+a name screen readers read, and Windows contrast themes are followed. The keys are in
+[docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md).
+
 **Report a problem.** In the tray menu, About and Settings › About: SnipForge puts together the
 details that help fix a bug (recent logs, the versions of SnipForge, Windows and Qt, your displays
 and their scaling, your settings with anything private left out, and the last crash, if there was

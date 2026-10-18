@@ -67,6 +67,11 @@ class Palette:
     select: str      # selected list rows and nav items
     danger: str
     success: str
+    disabled: str = ""  # text of controls you can't use; "" = text3
+
+    @property
+    def off(self) -> str:
+        return self.disabled or self.text3
 
 
 LIGHT = Palette(
@@ -152,6 +157,7 @@ class Theme:
     accent: AccentShade
     accent_id: str
     header: Header
+    contrast: bool = False  # the system's high-contrast colors: states are shown by borders, not shades
 
     @property
     def dark(self) -> bool:
@@ -170,6 +176,30 @@ def _header(palette: Palette, accent: AccentShade, band: Band | None, light_acce
         hover=rgba(band.text, 0.14), border=rgba(band.text, 0.12), button=rgba(band.text, 0.08),
         button_border=rgba(band.text, 0.2), primary_bg=band.primary_bg, primary_text=band.primary_text,
         mark_bg=band.primary_bg, mark_ink=light_accent.fill)
+
+
+CONTRAST_ACCENT = "contrast"
+READABLE = 4.5  # a system color that reads worse than this on its background is swapped for plain text
+
+
+def contrast_theme(colors) -> Theme:
+    """A theme drawn only in the system's high-contrast colors (snipforge.theme.contrast.SystemColors):
+    one background, one text color for text, icons and borders, and the highlight for whatever is
+    selected, checked or focused. Raises ValueError for a color that isn't '#RRGGBB'."""
+    bg, text = colors.window, colors.text
+    link = colors.link if contrast_ratio(colors.link, bg) >= READABLE else text
+    fill, on = colors.highlight, colors.highlight_text
+    if contrast_ratio(on, fill) < READABLE:
+        fill, on = text, bg
+    button = colors.button if contrast_ratio(text, colors.button) >= READABLE else bg  # text is drawn on it
+    disabled = colors.disabled if contrast_ratio(colors.disabled, bg) >= READABLE else text
+    palette = Palette(bg=bg, surface=bg, surface2=button, well=bg, dot=bg, border=text, text=text, text2=text,
+                      text3=text, hover=bg, select=bg, danger=text, success=text, disabled=disabled)
+    shade = AccentShade(fill=fill, fill_hover=fill, on=on, text=link, soft=bg)
+    header = Header(branded=False, bg=bg, bar=bg, text=text, text2=text, ink=text, hover=bg, border=text,
+                    button=button, button_border=text, primary_bg=fill, primary_text=on, mark_bg=fill, mark_ink=on)
+    mode = "dark" if _luminance(bg) < 0.5 else "light"
+    return Theme(mode, palette, shade, CONTRAST_ACCENT, header, contrast=True)
 
 
 def resolve(mode: str, accent: Accent, band: Band | None = None) -> Theme:

@@ -30,7 +30,7 @@ from .icons import icon
 from .library import DOCUMENT, META, EntryMeta, Library, in_parallel
 from .library_search import PERIODS, Item, group_by_date, select, tag_counts, top_apps
 from .library_view import SnipGrid
-from .widgets import NavItem, Segmented
+from .widgets import NavItem, Segmented, name_field_buttons
 
 log = logging.getLogger(__name__)
 VIEWS = {"all": ("All captures", "grid"), "favorites": ("Favorites", "star"), "edited": ("Recently edited", "pen")}
@@ -151,6 +151,7 @@ class HomeWindow(QMainWindow):
         self._search.setClearButtonEnabled(True)
         self._search.setMinimumWidth(320)
         self._search_icon = self._search.addAction(icon("search"), QLineEdit.LeadingPosition)
+        name_field_buttons(self._search, self._search_icon)
         self._search_timer = QTimer(self, singleShot=True, interval=SEARCH_DELAY_MS)
         self._search_timer.timeout.connect(self.apply)
         self._search.textChanged.connect(lambda _t: self._search_timer.start())
@@ -173,7 +174,7 @@ class HomeWindow(QMainWindow):
         self._stack = QStackedWidget()
         self.grid = SnipGrid()
         self.grid.activated.connect(lambda index: self._open_ids([self.grid.current_id()]))
-        self.grid.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.grid.setContextMenuPolicy(Qt.DefaultContextMenu)  # SnipGrid.contextMenuEvent asks for the menu
         self.grid.customContextMenuRequested.connect(self._context_menu)
         self.grid.delegate.favorite_clicked.connect(self.toggle_favorite)
         self.grid.delegate.copy_clicked.connect(self._copy)

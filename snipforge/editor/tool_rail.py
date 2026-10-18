@@ -3,10 +3,15 @@
 One column when the window is tall enough, and two or three when it isn't, so no tool ever hides
 behind an overflow arrow. The rail's minimum height is the three-column layout, so the window can't
 get too short to show them all.
+
+From the keyboard the rail is one Tab stop, the tool you're on (as in a Windows toolbar): the arrow
+keys, Home and End move between tools, and Enter or Space picks one and goes to the canvas
+(`picked`), as Esc does without picking. Clicking a tool never takes the keyboard from the canvas,
+where each tool has its own key.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
@@ -17,9 +22,14 @@ SPACING = 2  # between buttons
 DIVIDER_GAP = 6  # above and below the line between groups
 DIVIDER_INSET = 10  # the line is shorter than the buttons
 MAX_COLUMNS = 3
+BACK = (Qt.Key_Up, Qt.Key_Left)
+ON = (Qt.Key_Down, Qt.Key_Right)
+PICK = (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space)
 
 
 class ToolRail(QWidget):
+    picked = Signal()  # Enter, Space or Esc on a tool: the keyboard goes back to the canvas
+
     def __init__(self, groups: list[list[tuple[str, QAction]]], parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("ToolRail")
@@ -30,6 +40,8 @@ class ToolRail(QWidget):
         self._groups = [[self._make_button(name, action) for name, action in group] for group in groups if group]
         self._dividers = [self._make_divider() for _ in self._groups[1:]]
         self._columns = 1
+        checked = next((n for n, b in self._buttons.items() if b.defaultAction().isChecked()), None)
+        self._set_stop(checked or next(iter(self._buttons)))
 
     def _make_button(self, name: str, action: QAction) -> QToolButton:
         button = QToolButton(self)
@@ -37,10 +49,38 @@ class ToolRail(QWidget):
         button.setAccessibleName(action.text())
         button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
         button.setAutoRaise(True)
-        button.setFocusPolicy(Qt.NoFocus)  # tools have single-key shortcuts; the keyboard stays on the canvas
+        button.setFocusPolicy(Qt.NoFocus)  # never on a click; one of them is the rail's Tab stop (_set_stop)
         button.setCursor(Qt.PointingHandCursor)
+        button.installEventFilter(self)
+        action.toggled.connect(lambda on, n=name: on and self._set_stop(n))
         self._buttons[name] = button
         return button
+
+    # ------------------------------------------------------------------ keyboard
+    def _set_stop(self, name: str) -> None:
+        """Make `name`'s button the one Tab reaches."""
+        for other, button in self._buttons.items():
+            button.setFocusPolicy(Qt.TabFocus if other == name else Qt.NoFocus)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 - Qt API
+        if event.type() != QEvent.KeyPress or obj not in self._buttons.values():
+            return False
+        key, order = event.key(), list(self._buttons.values())
+        n = order.index(obj)
+        if key in BACK + ON + (Qt.Key_Home, Qt.Key_End):
+            n = {Qt.Key_Home: 0, Qt.Key_End: len(order) - 1}.get(key, n + (1 if key in ON else -1))
+            target = order[max(0, min(len(order) - 1, n))]
+            self._set_stop(next(name for name, b in self._buttons.items() if b is target))
+            target.setFocus(Qt.TabFocusReason)
+            return True
+        if key in PICK:
+            obj.click()
+            self.picked.emit()
+            return True
+        if key == Qt.Key_Escape:
+            self.picked.emit()
+            return True
+        return False
 
     def _make_divider(self) -> QWidget:
         line = QWidget(self)

@@ -228,12 +228,14 @@ def test_ctrl_or_alt_arrows_do_not_nudge(qapp):
     assert o._selection() == QRect(300, 250, 200, 100)
 
 
-def test_arrow_keys_do_nothing_in_other_modes(qapp):
+def test_enter_is_the_whole_monitor_unless_the_arrow_keys_chose_a_window(qapp):
     o = make_overlay((200, 100), mode="area")
     move(o, (400, 300))
-    key(o, Qt.Key_Right)
     key(o, Qt.Key_Return)
-    assert o.got[0].size() == o.size()  # Enter is still the whole monitor
+    assert o.got[0].size() == o.size()
+    key(o, Qt.Key_Right)  # the arrow keys go from window to window (tests/test_accessibility.py)
+    key(o, Qt.Key_Return)
+    assert o.got[1].size() == WINDOW.size()
 
 
 def test_x_switches_to_fixed_size_and_shows_the_frame_at_once(qapp):

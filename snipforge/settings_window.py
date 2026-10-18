@@ -33,7 +33,7 @@ from .preset_settings import PresetList
 from .shortcut_edit import ShortcutEdit
 from .shortcuts import ACTIONS as SHORTCUT_TITLES
 from .theme.tokens import DARK, LIGHT
-from .widgets import NavItem, Segmented, SettingRow, ToggleSwitch, stack
+from .widgets import NavItem, Segmented, SettingRow, ToggleSwitch, name_field_buttons, stack
 
 log = logging.getLogger(__name__)
 
@@ -129,6 +129,7 @@ class SettingsWindow(QMainWindow):
         row.addWidget(self._build_nav())
         self._scroll = scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
+        scroll.setFocusPolicy(Qt.NoFocus)  # Tab goes to the settings in it (and scrolls them into view)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         body = QWidget()
@@ -185,6 +186,7 @@ class SettingsWindow(QMainWindow):
         self._find.setAccessibleName("Find a setting")
         self._find.setClearButtonEnabled(True)
         self._find_icon = self._find.addAction(icon("search"), QLineEdit.LeadingPosition)
+        name_field_buttons(self._find, self._find_icon)
         self._find.textChanged.connect(self._filter_nav)
         col.addWidget(self._find)
         col.addSpacing(10)
@@ -521,6 +523,13 @@ class SettingsWindow(QMainWindow):
             note.setProperty("sfRole", "muted")
             col.addWidget(note)
             return box
+        self.contrast_note = QLabel(f"{wording.contrast_setting()} is on, so SnipForge "
+                                    f"{wording.contrast_look()}. The theme and accent color you choose here come "
+                                    "back when it's off.")
+        self.contrast_note.setWordWrap(True)
+        self.contrast_note.setProperty("sfRole", "secondary")
+        self.contrast_note.setContentsMargins(0, 0, 0, 10)
+        col.addWidget(self.contrast_note)
         tiles = QHBoxLayout()
         tiles.setSpacing(12)
         self.theme_tiles: dict[str, ThemeTile] = {}
@@ -549,7 +558,16 @@ class SettingsWindow(QMainWindow):
             self.accent_buttons[accent.id] = button
             grid.addWidget(button, n // 3, n % 3)
         col.addLayout(grid)
+        self._themes.changed.connect(self._show_contrast)
+        self._show_contrast()
         return box
+
+    def _show_contrast(self, *_args) -> None:
+        """While the system's high-contrast setting is on, its colors win: say so, and wait."""
+        on = self._themes.high_contrast
+        self.contrast_note.setVisible(on)
+        for control in (*self.theme_tiles.values(), *self.accent_buttons.values()):
+            control.setEnabled(not on)
 
     @staticmethod
     def _swatch(color: str):

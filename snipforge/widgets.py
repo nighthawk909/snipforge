@@ -1,15 +1,16 @@
 """Small shared controls drawn from the theme: toggle switch, segmented control, sidebar item and
-settings row."""
+settings row; and names for the parts of Qt's controls a screen reader reads on their own."""
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QAction, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -18,6 +19,23 @@ from PySide6.QtWidgets import (
 from . import theme
 from .icons import icon
 from .theme.tokens import to_qcolor
+
+
+def screen_reader_name(widget: QWidget, text: str) -> None:
+    """`widget`'s name for screen readers, given to the text box inside it too (a spin box's or a
+    shortcut box's), which is what has the keyboard and so what gets read."""
+    widget.setAccessibleName(text)
+    for inner in widget.findChildren(QLineEdit):
+        inner.setAccessibleName(text)
+
+
+def name_field_buttons(field: QLineEdit, icon_action: QAction | None = None, icon_text: str = "Search") -> None:
+    """Names for the little buttons inside a text box: its icon, and the clear button Qt adds."""
+    if icon_action is not None:
+        icon_action.setText(icon_text)
+    clear = field.findChild(QAction, "_q_qlineeditclearaction")
+    if clear is not None:
+        clear.setText("Clear")
 
 
 class ToggleSwitch(QAbstractButton):
