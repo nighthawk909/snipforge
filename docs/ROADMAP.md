@@ -72,13 +72,13 @@ Software Center) and the SnagIt features people miss most. Built in this order:
 - [x] Privacy: private-window titles never kept, in many browsers and languages (#65, #70, #77)
 - [x] Windows and Mac parity rules, tracker and skill (#75)
 - [x] The Mac version is built, installed and started for every PR (#76)
-- [ ] Every release includes the Mac version, with a Mac download on the page (#80)
+- [x] Every release includes the Mac version, with a Mac download on the page (#80)
 - [x] Code-signing pipeline ready (#24); waiting on signing itself (below)
 
 ## Releases
 - [x] 0.4.0 to 0.10.0: the update engine, the new look, Settings, capture parity
 - [x] 0.11.0: Phase 3, recording, privacy
-- [ ] 0.11.1: polish, the crash fix (#77), the first release with a Mac .dmg (#72, after #80)
+- [x] 0.12.0: the first release with the Mac version (a .dmg), editor and privacy fixes (#72)
 - [ ] 1.0: when Phase 4's hand checks and the fix-it backlog are done
 
 ## Fix-it: feedback from testing

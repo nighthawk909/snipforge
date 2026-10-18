@@ -11,9 +11,9 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 
 | Area | Feature | Windows | Mac | Mac plan |
 |---|---|---|---|---|
-| **Release** | Installer / download | ✅ setup.exe, portable zip | ❌ `.dmg` built by CI but not attached to releases | Every release attaches the `.dmg` (next) |
-| | Download page offers the right build | ✅ | ❌ | With the release work |
-| | Updates (check, download, install, roll back) | ✅ | ❌ | Phase 8: `.dmg` install path |
+| **Release** | Installer / download | ✅ setup.exe, portable zip | 🟡 every release attaches `SnipForge-<version>.dmg` and `SnipForge.dmg` (#80) | |
+| | Download page offers the right build | ✅ | 🟡 a Mac download and first-launch steps (#80) | |
+| | Updates (check, download, install, roll back) | ✅ | 🟡 checks, then says to download the new `.dmg` (#80) | Phase 8: installs the `.dmg` itself |
 | | First launch without warnings | 🔒 SmartScreen warns until the installer is signed | 🔒 Gatekeeper's Open Anyway until notarized | Free signing (SignPath) / Apple account: maintainer's call |
 | | IT policy settings | ✅ registry | ❌ | Phase 8: managed preferences |
 | **App** | Starts, one copy at a time | ✅ | ✅ CI | |
