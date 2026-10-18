@@ -42,8 +42,9 @@ testpaths = ["tests"]
 markers = [
     "desktop: drives real Windows features (windows, share sheet, hook); run with -m desktop",
     "windows: needs Windows itself (registry, Explorer, Win32); skipped on other platforms",
+    "stress: long runs that look for rare failures (hundreds of recordings); run with -m stress",
 ]
-addopts = "-m 'not desktop'"
+addopts = "-m 'not desktop and not stress'"
 
 [tool.ruff]
 line-length = 120

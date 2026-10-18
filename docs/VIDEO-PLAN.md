@@ -261,8 +261,8 @@ encoding, or a Windows-only ffmpeg.exe, would each be a second encoder to write 
 |---|---|
 | **Python stalls starve the capture threads** (a slow UI update in the prototype froze the main thread for up to 1.2 s and cost 2.6 s of audio) | Record in a separate process, so the editor, Library indexing and OCR can't stall it; keep its UI work tiny (update the control bar ten times a second, only what changed); 1 s WASAPI buffers instead of 0.2 s; register the audio threads with Windows' multimedia scheduler (MMCSS) and raise the recorder's priority; keep per-frame Python work small (the slowest frame took 4-17 ms to make, against 33 ms available). A desktop test fails if a 10 s recording drops more than 3% of frames. |
 | CPU on older laptops (Windows' software H.264 encoder) | Default output capped at 1080p / 30 fps; frames dropped, never queued, so the file stays in sync; the control bar warns when frames are being dropped. If field testing shows trouble, add the Media Foundation hardware encoder behind the encoder interface. |
-| Crash or power loss mid-recording | Open, to settle in the recorder step with a test that kills the recorder mid-way. Candidates: (1) record AVI (H.264, written as it goes, survives a crash) and copy it into MP4 at the end, correcting Qt's AVI timestamps; (2) record MP4 directly and rely on the recorder's own process plus finishing the file when Windows announces sleep or shutdown (a sudden power cut then loses the recording). Matroska is out (no H.264 in Qt 6.12). |
-| Qt's recorder and player now and then misbehave in the test runner: Qt's player sometimes loaded a fresh clip with no tracks or stalled before its first frame (a few runs in a hundred), and in about 1 run in 65 a clip read back as a different format. Never seen in 140 clips made outside the test runner | Step 1 checks clips with FFmpeg directly (not Qt's player) and records a bad clip once more, logging it. The recorder step adds a stress test (hundreds of recordings, every file checked) and checks each real recording before it's kept; the editor step tests the player the same way. |
+| Crash or power loss mid-recording | **Decided in the recorder step: MP4 written directly.** Tested the alternative, AVI (H.264, written as it goes): Qt flushes it 256 KB at a time, so a recording killed at 4 s was unreadable and one killed at 9 s lost its first frame and its last second, and still screens compress so well that 256 KB can be 10-20 s; its timestamps also need repairing. Instead the recorder runs in its own process (a crash in the rest of SnipForge can't touch it) and finishes the file when Windows announces sleep, shutdown or sign-out, which covers a laptop battery running out. A hard power cut or the recorder itself crashing still loses the recording. |
+| Qt's recorder and player now and then misbehaved in the test runner: Qt's player sometimes loaded a fresh clip with no tracks or stalled before its first frame, and in about 1 run in 65 a clip read back as a different format | Files are checked with FFmpeg directly, not Qt's player (the editor step must test the player the same way). After recorders were made to always shut down and let go of their file, the stress test (`pytest -m stress`: 200 recordings, every file checked) passed four times in a row, 800 recordings, none bad; the recorder also checks every real recording before reporting it finished. |
 | On macOS CI, Qt 6.12 crashed (segfault) while deleting a recorder that had failed or been abandoned (the two tests of those paths are Windows-only for now) | Reproduce on a Mac in the Mac phase; the recorder process isolates such a crash from the rest of SnipForge either way. |
 | Windows "N" editions (sold in Europe) ship without Media Foundation, so without the H.264 encoder | The self-test and the recorder check for it; recording explains how to add the free Media Feature Pack instead of failing. |
 | Audio clocks drift from the system clock (up to ~0.01-0.1%, up to a few seconds an hour) | The mixer (`snipforge/video/mixer.py`) keeps each source within 2 ms of its timestamps by adding one sample (the average of its neighbours) or dropping one, in the middle of a 10 ms packet: inaudible, and enough for drift up to 0.2%. Tested over a simulated minute both ways; a one-hour soak test in the hardening step. |
@@ -295,12 +295,18 @@ recording UI appears in step 6; before that the pieces are tested on their own.
 4. **Screen and pointer** (`dxgi.py`, `pointer.py` additions, compositor). Adapter and monitor
    lookup, desktop switches, rotation, protected content; pointer shape cache, highlight, click
    rings. Desktop test: records a test window's area and checks its pixels.
-5. **Recorder engine** (`recorder.py`, `SnipForge.exe --record`). Frame clock, bounded queues,
-   pause, stop → MP4 → Library; the recorder process and its channel to SnipForge (the
-   `QLocalSocket` that `single_instance.py` already uses); crash safety settled (see Risks) with a
-   test that kills the recorder mid-way. Desktop end-to-end test:
-   the prototype's flash-and-beep check (sound within 150 ms of picture, control bar never in a
-   frame).
+5. **Recorder engine** (`recorder.py`, `encoder.py`, `screen_frames.py`, `gdi.py`,
+   `recording_check.py`). Frame clock on its own thread, the encoder's bounded queue (never dropping
+   frame 0), pause, stop → MP4 checked with FFmpeg stream by stream; sound sources that can't open or
+   get lost become warnings, and so does losing the screen mid-recording (what was recorded is
+   kept). The clock starts only once Qt's encoder takes frames ("starting": ~0.1 s, 1.3 s on a
+   saturated CPU, which used to cost the first second of video); starting and finishing each have a
+   time limit; `cancel()` keeps nothing and `finish_now()` finishes the file there and then. Tests with
+   a fake screen whose frames show their due time, a desktop test of the real thing (flash and beep
+   in the file together, a window hidden from capture never in it), and the stress test.
+   **5b. The recorder process**: `SnipForge.exe --record`, its channel to SnipForge (the
+   `QLocalSocket` that `single_instance.py` already uses), and finishing the file when Windows
+   announces sleep, shutdown or sign-out.
 6. **Recording UI**. Snip / Record switch on the capture toolbar, `selected_rect`, the ready panel
    (sources, levels, webcam on/off), the countdown (reusing the snip delay's), the control bar,
    the stop hotkey, "Record video" in the tray menu.
