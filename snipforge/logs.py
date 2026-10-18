@@ -200,9 +200,11 @@ _recent_errors: collections.deque = collections.deque(maxlen=ERRORS_PER_MINUTE)
 _skipped_errors = 0
 
 
-def setup(name: str = "snipforge", where: Path | None = None) -> LogSession | None:
+def setup(name: str = "snipforge", where: Path | None = None, slots: int = 1) -> LogSession | None:
     """Start writing this process's log and crash files. None if the folder can't be written
-    (SnipForge works the same without them)."""
+    (SnipForge works the same without them). `slots`: how many processes of this kind can run at
+    once (SLOTS for recorders). SnipForge itself runs one copy at a time, so any marker it finds is
+    from a run that's over, even if another process has since been given that process id."""
     global _active
     place = where or folder()
     try:
@@ -210,7 +212,7 @@ def setup(name: str = "snipforge", where: Path | None = None) -> LogSession | No
     except OSError as exc:
         log.warning("SnipForge can't keep a log in %s: %s", place, exc)
         return None
-    files = _free_slot(place, name)
+    files = _free_slot(place, name, slots)
     try:
         crashed = _keep_last_crash(files)
     except OSError as exc:
@@ -255,9 +257,11 @@ def remember_error(kind, error, trace) -> None:
         _write_error(_active.files, kind, error, trace, "")
 
 
-def _free_slot(place: Path, name: str) -> Files:
+def _free_slot(place: Path, name: str, slots: int) -> Files:
     """The first of `name`, `name-2`... whose last user isn't running any more."""
-    for n in range(1, SLOTS + 1):
+    if slots <= 1:
+        return Files(place, name)
+    for n in range(1, slots + 1):
         files = Files(place, name if n == 1 else f"{name}-{n}")
         owner = files.owner()
         if owner is None or owner == os.getpid() or not process_alive(owner):

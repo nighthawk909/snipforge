@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     if name is None:
         log.error("SnipForge's recorder needs the channel to SnipForge: --record <name>")
         return 2
-    logging_session = logs.setup("recorder")  # for Report a problem (snipforge.diagnostics)
+    logging_session = logs.setup("recorder", slots=logs.SLOTS)  # for Report a problem (snipforge.diagnostics)
     try:
         return _record(argv, name, logging_session)
     finally:

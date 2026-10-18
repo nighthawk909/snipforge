@@ -49,7 +49,7 @@ def session(tmp_path, faults):
     made = []
 
     def start(name="snipforge"):
-        s = logs.setup(name, tmp_path)
+        s = logs.setup(name, tmp_path, slots=logs.SLOTS if name == "recorder" else 1)
         made.append(s)
         return s
     yield start
@@ -86,7 +86,7 @@ def test_an_error_in_a_thread_is_kept_too(session):
 
 def test_crash_details_are_kept_only_when_the_last_run_did_not_quit_normally(session, tmp_path):
     files = logs.Files(tmp_path, "snipforge")
-    files.running.write_text("123 2026-10-18 09:00:00\n", encoding="utf-8")  # it never quit
+    files.running.write_text("123 2026-10-18 09:00:00\n", encoding="utf-8")  # it never quit (123 may be alive now)
     files.crash.write_text("Windows fatal exception: access violation\n\nCurrent thread 0x1:\n", encoding="utf-8")
     first = session()
     assert first.crashed_last_time
@@ -137,6 +137,14 @@ def test_a_running_process_crash_file_is_not_a_crash(tmp_path):
     files.running.write_text(f"{os.getppid()} 2026-10-18 09:00:00\n", encoding="utf-8")  # alive
     files.crash.write_text("Windows fatal exception: code 0xc0000005\n", encoding="utf-8")
     assert not files.ended_badly() and files.unseen_crash() == ""
+
+
+def test_snipforge_itself_always_takes_its_own_files(session, tmp_path):
+    files = logs.Files(tmp_path, "snipforge")
+    files.running.write_text(f"{os.getppid()} 2026-10-18 09:00:00\n", encoding="utf-8")  # a reused process id
+    files.crash.write_text("Fatal Python error: Segmentation fault\n", encoding="utf-8")
+    s = session()
+    assert s.files.name == "snipforge" and s.crashed_last_time  # one copy at a time: that run is over
 
 
 def test_a_second_recorder_keeps_its_own_files(session, tmp_path):
@@ -268,7 +276,8 @@ def test_server_names_and_the_organization_domain_are_taken_out():
                  "objects.githubusercontent.com is fine")
     for private in ("fabrikam", "example-feed", "feedserver", "Sams-MacBook", "fs01"):
         assert private.lower() not in text.lower(), private
-    assert "snipforge.update_sources" in text and "x.png" in text and "objects.githubusercontent.com" in text
+    assert "snipforge.update_sources" in text and "x.png" in text
+    assert text.split("; ")[-1] == "objects.githubusercontent.com is fine"  # GitHub's own host stays
 
 
 def test_onedrive_folders_of_any_organization_are_taken_out(scrub):
