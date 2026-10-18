@@ -47,3 +47,5 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | Microphone and computer sound | ✅ | ❌ | New phase: ScreenCaptureKit audio, AVFoundation |
 | | Webcam bubble | ✅ | ❌ | New phase: Qt camera (AVFoundation) |
 | | Video editor (trim, GIF) and recordings in the Library | ✅ | ❌ unverified | With the recording phase |
+| | Finishes the file before sleep, shutdown or sign-out; keeps the computer awake; pauses when locked; says when the screen goes off | ✅ | ❌ | With the recording phase: `_power_mac.py` behind `power.py` (an IOPMAssertion; NSWorkspace's sleep, session and screen notifications) |
+| | Follows the default sound device when it changes mid-recording (headset plugged in) | ✅ | ❌ | With the recording phase: AVFoundation's default-device notifications (microphone), ScreenCaptureKit (computer sound) |
