@@ -91,6 +91,18 @@ def _paint(p: QPainter, rect: QRectF, kind: str, style: Style, background: QColo
         box = QRectF(0, 0, side, side)
         box.moveCenter(rect.center())
         renderer(style.stamp).render(p, box)
+    elif kind == "magnify":
+        source = QRectF(rect.left() + 3, rect.bottom() - 11, 8, 8)
+        lens = QRectF(rect.left() + 14, rect.top() + 2, rect.height() - 4, rect.height() - 4)
+        p.setPen(QPen(color, 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(source)
+        p.setPen(_pen(style))
+        p.setBrush(QColor("#ffffff"))
+        if style.shape == "ellipse":
+            p.drawEllipse(lens)
+        else:
+            p.drawRoundedRect(lens, 4 if style.shape != "rect" else 0, 4 if style.shape != "rect" else 0)
     elif kind in ("blur", "pixelate"):
         _paint_redaction(p, rect.adjusted(4, 6, -4, -6), kind, style)
     elif kind == "text" and not style.fill:  # just the letters, as unfilled text has no box

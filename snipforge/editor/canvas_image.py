@@ -9,7 +9,7 @@ from . import image_ops
 from .canvas_view import SCENE_MARGIN
 from .commands import ImageCommand
 from .image_ops import ImageGeometry, Remap
-from .items import EffectItem, SpotlightItem
+from .items import SpotlightItem
 
 NEWER_MARKUP = "This snip has markup from a newer SnipForge, which this version can't turn or resize along with it."
 
@@ -71,7 +71,7 @@ class ImageMixin:
         self._base_item.setPixmap(QPixmap.fromImage(self.base_image))
         self._mask.set_image_rect(self._image_rect)
         for item in self.annotations():
-            if isinstance(item, EffectItem):
+            if hasattr(item, "set_base"):  # redactions and magnifiers draw from the snip's pixels
                 item.set_base(self.base_image)
             elif isinstance(item, SpotlightItem):
                 item.set_image_rect(self._image_rect)

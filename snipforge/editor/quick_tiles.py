@@ -25,7 +25,7 @@ COLUMNS = 4
 TOOL_NAMES = {
     "arrow": "arrows", "line": "lines", "rect": "rectangles", "ellipse": "ellipses", "pen": "the pen",
     "highlight": "the highlighter", "text": "text", "callout": "callouts", "stamp": "stamps",
-    "step": "step numbers", "pixelate": "pixelate", "blur": "blur",
+    "step": "step numbers", "pixelate": "pixelate", "blur": "blur", "magnify": "magnifiers",
 }
 
 

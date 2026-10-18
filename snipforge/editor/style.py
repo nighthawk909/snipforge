@@ -75,6 +75,7 @@ DEFAULT_TOOL_STYLES: dict[str, Style] = {
     "pixelate": Style(width=4, shadow=False),
     "blur": Style(width=4, shadow=False),
     "spotlight": Style(shadow=False),
+    "magnify": Style(color="#1c1c1e", width=3, shape="ellipse"),
 }
 
 # Which style controls the property bar shows for each annotation kind.
@@ -92,6 +93,7 @@ STYLE_FIELDS: dict[str, tuple[str, ...]] = {
     "pixelate": ("width",),
     "blur": ("width",),
     "spotlight": (),
+    "magnify": ("shape", "color", "width", "dash", "shadow"),
 }
 
 STRENGTH_KINDS = {"pixelate", "blur"}  # 'width' means redaction strength for these

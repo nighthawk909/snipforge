@@ -172,7 +172,15 @@ def mapped_state(item, remap: Remap) -> dict:
         state["pos"] = [new_pos.x(), new_pos.y()]
     if "size" in state:
         _big_enough(item, state)
+    if "source" in state:  # a magnifier's source area, in scene coordinates
+        source = t.mapRect(QRectF(*state["source"]))
+        grow_w, grow_h = max(0.0, MIN_BOX - source.width()), max(0.0, MIN_BOX - source.height())
+        source.adjust(-grow_w / 2, -grow_h / 2, grow_w / 2, grow_h / 2)
+        state["source"] = [source.x(), source.y(), source.width(), source.height()]
     return state
+
+
+MIN_BOX = 6.0  # the smallest a shrunk box (or a magnifier's source) is kept
 
 
 MIN_LINE = 6.0  # a shrunk line is kept at least this long (LineItem drops lines under 4 px)

@@ -53,6 +53,7 @@ the snip, with a magnified view of the pixels under the pointer. Everything you 
 | Pen, highlighter | P, H | |
 | Blur, pixelate | B, X | hide sensitive details |
 | Spotlight | S | dim everything except one area |
+| Magnify | M | a circle or box lens showing part of the snip enlarged; move and resize the lens and what it shows |
 | Crop | C | drag edges in to cut, back out to restore; Enter applies |
 
 Undo/redo, duplicate (Ctrl+D), nudge with arrow keys, zoom with Ctrl+wheel.

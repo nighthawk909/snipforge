@@ -16,6 +16,9 @@ CURSORS = {
     "t": Qt.SizeVerCursor, "b": Qt.SizeVerCursor,
     "l": Qt.SizeHorCursor, "r": Qt.SizeHorCursor,
     "p1": Qt.SizeAllCursor, "p2": Qt.SizeAllCursor, "tail": Qt.SizeAllCursor,
+    # a magnifier's source area
+    "s_tl": Qt.SizeFDiagCursor, "s_br": Qt.SizeFDiagCursor, "s_tr": Qt.SizeBDiagCursor, "s_bl": Qt.SizeBDiagCursor,
+    "source": Qt.SizeAllCursor,
 }
 
 
@@ -75,7 +78,9 @@ class HandleOverlay(QGraphicsItem):
             if len(item.handle_points()) != 2:  # lines show just their end handles
                 p.setPen(outline)
                 p.setBrush(Qt.NoBrush)
-                p.drawRect(item.sceneBoundingRect())
+                rects = item.selection_rects() if hasattr(item, "selection_rects") else [item.sceneBoundingRect()]
+                for rect in rects:
+                    p.drawRect(rect)
         target = self.target
         if target is None or target.scene() is None:
             return
