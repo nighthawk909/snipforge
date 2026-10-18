@@ -16,9 +16,22 @@ from .items import BoxItem
 from .style import Style
 
 MAX_PIECE_PIXELS = 4_000_000  # a piece bigger than this is kept at this size (it's drawn stretched)
-
-
 MAX_ENCODED = 40_000_000  # characters of base64: far more than a MAX_PIECE_PIXELS PNG ever takes
+PNG_HEAD = b"\x89PNG\r\n\x1a\n"
+
+
+def pixels(text) -> int | None:
+    """How many pixels a piece's picture unpacks to, read from its PNG header without unpacking
+    it; None if it isn't a PNG."""
+    if not isinstance(text, str):
+        return None
+    try:
+        head = base64.b64decode(text[:32], validate=True)  # 24 bytes: the signature and IHDR's size
+    except (ValueError, TypeError):
+        return None
+    if len(head) < 24 or not head.startswith(PNG_HEAD) or head[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(head[16:20], "big") * int.from_bytes(head[20:24], "big")
 
 
 def encode(image: QImage) -> str:
@@ -129,7 +142,7 @@ def cut_out(text: str, rect: QRectF, cut: cutout.Cut) -> str:
         return text
     start = max(0.0, cut.start - low) * pixels / length
     end = min(length, cut.end - low) * pixels / length
-    first, last = max(0, round(start)), min(pixels, round(end))
+    first, last = max(0, math.floor(start)), min(pixels, math.ceil(end))  # outward: none of the strip stays
     if last <= first:
         return text  # the strip misses the piece
     if last - first >= pixels:

@@ -16,6 +16,7 @@ MAX_TOTAL_TEXT = 50_000
 MAX_POINTS = 20_000  # in one pen or highlighter stroke
 HEAVY_KINDS = {"blur", "pixelate", "erase", "magnify", "piece"}  # each keeps a picture of its area
 MAX_PICTURES = 60_000_000  # characters of moved pieces' pictures (base64 PNG), together
+MAX_PICTURE_PIXELS = 16_000_000  # what they unpack to, together (64 MB)
 MAX_HEAVY = 100
 MAX_HEAVY_AREA = 4  # those areas together: at most this many times the snip's
 
@@ -44,7 +45,9 @@ def _area(state: dict, snip_area: float) -> float:
 def problem(states: list[dict], snip: QSizeF) -> str | None:
     """Why these item states can't be pasted into a snip of this size, or None if they can."""
     snip_area = max(1.0, snip.width() * snip.height())
-    total_text, heavy, heavy_area, pictures = 0, 0, 0.0, 0
+    from .piece import pixels
+
+    total_text, heavy, heavy_area, pictures, picture_pixels = 0, 0, 0.0, 0, 0
     for state in states:
         if not _numbers_ok(state):
             return "it has numbers no snip uses"
@@ -58,13 +61,15 @@ def problem(states: list[dict], snip: QSizeF) -> str | None:
         if state.get("kind") in HEAVY_KINDS:
             heavy += 1
             heavy_area += _area(state, snip_area)
-        picture = state.get("image", "")
-        pictures += len(picture) if isinstance(picture, str) else MAX_PICTURES + 1
+        if state.get("kind") == "piece":  # its picture: the characters, and the pixels they unpack to
+            picture = state.get("image")
+            pictures += len(picture) if isinstance(picture, str) else 0
+            picture_pixels += pixels(picture) or 0  # not a picture: that piece is skipped when pasted
     if total_text > MAX_TOTAL_TEXT:
         return "it has too much text"
     if heavy > MAX_HEAVY or heavy_area > MAX_HEAVY_AREA * snip_area:
         return "it has too many blurred, erased, moved or magnified areas"
-    if pictures > MAX_PICTURES:
+    if pictures > MAX_PICTURES or picture_pixels > MAX_PICTURE_PIXELS:
         return "its moved pieces are too big"
     return None
 

@@ -44,6 +44,8 @@ def document_version(states: list[dict]) -> int:
     """The oldest document version that shows these items right: older SnipForges still open
     every snip that doesn't need a newer one."""
     for state in states:
+        if not isinstance(state, dict):  # kept unread from a damaged document
+            continue
         style = state.get("style")
         if state.get("kind") == "piece" or (isinstance(style, dict) and style.get("bold") is False):
             return 2
@@ -140,6 +142,13 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, Imag
     def selected_annotations(self) -> list[Annotation]:
         return [i for i in self._scene.selectedItems() if isinstance(i, Annotation)]
 
+    def bottom_up(self, items) -> list[Annotation]:
+        """`items` in the order they're drawn, bottom first. Items on the same layer are drawn in
+        the order they were added, so saving, copying or duplicating them in this order keeps what's
+        on top on top (an Edit text's text over its erase, say)."""
+        order = {id(item): n for n, item in enumerate(reversed(self._scene.items()))}
+        return sorted(items, key=lambda item: order.get(id(item), -1))
+
     def editing_text_item(self) -> EditableText | None:
         item = self._scene.focusItem()
         return item if isinstance(item, EditableText) and item.is_editing() else None
@@ -216,15 +225,16 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, Imag
             self.undo_stack.push(RemoveItemsCommand(self._scene, items))
 
     def duplicate_selection(self) -> None:
-        sources = self.selected_annotations()
+        sources = self.bottom_up(self.selected_annotations())
         if not sources:
             return
-        copies = []
+        copies, top = [], self._next_z()
         for src in sources:
             state = src.get_state()
             state["pos"] = [state["pos"][0] + DUPLICATE_OFFSET, state["pos"][1] + DUPLICATE_OFFSET]
             if src.zValue() > -100:  # spotlights/highlighters keep their layer below annotations
-                state["z"] = self._next_z()
+                state["z"] = top
+                top += 1  # each copy over the one below it, as the originals are
             copies.append(self._adopt(create_item(state, self.base_image, self._image_rect)))
         self.undo_stack.push(AddItemsCommand(self._scene, copies, "Duplicate"))
         self._select(copies)
@@ -349,7 +359,7 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, Imag
 
     # ------------------------------------------------------------------ document
     def to_document(self) -> dict:
-        items = sorted(self.annotations(), key=lambda i: i.zValue())
+        items = self.bottom_up(self.annotations())
         r = self._crop_rect
         states = [i.get_state() for i in items if not i.is_degenerate()]
         states += self._unparsed

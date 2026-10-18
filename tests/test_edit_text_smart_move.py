@@ -1,6 +1,8 @@
 """Edit text (retype a line text recognition found: it's smart-erased and the new words are written
 over it, matched in size and colour) and Smart Move (drag out part of the snip, put it anywhere;
 Smart erase fills in where it was)."""
+import json
+
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QTransform
@@ -362,8 +364,114 @@ def test_esc_clears_the_hint_to_click_a_line(qapp, page, tmp_path, monkeypatch):
 
 def test_moving_a_piece_keeps_what_was_selected_selected(page):
     canvas = make_canvas(page)
-    drag(canvas, "rect", (300, 150), (380, 220))
-    box = next(i for i in canvas.annotations() if i.kind == "rect")
+    drag(canvas, "erase", (200, 20), (240, 60))  # so the snip is drawn with markup hidden, not just copied
+    box = drag(canvas, "rect", (300, 150), (380, 220))
+    box.setOpacity(0.4)
     assert box.isSelected()
-    canvas.shown_pixels()
-    assert box.isSelected() and box.opacity() == 1.0
+    shown = canvas.shown_pixels()
+    assert shown is not canvas.base_image and shown.pixelColor(300, 185).name() == "#ffffff"
+    assert box.isSelected() and box.opacity() == 0.4
+
+
+# --- What the second review found --------------------------------------------------------------
+def stacked(pitch):
+    """Three lines of 13 px text, `pitch` apart; their letters as drawn, each line's on its own."""
+    img = QImage(320, 120, QImage.Format_ARGB32)
+    img.fill(QColor("#ffffff"))
+    font = QFont("Segoe UI")
+    font.setPixelSize(13)
+    texts = ["Total due by Friday 120", "Paid", "Questions? Ask the team"]
+    letters = []
+    for n, text in enumerate(texts):
+        alone = QImage(img.size(), QImage.Format_ARGB32)
+        alone.fill(QColor("#ffffff"))
+        for target in (img, alone):
+            p = QPainter(target)
+            p.setFont(font)
+            p.setPen(QColor("#222222"))
+            p.drawText(QPointF(20, 40 + n * pitch), text)
+            p.end()
+        letters.append(inked(alone, alone.rect()))
+    return img, texts, letters
+
+
+@pytest.mark.parametrize("pitch", [13, 16, 20])
+def test_a_box_between_two_lines_never_takes_in_the_other_line(qapp, pitch):
+    img, texts, letters = stacked(pitch)
+    middle = letters[1]
+    for recognized in (middle, middle.adjusted(0, -0.72 * middle.height(), 0, -0.54 * middle.height())):
+        swap = edit_text.replacement(img, QPointF(0, 0), recognized, texts[1], QRectF(img.rect()))
+        assert swap.erase.contains(middle)
+        assert not swap.erase.intersects(letters[0]) and not swap.erase.intersects(letters[2])
+
+
+def test_a_busy_background_falls_back_to_the_box(qapp):
+    img = QImage(200, 80, QImage.Format_ARGB32)
+    p = QPainter(img)
+    for y in range(80):
+        p.fillRect(0, y, 200, 1, QColor.fromHsv(220, 40, 255 - 2 * y))
+    p.end()
+    box = QRectF(20, 24, 120, 24)
+    assert edit_text.ink_box(img, box, edit_text.paper_color(img, box)) == box
+
+
+def test_a_document_with_damaged_items_still_saves(page):
+    canvas = make_canvas(page)
+    canvas.load_document({"items": [5, None, "x"]})
+    assert canvas.to_document()["items"] == [5, None, "x"]
+
+
+def test_items_on_the_same_layer_keep_their_order_when_saved_copied_or_duplicated(page):
+    canvas = make_canvas(page)
+    canvas.set_tool("move")
+    gesture(canvas, (35, 35), (105, 85))
+    erase, moved = sorted(canvas.annotations(), key=lambda i: i.kind)
+    moved.setZValue(erase.zValue())  # as a version without the fix saved them
+    moved.setPos(moved.pos() + QPointF(200, 0))
+    assert canvas.to_document()["items"][-1]["kind"] == "piece"  # drawn last, saved last
+    canvas.set_tool("select")
+    canvas._select([erase, moved])
+    canvas.duplicate_selection()
+    copies = canvas.selected_annotations()
+    assert {i.kind: i.zValue() for i in copies}["piece"] > {i.kind: i.zValue() for i in copies}["erase"]
+    canvas._select([erase, moved])
+    assert json.loads(canvas.markup_data())["items"][-1]["kind"] == "piece"
+    before = canvas.render_image()
+    again = make_canvas(page)
+    again.load_document(canvas.to_document())
+    assert again.render_image() == before
+
+
+def test_a_cut_through_a_stretched_piece_takes_every_column_it_touches(qapp):
+    from snipforge.editor.cutout import Cut
+    image = QImage(70, 10, QImage.Format_ARGB32)
+    image.fill(QColor("#e11d48"))
+    encoded = piece.encode(image)
+    # drawn twice as wide: the cut's x 51 to 54 is the picture's 15.5 to 17
+    assert piece.decode(piece.cut_out(encoded, QRectF(20, 0, 140, 10), Cut("x", 51, 54))).width() == 68
+    assert piece.cut_out(encoded, QRectF(20, 0, 140, 10), Cut("x", 200, 220)) == encoded  # misses it
+
+
+def test_pasted_pieces_are_counted_by_the_pixels_they_unpack_to():
+    import base64
+    import struct
+
+    from PySide6.QtCore import QSizeF
+
+    from snipforge.editor import paste_checks
+    header = piece.PNG_HEAD + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 5000, 4000) + bytes(5)
+    claimed = base64.b64encode(header).decode()  # a tiny paste that says it's 20 megapixels
+    assert piece.pixels(claimed) == 20_000_000 and piece.pixels("nonsense") is None
+    big = {"kind": "piece", "pos": [0, 0], "size": [10, 10], "style": {}, "image": claimed}
+    assert paste_checks.problem([big], QSizeF(100, 100))
+
+
+def test_a_double_click_while_choosing_is_a_click(page):
+    canvas = make_canvas(page)
+    chosen = []
+    canvas.start_choosing([QRectF(41, 162, 150, 22)], chosen.append)
+    view = canvas.mapFromScene(QPointF(300, 40))
+    QTest.mouseDClick(canvas.viewport(), Qt.LeftButton, Qt.NoModifier, view)  # beside the line: still choosing
+    assert canvas.choosing() and canvas.editing_text_item() is None
+    QTest.mouseDClick(canvas.viewport(), Qt.LeftButton, Qt.NoModifier, canvas.mapFromScene(QPointF(100, 173)))
+    assert chosen == [0] and canvas.editing_text_item() is None

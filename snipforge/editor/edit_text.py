@@ -18,6 +18,7 @@ from .style import FONT_RANGE, Style
 INK_DIFFERENCE = 90  # how far from the background a pixel must be to count as a letter (sum of RGB)
 SEARCH = 0.6  # how far above and below the recognized line to look for its letters (times its height)
 ERASE_PAD = 0.15  # erased around the letters, times their height (antialiasing), at least 2 px
+MAX_INK = 0.65  # letters cover at most this much of their box (heavy bold text about half)
 TEXT_MARGIN = 8  # TextItem's document margin
 
 
@@ -40,12 +41,15 @@ def _distance(a: QColor, b: QColor) -> int:
     return abs(a.red() - b.red()) + abs(a.green() - b.green()) + abs(a.blue() - b.blue())
 
 
-def colors(image: QImage, rect: QRectF) -> tuple[QColor, QColor]:
-    """(background, ink) under `rect`: the most common colour around its edge, and the average of
-    the pixels inside that differ from it most."""
-    area = rect.toAlignedRect().adjusted(-1, -1, 1, 1).intersected(image.rect())
+def _area(image: QImage, rect: QRectF):
+    return rect.toAlignedRect().adjusted(-1, -1, 1, 1).intersected(image.rect())
+
+
+def paper_color(image: QImage, rect: QRectF) -> QColor:
+    """The background under `rect`: the most common colour around its edge."""
+    area = _area(image, rect)
     if area.isEmpty():
-        return QColor("#ffffff"), QColor("#111111")
+        return QColor("#ffffff")
     step = max(1, max(area.width(), area.height()) // 200)  # a few hundred samples are plenty
     edge: dict[int, int] = {}
     for x in range(area.left(), area.right() + 1, step):
@@ -56,25 +60,58 @@ def colors(image: QImage, rect: QRectF) -> tuple[QColor, QColor]:
         for x in (area.left(), area.right()):
             rgb = image.pixel(x, y) & 0xFFFFFF
             edge[rgb] = edge.get(rgb, 0) + 1
-    paper = QColor(max(edge, key=edge.get))
+    return QColor(max(edge, key=edge.get))
+
+
+def ink_color(image: QImage, rect: QRectF, paper: QColor) -> QColor:
+    """The letters' colour under `rect`: the average of the pixels that differ most from `paper`
+    (dark on light, light on dark when there's no ink to speak of)."""
+    area = _area(image, rect)
+    step = max(1, max(area.width(), area.height()) // 200)
     inside = [QColor(image.pixel(x, y)) for x in range(area.left(), area.right() + 1, step)
               for y in range(area.top(), area.bottom() + 1, step)]
     inside.sort(key=lambda c: _distance(c, paper), reverse=True)
     darkest = inside[:max(1, len(inside) // 10)]
-    if not darkest or _distance(darkest[0], paper) < 60:  # no ink to speak of: dark on light, light on dark
-        return paper, QColor("#111111" if paper.lightness() > 128 else "#ffffff")
+    if not darkest or _distance(darkest[0], paper) < 60:
+        return QColor("#111111" if paper.lightness() > 128 else "#ffffff")
     count = len(darkest)
-    ink = QColor(round(sum(c.red() for c in darkest) / count), round(sum(c.green() for c in darkest) / count),
-                 round(sum(c.blue() for c in darkest) / count))
-    return paper, ink
+    return QColor(round(sum(c.red() for c in darkest) / count), round(sum(c.green() for c in darkest) / count),
+                  round(sum(c.blue() for c in darkest) / count))
+
+
+def colors(image: QImage, rect: QRectF) -> tuple[QColor, QColor]:
+    """(background, ink) under `rect`."""
+    paper = paper_color(image, rect)
+    return paper, ink_color(image, rect, paper)
+
+
+def _runs(rows: dict[int, bool]) -> list[tuple[int, int]]:
+    """Each stretch of inked rows, (first, last), top to bottom."""
+    runs, start = [], None
+    for y in sorted(rows):
+        if rows[y] and start is None:
+            start = y
+        elif not rows[y] and start is not None:
+            runs.append((start, y - 1))
+            start = None
+    if start is not None:
+        runs.append((start, max(rows)))
+    return runs
+
+
+def _overlap(run: tuple[int, int], rect: QRectF) -> float:
+    return max(0.0, min(run[1] + 1, rect.bottom()) - max(run[0], rect.top()))
 
 
 def ink_box(image: QImage, rect: QRectF, paper: QColor) -> QRectF:
-    """The letters of the line recognition put at `rect`: the rows next to it (and in it) that have
-    ink on them, and the columns of those rows that do. `rect` itself when there's no ink to find."""
+    """The letters of the line recognition put at `rect`. Of the stretches of inked rows that reach
+    into it, the one most inside it whose letters start and end where it does (recognition's widths
+    are good: that tells a line from the one above or below when the box sits between them), with
+    any small stretch close by that's mostly inside it, like the dots on i's. `rect` itself when
+    there are no such letters, or what's found doesn't look like one line (a busy background)."""
     reach = rect.height() * SEARCH
     window = rect.adjusted(-2, -reach, 2, reach).toAlignedRect().intersected(image.rect())
-    if window.isEmpty():
+    if window.isEmpty() or rect.height() <= 0 or rect.width() <= 0:
         return QRectF(rect)
     rgb = paper.rgb() & 0xFFFFFF
 
@@ -84,19 +121,37 @@ def ink_box(image: QImage, rect: QRectF, paper: QColor) -> QRectF:
                 + abs((pixel & 255) - (rgb & 255))) >= INK_DIFFERENCE
 
     columns = range(window.left(), window.right() + 1)
-    rows = {y: any(inked(x, y) for x in columns) for y in range(window.top(), window.bottom() + 1)}
-    middle = [y for y in rows if rect.top() <= y + 0.5 <= rect.bottom() and rows[y]]
-    if not middle:
+
+    def span(top: int, bottom: int) -> tuple[int, int] | None:
+        used = [x for x in columns if any(inked(x, y) for y in range(top, bottom + 1))]
+        return (min(used), max(used) + 1) if used else None
+
+    def fit(run: tuple[int, int]) -> float:
+        left, right = span(*run)
+        misfit = (abs(left - rect.left()) + abs(right - rect.right())) / rect.width()
+        return _overlap(run, rect) / (run[1] - run[0] + 1) - misfit
+
+    runs = _runs({y: any(inked(x, y) for x in columns) for y in range(window.top(), window.bottom() + 1)})
+    reaching = [run for run in runs if _overlap(run, rect) > 0]
+    if not reaching:
         return QRectF(rect)
-    top, bottom = min(middle), max(middle)
-    while top - 1 in rows and rows[top - 1]:  # letters run on above and below the box: follow them
-        top -= 1
-    while bottom + 1 in rows and rows[bottom + 1]:
-        bottom += 1
-    used = [x for x in columns if any(inked(x, y) for y in range(top, bottom + 1))]
-    if not used:
-        return QRectF(rect)
-    return QRectF(min(used), top, max(used) - min(used) + 1, bottom - top + 1)
+    best = max(reaching, key=fit)
+    top, bottom = best
+    gap = max(1.0, rect.height() * ERASE_PAD)
+    for run in reaching:  # accents and dots just above or below, mostly inside the box
+        near = run[0] - bottom - 1 <= gap if run[0] > bottom else top - run[1] - 1 <= gap
+        if run != best and near and _overlap(run, rect) * 2 >= run[1] - run[0] + 1:
+            top, bottom = min(top, run[0]), max(bottom, run[1])
+    height = bottom - top + 1
+    off = abs((top + bottom + 1) / 2 - rect.center().y())
+    if not 0.4 * rect.height() <= height <= 1.6 * rect.height() or off > 0.75 * rect.height():
+        return QRectF(rect)  # not one line of letters
+    left, right = span(top, bottom)
+    step = max(1, (right - left) // 300)
+    samples = [inked(x, y) for x in range(left, right, step) for y in range(top, bottom + 1)]
+    if sum(samples) > MAX_INK * len(samples):
+        return QRectF(rect)  # solid colour, not letters: there's always paper between letters
+    return QRectF(left, top, right - left, height)
 
 
 def _font(size: int) -> QFont:
@@ -131,8 +186,10 @@ def replacement(image: QImage, origin: QPointF, rect: QRectF, old_text: str, bou
     """How to replace the line recognized as `old_text` at `rect` (snip pixels). `image` is the snip
     as shown around it, its top-left at `origin`; nothing is erased outside `bounds` (the snip)."""
     local = rect.translated(-origin)
-    paper, ink = colors(image, local)
-    letters = ink_box(image, local, paper).translated(origin)
+    paper = paper_color(image, local)
+    found = ink_box(image, local, paper)
+    ink = ink_color(image, found, paper)
+    letters = found.translated(origin)
     size = fitted_size(old_text, letters.width(), letters.height())
     style = Style(color=ink.name(), fill=False, shadow=False, font_size=size, bold=False)
     metrics = QFontMetricsF(_font(size))
@@ -141,7 +198,7 @@ def replacement(image: QImage, origin: QPointF, rect: QRectF, old_text: str, bou
     pos = QPointF(letters.left() - TEXT_MARGIN - sample.left(),
                   letters.bottom() - TEXT_MARGIN - metrics.ascent() - sample.bottom())
     pad = max(2.0, letters.height() * ERASE_PAD)
-    erase = letters.united(rect).adjusted(-pad, -pad, pad, pad)
+    erase = letters.adjusted(-pad, -pad, pad, pad)  # the letters, not the box: it can reach the next line
     return Replacement(erase.intersected(bounds), style, pos)
 
 

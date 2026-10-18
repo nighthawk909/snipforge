@@ -70,7 +70,7 @@ class ClipboardMixin:
     # ------------------------------------------------------------------ copy and cut
     def markup_data(self) -> bytes | None:
         """The selected markup in SnipForge's clipboard format, or None if nothing is selected."""
-        items = sorted(self.selected_annotations(), key=lambda i: i.zValue())
+        items = self.bottom_up(self.selected_annotations())
         states = [i.get_state() for i in items if not i.is_degenerate()]
         return json.dumps({"version": 1, "items": states}).encode("utf-8") if states else None
 

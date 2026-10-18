@@ -270,6 +270,9 @@ class InputMixin:
             if self.picking():
                 self.mousePressEvent(e)
             return
+        if self.choosing():  # Edit text: a double-click is a click, never typing into a text box
+            self.mousePressEvent(e)
+            return
         view_pos = e.position().toPoint()
         hit = None if e.modifiers() & Qt.AltModifier else self._annotation_at(view_pos)
         editing = self.editing_text_item()
