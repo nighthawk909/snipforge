@@ -134,6 +134,8 @@ class SnipForgeApp:
     def _build_tray(self) -> None:
         self._tray = QSystemTrayIcon(self._icon)
         self._update_tray_tip()
+        # Before UpdateFlow's own: a click on its "updated" notice is seen while that notice is still up.
+        self._tray.messageClicked.connect(self._message_clicked)
         self._updates = UpdateFlow(self._tray)
         self._updates.ui_shows_updates = self._settings_shows_updates
         menu = QMenu()
@@ -154,7 +156,6 @@ class SnipForgeApp:
         menu.addAction("Quit", self._app.quit)
         self._menu = menu
         self._tray.setContextMenu(menu)
-        self._tray.messageClicked.connect(self._message_clicked)
         if sys.platform != "darwin":  # a Mac menu bar icon opens its menu on click, and New snip is in it
             self._tray.activated.connect(
                 lambda reason: self.capture() if reason == QSystemTrayIcon.Trigger else None)
@@ -217,11 +218,13 @@ class SnipForgeApp:
         self._crash_notice_until = 0.0
         report_dialog.open_report(library_root=self.library.root)
 
-    def notice_crash(self) -> None:
+    def notice_crash(self, wait: bool = True) -> None:
         """The last run ended in a crash: say so, and offer the report that has its details. Not
-        over the "SnipForge was updated" notice: a click on one would open both."""
+        over the "SnipForge was updated" notice: it gets one turn later, or none (the report keeps
+        the crash either way)."""
         if self._updates.showing_whats_new:
-            QTimer.singleShot(CRASH_NOTICE_MS + 1000, self.notice_crash)
+            if wait:
+                QTimer.singleShot(CRASH_NOTICE_MS + 1000, lambda: self.notice_crash(wait=False))
             return
         self._crash_notice_until = time.monotonic() + CRASH_NOTICE_MS / 1000
         self._tray.showMessage("SnipForge", "SnipForge closed unexpectedly last time. Click here to save the "

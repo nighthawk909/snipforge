@@ -37,7 +37,7 @@ PRIVATE_KEYS = frozenset({"teams_recent", "output/folder", "capture/last_area", 
 SAFE_VALUE = re.compile(r"[\w.+\-# ]{0,40}")  # short codes, numbers, versions, shortcuts, colors
 KEEP_HOSTS = frozenset({"github.com", "api.github.com", *project.DOWNLOAD_HOSTS})
 # Endings of server names taken out wherever they appear (logger names like snipforge.app never end so).
-HOST_ENDINGS = "com|net|org|local|lan|corp|internal|intranet|intra|biz|info|us|uk|de|fr|nl|ca|au|eu|ch|gov|edu|mil"
+HOST_ENDINGS = "com|net|org|local|lan|corp|internal|intranet|intra|biz|us|uk|de|fr|nl|ca|au|eu|ch|gov|edu|mil"
 GENERIC_LABELS = frozenset({"com", "net", "org", "local", "lan", "corp", "internal", "ad", "co", "www"})
 NEVER_INCLUDED = ("your snips and recordings, window titles, your name, your computer's name, email addresses, or "
                   "the names of your organization's servers and network")
@@ -80,16 +80,20 @@ class Scrubber:
             self._rules.append((_path_pattern(path), replacement))
         self._rules += [
             (re.compile(r"(?i)(?<=[\\/])OneDrive - [^\\/\r\n\"'<>|:*?]+"), "OneDrive - <organization>"),
-            (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
+            (re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),  # from a word's start only
             (re.compile(r"(?i)[\\/]{2,4}\?[\\/]+UNC[\\/]+[^\\/\s'\"<>|]+[\\/]+[^\\/\s'\"<>|]+"),
              r"\\\\<server>\\<share>"),
-            # \\server\share however it's written (\\, // or doubled in Python's repr), not \\.\pipe or \\?\
-            (re.compile(r"(?<![\w:\\/])[\\/]{2,4}(?![.?][\\/])(?!<)[^\\/\s'\"<>|]+[\\/]+[^\\/\s'\"<>|]+"),
+            # \\server\share however it's written (\\, // or doubled in Python's repr), not \\.\pipe or \\?\,
+            # and not the doubled separators after %USERPROFILE% or a placeholder
+            (re.compile(r"(?<![\w:%>\\/])[\\/]{2,4}(?![.?][\\/])(?!<)[^\\/\s'\"<>|]+[\\/]+[^\\/\s'\"<>|]+"),
              r"\\\\<server>\\<share>"),
+            # file://server/share and file:////server/share (not file:///C:/ or a local file:///path)
+            (re.compile(r"(?i)\bfile:(?://(?!/)|/{4,5})(?![a-z]:|[%<])[^/\s'\"<>|]+/[^/\s'\"<>|]+"),
+             "file://<server>/<share>"),
             (re.compile(r"(?i)\b([A-Z]:[\\/]+Users[\\/]+)[^\\/:*?\"<>|\r\n]+"), r"\1<user>"),  # anyone's profile
             (re.compile(r"(?<![\w.])/(Users|home)/[^/\s]+"), r"/\1/<user>"),
             (re.compile(r"(?i)\b((?:https?|ftp|file)://)([^/\s:?#]+)"), _host),
-            (re.compile(rf"(?i)\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:{HOST_ENDINGS})\b"), _bare_host),
+            (re.compile(rf"(?i)(?<![\w.-])(?:[a-z0-9][a-z0-9-]*+\.)++(?:{HOST_ENDINGS})\b"), _bare_host),
         ]
         machine = list(hostnames) if hostnames is not None else [platform.node(), socket.gethostname()]
         machine.append(env.get("COMPUTERNAME", ""))
@@ -98,13 +102,15 @@ class Scrubber:
         for name in (env.get(var, "") for var in ("USERNAME", "USER", "LOGNAME")):
             labels[name] = "<user>"
         labels[home.name] = "<user>"
-        for host in hosts:
+        for host in hosts:  # whole names only: "updates" or "10" alone are ordinary words
             labels[host] = "<host>"
-            labels[host.split(".", 1)[0]] = "<host>"
         for name in (domain, env.get("USERDOMAIN", ""), *_labels(domain)):
             labels[name] = "<domain>"
         for name in machine:
-            labels[name] = labels[name.split(".", 1)[0]] = "<computer>"
+            labels[name] = "<computer>"
+            short = name.split(".", 1)[0]
+            if len(short) >= 4 and not short.isdigit():  # not part of an address like 10.1.2.3
+                labels[short] = "<computer>"
         for name in sorted((n for n in labels if len(n) >= 2), key=len, reverse=True):
             pattern = re.compile(rf"(?i)(?<![A-Za-z0-9<]){re.escape(name)}(?![A-Za-z0-9>])")
             self._rules.append((pattern, labels[name]))
@@ -130,7 +136,9 @@ def _path_pattern(path: str) -> re.Pattern:
 
 def _host(match: re.Match) -> str:
     host = match.group(2)
-    return match.group(0) if host.lower() in KEEP_HOSTS else f"{match.group(1)}<host>"
+    if host.lower() in KEEP_HOSTS or host.startswith("<"):
+        return match.group(0)
+    return f"{match.group(1)}<host>"
 
 
 def _bare_host(match: re.Match) -> str:

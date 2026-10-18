@@ -268,6 +268,41 @@ def test_a_network_share_is_taken_out_however_it_is_written(scrub, written):
     assert "fileserver01" not in text and "apps" not in text and "<server>" in text and "x.png" in text
 
 
+def test_paths_in_error_messages_stay_whole(scrub):
+    """Python doubles backslashes in an error message's path; once the profile or a OneDrive
+    folder is replaced, what follows mustn't look like a network share."""
+    home = str(HOME).replace("\\", "\\\\")
+    text = scrub(f"OSError: '{home}\\\\Pictures\\\\SnipForge\\\\x.png' and "
+                 f"'{home}\\\\OneDrive - Contoso\\\\SnipForge\\\\y.png' and "
+                 "'D:\\\\Data\\\\OneDrive - Fabrikam\\\\z.png'")
+    assert "<server>" not in text and "x.png" in text and "y.png" in text and "z.png" in text
+    assert "Contoso" not in text and "Fabrikam" not in text
+
+
+@pytest.mark.parametrize("url", ["file://fileserver01/apps/a.png", "file:////fileserver01/apps/a.png"])
+def test_a_share_in_a_file_address_is_taken_out(scrub, url):
+    text = scrub(f"Couldn't play {url}")
+    assert "fileserver01" not in text and "apps" not in text and text.endswith("/a.png")
+
+
+def test_a_local_file_address_is_left_readable(scrub):
+    assert scrub("file:///C:/Temp/a.mp4") == "file:///C:/Temp/a.mp4"
+
+
+def test_a_feed_server_named_like_a_word_only_goes_as_a_whole_name():
+    scrub = diagnostics.Scrubber({}, HOME, hosts=["updates.contoso.com", "10.1.2.3"], hostnames=("10.0.0.7",))
+    text = scrub("2026-10-18 10:15:03 Checking for updates on Windows 10 from updates.contoso.com and 10.1.2.3, "
+                 "host 10.0.0.7")
+    assert text == ("2026-10-18 10:15:03 Checking for updates on Windows 10 from <host> and <host>, host <computer>")
+
+
+def test_a_long_dotted_run_is_scrubbed_quickly():
+    import time
+    started = time.monotonic()
+    diagnostics.Scrubber({}, HOME, hostnames=())("a." * 10_000)
+    assert time.monotonic() - started < 2
+
+
 def test_server_names_and_the_organization_domain_are_taken_out():
     scrub = diagnostics.Scrubber({"USERDNSDOMAIN": "CORP.FABRIKAM.COM", "USERNAME": "sam"}, HOME,
                                  hosts=["updates.example-feed.net", "feedserver"], hostnames=("Sams-MacBook.local",))
@@ -523,6 +558,9 @@ def test_the_crash_notice_waits_for_an_update_notice(forge, opened, monkeypatch)
     assert shown == [] and later == [app_module.CRASH_NOTICE_MS + 1000]
     forge._tray.messageClicked.emit()
     assert opened == []
+    monkeypatch.setattr(forge._updates, "_whats_new", object())  # (the click above showed what's new)
+    forge.notice_crash(wait=False)  # its one later turn: still up, so no notice at all
+    assert shown == [] and len(later) == 1
 
 
 def test_clicking_the_crash_notice_opens_the_report(forge, opened, monkeypatch):
