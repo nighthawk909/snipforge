@@ -240,6 +240,14 @@ def _video_editor() -> str:
     return f"editor opened a {frames}-frame clip; GIF of {gif_frames} frames"
 
 
+def _recorder_process() -> str:
+    """Recordings are made in a process of their own (`SnipForge.exe --record`): start one and have
+    it answer over its channel, as SnipForge does for each recording."""
+    from .video.remote_recorder import ping
+
+    return f"the recorder process answered (version {ping(timeout_ms=60_000)})"
+
+
 def run(report_path: str) -> int:
     windows = sys.platform == "win32"
     results: dict = {}
@@ -254,6 +262,7 @@ def run(report_path: str) -> int:
     _check(results, "share", _share, required=False)
     _check(results, "video", _video)
     _check(results, "video_editor", _video_editor)
+    _check(results, "recorder_process", _recorder_process, required=windows)
     passed = all(r["ok"] for r in results.values() if r["required"])
     report = {"version": __version__, "platform": sys.platform, "passed": passed, "checks": results}
     try:

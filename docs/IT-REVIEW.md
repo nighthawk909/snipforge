@@ -63,6 +63,15 @@ player to local files too (`QT_FFMPEG_PROTOCOL_WHITELIST=file`).
 editor. Only its core is bundled (no font, colour management, WebP or AVIF modules); it reads and
 writes local files only.
 
+**A second SnipForge process while recording** (`SnipForge.exe --record <channel>`). Each screen
+recording is made by its own copy of `SnipForge.exe`, started by SnipForge and ending when the
+recording does, so nothing else SnipForge does can stall or lose a recording. The two talk over a
+local named pipe, `\\.\pipe\SnipForge-recorder-<user>-<random>`, that only the signed-in user can
+open, and only about the recording (its settings, pause/stop, how it went). It listens for Windows'
+sleep, shutdown and sign-out notices to finish the video file first; if Windows waits on it,
+Windows shows "Saving your screen recording" as the reason. The packaged self-test starts one and
+has it answer.
+
 **Explorer right-click commands** (`snipforge/share.py`). The Share menu invokes the same
 right-click commands a user would click by hand (OneDrive "Copy link"/"Share", Windows "Share") on
 the exported image.

@@ -304,9 +304,16 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    time limit; `cancel()` keeps nothing and `finish_now()` finishes the file there and then. Tests with
    a fake screen whose frames show their due time, a desktop test of the real thing (flash and beep
    in the file together, a window hidden from capture never in it), and the stress test.
-   **5b. The recorder process**: `SnipForge.exe --record`, its channel to SnipForge (the
-   `QLocalSocket` that `single_instance.py` already uses), and finishing the file when Windows
-   announces sleep, shutdown or sign-out.
+   **5b. The recorder process** (`recorder_process.py`, `remote_recorder.py`, `channel.py`,
+   `power.py`): `SnipForge.exe --record <channel>`, started detached for each recording. Its channel
+   to SnipForge is JSON lines over a `QLocalSocket` with a random name only this user can open;
+   `RemoteRecorder` has the `Recorder`'s controls and signals, and checks what comes back. A hidden
+   window hears Windows' sleep (`PBT_APMSUSPEND`, ~2 s allowed) and session end
+   (`WM_QUERYENDSESSION`/`WM_ENDSESSION`, ~5 s, with "Saving your screen recording" as the reason if
+   Windows has to wait) and finishes the file before returning; a desktop test sends the real sleep
+   message to the real process and finds the file whole when `SendMessage` returns. If SnipForge
+   goes away, the recording is finished too (until step 6 puts the controls in the recorder
+   process). The packaged self-test starts one and has it answer.
 6. **Recording UI**. Snip / Record switch on the capture toolbar, `selected_rect`, the ready panel
    (sources, levels, webcam on/off), the countdown (reusing the snip delay's), the control bar,
    the stop hotkey, "Record video" in the tray menu.

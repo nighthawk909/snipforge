@@ -299,6 +299,8 @@ def test_selftest_report(tmp_path, monkeypatch, qapp):
     assert data["checks"]["video"]["ok"] and data["checks"]["video"]["required"]  # the recorder's encoder
     editor = data["checks"]["video_editor"]  # the video editor and Pillow's GIF writer
     assert editor["ok"] and editor["required"] and "12 frames" in editor["detail"]
+    # A real `python -m snipforge --record` started and answered over its channel.
+    assert data["checks"]["recorder_process"]["ok"], data["checks"]["recorder_process"]
     assert qapp.styleSheet() == ""  # the check leaves the test app as it found it
 
 
@@ -309,6 +311,7 @@ def test_selftest_reports_failures(tmp_path, monkeypatch, qapp):
         raise RuntimeError("broken")
 
     monkeypatch.setattr(selftest, "_icons", boom)  # required on every platform
+    monkeypatch.setattr(selftest, "_recorder_process", lambda: "ok")
     monkeypatch.setattr(selftest, "_ocr", lambda: "ok")
     monkeypatch.setattr(selftest, "_search_index", lambda: "skipped in unit tests")
     monkeypatch.setattr(selftest, "_hotkey", lambda: "ok")
@@ -324,7 +327,8 @@ def test_selftest_on_a_mac_skips_the_windows_only_checks(tmp_path, monkeypatch, 
         raise AssertionError("a Windows-only check ran on a Mac")
 
     on_a_mac(selftest)
-    for name in ("_theme", "_editor", "_library", "_icons", "_windows", "_share", "_video", "_video_editor"):
+    for name in ("_theme", "_editor", "_library", "_icons", "_windows", "_share", "_video", "_video_editor",
+                 "_recorder_process"):
         monkeypatch.setattr(selftest, name, lambda: "ok")
     for name in ("_ocr", "_search_index", "_hotkey"):
         monkeypatch.setattr(selftest, name, windows_only)
