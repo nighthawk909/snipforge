@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from .. import theme
 from ..icons import icon
 from ..widgets import Segmented, ToggleSwitch
+from .edge_controls import CutoutControls, EdgeControls
 from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
 from .style import CALLOUT_SHAPES, COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style
@@ -34,13 +35,14 @@ TITLES = {
     "select": "Select", "arrow": "Arrow", "line": "Line", "rect": "Rectangle", "ellipse": "Ellipse",
     "pen": "Pen", "highlight": "Highlighter", "text": "Text", "callout": "Callout", "stamp": "Stamp",
     "step": "Step number", "pixelate": "Pixelate", "blur": "Blur", "spotlight": "Spotlight", "crop": "Crop",
-    "magnify": "Magnify",
+    "magnify": "Magnify", "cutout": "Cut out",
 }
 HINTS = {
     "select": "Click any markup to change it. Drag to move, Ctrl+click to add to the selection, "
               "Delete to remove, Ctrl+D to duplicate. Turn, flip or resize the snip under Image.",
     "crop": "Drag the edges in to cut and back out to restore. Drag inside to move. Enter applies, Esc cancels.",
     "spotlight": "Drag over the area to keep lit. Everything else dims.",
+    "cutout": "Drag across the part to take out. What's left is joined together.",
     "magnify": "Drag over what to enlarge. Drag the lens to move it, or inside the frame to show another area.",
     "text": "Click to type. Esc finishes.",
     "callout": "Drag a box, then type. Drag the orange dot to aim the pointer.",
@@ -102,6 +104,8 @@ class PropertiesPanel(QScrollArea):
     image_action = Signal(str)      # rotate_left | rotate_right | flip_horizontal | flip_vertical | resize
     pick_color = Signal()           # the eyedropper button: start (or stop) picking a color from the snip
     style_saved = Signal(str)       # the selection's look was saved as a quick style for this tool
+    edges_changed = Signal(object)  # Edges: the snip's border and torn sides
+    cutout_changed = Signal(dict)   # the Cut out tool's direction or seam
     editing_done = Signal()         # finished typing in a field: give the keyboard back to the canvas
 
     def __init__(self, parent=None) -> None:
@@ -134,7 +138,9 @@ class PropertiesPanel(QScrollArea):
         self._build_text()
         self._build_effects()
         self._build_crop()
+        self._build_cutout()
         self._build_image()
+        self._build_edges()
         self._column.addStretch(1)
         self.setWidget(body)
         # Controls are reachable with Tab but don't take the keyboard when clicked; you can type a font size.
@@ -323,6 +329,18 @@ class PropertiesPanel(QScrollArea):
         self._crop_buttons["reset"] = reset
         col.addWidget(reset)
 
+    def _build_cutout(self) -> None:
+        col = self._section("cutout", "Cut out")
+        self._cutout = CutoutControls()
+        self._cutout.changed.connect(self.cutout_changed)
+        col.addWidget(self._cutout)
+
+    def _build_edges(self) -> None:
+        col = self._section("edges", "Edges")
+        self._edges = EdgeControls(Swatch)
+        self._edges.changed.connect(self.edges_changed)
+        col.addWidget(self._edges)
+
     def _build_image(self) -> None:
         col = self._section("image", "Image")
         self._image_size = QLabel()
@@ -364,6 +382,7 @@ class PropertiesPanel(QScrollArea):
             "stamp": "stamp" in fields,
             "color": "color" in fields, "size": "width" in fields, "text": "font_size" in fields,
             "effects": any(f in fields for f in SWITCHES), "crop": kind == "crop", "image": kind == "select",
+            "cutout": kind == "cutout", "edges": kind == "select",
         }
         for name, box in self._sections.items():
             box.setVisible(show[name])
@@ -392,6 +411,18 @@ class PropertiesPanel(QScrollArea):
         if style.stamp in self._stamp_buttons:
             self._stamp_buttons[style.stamp].setChecked(True)
 
+    def load_edges(self, edges) -> None:
+        self._edges.load(edges)
+
+    def load_cutout(self, options: dict) -> None:
+        self._cutout.load(options)
+
+    def edge_controls(self) -> EdgeControls:
+        return self._edges
+
+    def cutout_controls(self) -> CutoutControls:
+        return self._cutout
+
     def set_image_size(self, width: int, height: int) -> None:
         self._image_size.setText(f"{width} × {height} px")
 
@@ -399,6 +430,7 @@ class PropertiesPanel(QScrollArea):
         for shape in CALLOUT_SHAPES:
             self._shapes.button(shape).setIcon(icon(f"shape_{shape}"))
         self._custom.setIcon(icon("plus"))
+        self._cutout.retheme()
         self._picker.setIcon(icon("pipette"))
         for action, icon_name, _tip in IMAGE_ACTIONS:
             self._image_buttons[action].setIcon(icon(icon_name))

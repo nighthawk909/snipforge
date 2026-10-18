@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -55,11 +55,23 @@ TOOLS = [
     # at 200% scaling (tests/test_tool_rail.py).
     ("blur", "Blur (B)"), ("pixelate", "Pixelate (X)"),
     None,
-    ("crop", "Crop (C)"),
+    ("crop", "Crop (C)"), ("cutout", "Cut out: remove a strip and join the rest (U)"),
 ]
 AUTOSAVE_MS = 700
 PICK_HINT = "Click anywhere on the snip to pick its color. Esc or a right-click cancels."
 JPG_QUALITY = 92  # text in screenshots blurs at Qt's default of 75
+
+
+def on_white(image: QImage) -> QImage:
+    """`image` over white, for formats without transparency."""
+    if not image.hasAlphaChannel():
+        return image
+    out = QImage(image.size(), QImage.Format_RGB32)
+    out.fill(Qt.white)
+    painter = QPainter(out)
+    painter.drawImage(0, 0, image)
+    painter.end()
+    return out
 
 
 def load_tool_styles(settings: QSettings) -> dict[str, Style]:
@@ -131,6 +143,9 @@ class EditorWindow(QMainWindow):
         self.panel.crop_action.connect(self._crop_action)
         self.panel.image_action.connect(self.image_action)
         self.panel.pick_color.connect(self._toggle_picking)
+        self.panel.edges_changed.connect(self.canvas.set_edges)
+        self.canvas.notice.connect(lambda text: self.statusBar().showMessage(text, 6000))
+        self.panel.cutout_changed.connect(lambda changes: self.canvas.set_cutout_options(**changes))
         self.panel.style_saved.connect(
             lambda kind: self.statusBar().showMessage(f"Saved as a quick style for {TOOL_NAMES.get(kind, kind)}", 3000))
         self.canvas.picking_changed.connect(self._show_picking)
@@ -349,6 +364,8 @@ class EditorWindow(QMainWindow):
     def _refresh_props(self) -> None:
         kind, style = self.canvas.style_target()
         self.panel.load(kind, style, bool(self.canvas.selected_annotations()))
+        self.panel.load_edges(self.canvas.edges())
+        self.panel.load_cutout(self.canvas.cutout_options)
 
     def _mark_unsaved(self) -> None:
         if self._autosave_enabled:
@@ -428,9 +445,12 @@ class EditorWindow(QMainWindow):
 
     def _write(self, path: Path) -> None:
         jpg = path.suffix.lower() in (".jpg", ".jpeg")
+        image = self.final_image()
+        if jpg or path.suffix.lower() == ".bmp":
+            image = on_white(image)  # no transparency in these formats: torn edges would turn black
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            ok = self.final_image().save(str(path), "JPG" if jpg else None, JPG_QUALITY if jpg else -1)
+            ok = image.save(str(path), "JPG" if jpg else None, JPG_QUALITY if jpg else -1)
         except OSError:
             ok = False
         if ok:

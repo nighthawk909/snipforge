@@ -155,3 +155,18 @@ def test_a_recording_that_fails_to_start_leaves_nothing_behind(fakes, monkeypatc
 
     assert fakes._recording is None and tray_texts(fakes)["Record video"].isVisible()
     assert "couldn't start" in fakes.messages[-1]
+
+
+def test_a_recording_opens_in_the_video_editor_from_the_library(forge, monkeypatch, qapp):  # noqa: F811
+    from snipforge.library import write_recording_details
+    from snipforge.video import clip, recordings
+
+    video = recordings.new_recording(forge.library.root)
+    clip.make_test_clip(video, seconds=0.5)
+    write_recording_details(video, 0.5, (320, 240))
+    opened = []
+    monkeypatch.setattr(forge, "_open_video", lambda path: opened.append(Path(path)))
+
+    forge.open_entry(video.parent.name)
+
+    assert opened == [video]

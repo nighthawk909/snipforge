@@ -16,6 +16,9 @@ from dataclasses import dataclass, replace
 from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF, Qt
 from PySide6.QtGui import QImage, QTransform
 
+from . import cutout
+from .cutout import Cut
+
 # The biggest image a rotate or resize makes: the same as a scrolling capture's limits (stitch.py). A
 # capture that's bigger still can always be turned and flipped, and resized up to its own size.
 MAX_SIDE = 30_000
@@ -23,27 +26,37 @@ MAX_PIXELS = 60_000_000
 UPRIGHT_KINDS = {"text", "callout", "stamp", "step"}  # move with the image but never turn
 STRENGTH = {"pixelate": (4.0, 2.5), "blur": (3.0, 1.5)}  # effect size = a + b * strength (items.EffectItem)
 MIN_FONT = 6
+MAX_CUTS = 50
 
 
 @dataclass(frozen=True)
 class ImageGeometry:
     """The original, mirrored left to right if `mirrored`, then turned `turns` quarter-turns
-    clockwise, then scaled to `width` x `height`."""
+    clockwise, then scaled to `width` x `height`, then with each of `cuts` taken out in turn."""
 
     width: int
     height: int
     turns: int = 0
     mirrored: bool = False
+    cuts: tuple[Cut, ...] = ()
 
     @staticmethod
     def of(image: QImage) -> ImageGeometry:
         return ImageGeometry(image.width(), image.height())
 
+    def size(self) -> tuple[int, int]:
+        """The image's size once the cuts are out: what you mark up."""
+        return cutout.final_size(self.width, self.height, self.cuts)
+
     def is_original(self, original: QImage) -> bool:
-        return not self.turns and not self.mirrored and QSize(self.width, self.height) == original.size()
+        return (not self.turns and not self.mirrored and not self.cuts
+                and QSize(self.width, self.height) == original.size())
 
     def to_dict(self) -> dict:
-        return {"turns": self.turns, "mirrored": self.mirrored, "size": [self.width, self.height]}
+        data = {"turns": self.turns, "mirrored": self.mirrored, "size": [self.width, self.height]}
+        if self.cuts:
+            data["cuts"] = [cut.to_list() for cut in self.cuts]
+        return data
 
     @staticmethod
     def from_dict(data, original: QSize) -> ImageGeometry | None:
@@ -55,7 +68,19 @@ class ImageGeometry:
             return None
         if not isinstance(size, list) or len(size) != 2 or not all(type(v) is int for v in size):
             return None
-        return ImageGeometry(size[0], size[1], turns, mirrored) if fits(*size, original) else None
+        if not fits(*size, original):
+            return None
+        cuts, w, h = [], *size
+        raw_cuts = data.get("cuts", [])
+        if not isinstance(raw_cuts, list) or len(raw_cuts) > MAX_CUTS:
+            return None
+        for raw in raw_cuts:
+            cut = Cut.from_list(raw, w, h)
+            if cut is None:
+                return None
+            cuts.append(cut)
+            w, h = cutout.size_after(w, h, cut)
+        return ImageGeometry(size[0], size[1], turns, mirrored, tuple(cuts))
 
 
 def fits(width: int, height: int, original: QSize | None = None) -> bool:
@@ -76,6 +101,8 @@ def render(original: QImage, geometry: ImageGeometry) -> QImage:
         image = image.transformed(QTransform().rotate(90 * geometry.turns))
     if image.size() != QSize(geometry.width, geometry.height):
         image = image.scaled(geometry.width, geometry.height, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    for cut in geometry.cuts:
+        image = cutout.apply(image, cut)
     return image
 
 
@@ -84,34 +111,81 @@ def render(original: QImage, geometry: ImageGeometry) -> QImage:
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Remap:
-    """Where a point on the old image lands on the new one (`transform`), and how much a length
-    along x and y grows (`sx`, `sy`)."""
+    """Where a point on the old image lands on the new one (`transform`, or `cut` for a cut-out),
+    and how much a length along x and y grows (`sx`, `sy`)."""
 
     transform: QTransform
     sx: float = 1.0
     sy: float = 1.0
+    cut: Cut | None = None
+    sides: dict | None = None  # where each side of the snip ends up (for torn edges)
+
+    def map(self, point: QPointF) -> QPointF:
+        return cutout.map_point(point, self.cut) if self.cut is not None else self.transform.map(point)
+
+    def map_rect(self, rect: QRectF) -> QRectF:
+        if self.cut is None:
+            return self.transform.mapRect(rect)
+        return QRectF(self.map(rect.topLeft()), self.map(rect.bottomRight()))
+
+
+TURN_SIDES = {True: {"top": "right", "right": "bottom", "bottom": "left", "left": "top"},
+              False: {"top": "left", "left": "bottom", "bottom": "right", "right": "top"}}
+FLIP_SIDES = {True: {"left": "right", "right": "left"}, False: {"top": "bottom", "bottom": "top"}}
+
+
+def _carry(geometry: ImageGeometry, change) -> tuple[Cut, ...]:
+    """Each cut redone for the changed image, in the frame it was made in."""
+    frames = cutout.frames(geometry.width, geometry.height, geometry.cuts)
+    return tuple(change(cut, w, h) for cut, (w, h) in zip(geometry.cuts, frames, strict=True))
 
 
 def rotate(geometry: ImageGeometry, clockwise: bool) -> tuple[ImageGeometry, Remap]:
-    w, h = geometry.width, geometry.height
+    w, h = geometry.size()
     turns = (geometry.turns + (1 if clockwise else -1)) % 4
+    cuts = _carry(geometry, lambda cut, fw, fh: cutout.turned(cut, fw, fh, clockwise))
     # Clockwise in screen coordinates (y down): (x, y) -> (h - y, x). Anticlockwise: (y, w - x).
     t = QTransform(0, 1, -1, 0, h, 0) if clockwise else QTransform(0, -1, 1, 0, 0, w)
-    return replace(geometry, width=h, height=w, turns=turns), Remap(t)
+    new = replace(geometry, width=geometry.height, height=geometry.width, turns=turns, cuts=cuts)
+    return new, Remap(t, sides=TURN_SIDES[clockwise])
 
 
 def flip(geometry: ImageGeometry, horizontal: bool) -> tuple[ImageGeometry, Remap]:
     """Left to right if `horizontal`, else top to bottom. A mirror after a turn is the mirror
     first and the opposite turn after it, so the geometry stays mirror-then-turn."""
-    w, h = geometry.width, geometry.height
+    w, h = geometry.size()
     turns = (-geometry.turns) % 4 if horizontal else (2 - geometry.turns) % 4
+    cuts = _carry(geometry, lambda cut, fw, fh: cutout.flipped(cut, fw, fh, horizontal))
     t = QTransform(-1, 0, 0, 1, w, 0) if horizontal else QTransform(1, 0, 0, -1, 0, h)
-    return replace(geometry, turns=turns, mirrored=not geometry.mirrored), Remap(t)
+    new = replace(geometry, turns=turns, mirrored=not geometry.mirrored, cuts=cuts)
+    return new, Remap(t, sides=FLIP_SIDES[horizontal])
 
 
 def resize(geometry: ImageGeometry, width: int, height: int) -> tuple[ImageGeometry, Remap]:
-    sx, sy = width / geometry.width, height / geometry.height
-    return replace(geometry, width=width, height=height), Remap(QTransform.fromScale(sx, sy), sx, sy)
+    """Make the image (after its cuts) `width` x `height`."""
+    w, h = geometry.size()
+    sx, sy = width / w, height / h
+    cuts = cutout.scaled_all(geometry.cuts, width, height, sx, sy)
+    full_w = width + sum(c.size for c in cuts if c.axis == "x")
+    full_h = height + sum(c.size for c in cuts if c.axis == "y")
+    new = replace(geometry, width=full_w, height=full_h, cuts=cuts)
+    return new, Remap(QTransform.fromScale(sx, sy), sx, sy)
+
+
+def reopens(geometry: ImageGeometry, original: QSize) -> bool:
+    """Whether a document with this geometry opens again exactly (what the editor saves must)."""
+    return ImageGeometry.from_dict(geometry.to_dict(), original) == geometry
+
+
+def cut(geometry: ImageGeometry, axis: str, start: int, end: int, seam: str) -> tuple[ImageGeometry, Remap]:
+    """Take out columns (axis "x") or rows (axis "y") `start` to `end` of the image as it is now.
+    Raises ValueError for a cut that doesn't fit or would leave too little."""
+    new_cut = Cut(axis, start, end, seam)
+    if not cutout.fits(new_cut, *geometry.size()):
+        raise ValueError(f"can't cut {axis} {start}-{end} from a {geometry.size()} image")
+    if len(geometry.cuts) >= MAX_CUTS:
+        raise ValueError(f"a snip can have {MAX_CUTS} cuts at most")
+    return replace(geometry, cuts=(*geometry.cuts, new_cut)), Remap(QTransform(), cut=new_cut)
 
 
 def snap(rect: QRectF, bounds: QRectF) -> QRectF:
@@ -147,33 +221,33 @@ def scaled_style(kind: str, style: dict, sx: float, sy: float | None = None) -> 
 def mapped_state(item, remap: Remap) -> dict:
     """The item's state once the image has changed by `remap`."""
     state = item.get_state()
-    kind, t = state["kind"], remap.transform
+    kind = state["kind"]
     pos = QPointF(*state["pos"])
     old_style = state["style"]
     state["style"] = scaled_style(kind, old_style, remap.sx, remap.sy)
     if kind in UPRIGHT_KINDS:
         _map_upright(item, state, pos, remap, old_style)
     elif "size" in state:
-        rect = t.mapRect(QRectF(pos, QSizeF(*state["size"])))
+        rect = remap.map_rect(QRectF(pos, QSizeF(*state["size"])))
         state["pos"], state["size"] = [rect.x(), rect.y()], [rect.width(), rect.height()]
     elif "p1" in state:
-        new_pos = t.map(pos)
-        p1, p2 = (t.map(pos + QPointF(*state[key])) - new_pos for key in ("p1", "p2"))
+        new_pos = remap.map(pos)
+        p1, p2 = (remap.map(pos + QPointF(*state[key])) - new_pos for key in ("p1", "p2"))
         p2 = _long_enough(p1, p2)
         state["p1"], state["p2"] = [p1.x(), p1.y()], [p2.x(), p2.y()]
         state["pos"] = [new_pos.x(), new_pos.y()]
     elif "points" in state:
-        new_pos = t.map(pos)
-        moved = (t.map(pos + QPointF(x, y)) - new_pos for x, y in state["points"])
+        new_pos = remap.map(pos)
+        moved = (remap.map(pos + QPointF(x, y)) - new_pos for x, y in state["points"])
         state["points"] = [[p.x(), p.y()] for p in moved]
         state["pos"] = [new_pos.x(), new_pos.y()]
     else:
-        new_pos = t.map(pos)
+        new_pos = remap.map(pos)
         state["pos"] = [new_pos.x(), new_pos.y()]
     if "size" in state:
         _big_enough(item, state)
     if "source" in state:  # a magnifier's source area, in scene coordinates
-        source = t.mapRect(QRectF(*state["source"]))
+        source = remap.map_rect(QRectF(*state["source"]))
         grow_w, grow_h = max(0.0, MIN_BOX - source.width()), max(0.0, MIN_BOX - source.height())
         source.adjust(-grow_w / 2, -grow_h / 2, grow_w / 2, grow_h / 2)
         state["source"] = [source.x(), source.y(), source.width(), source.height()]
@@ -214,26 +288,25 @@ def _big_enough(item, state: dict) -> None:
 
 def _map_upright(item, state: dict, pos: QPointF, remap: Remap, old_style: dict) -> None:
     """Keep the item's centre over the same spot, scaled but not turned."""
-    t = remap.transform
     if "size" in state:  # callout, stamp: a box
         w, h = state["size"]
         w, h = w * remap.sx, h * remap.sy
         if state["kind"] == "stamp":
             w = h = min(w, h)
-        center = t.map(pos + QPointF(state["size"][0] / 2, state["size"][1] / 2))
+        center = remap.map(pos + QPointF(state["size"][0] / 2, state["size"][1] / 2))
         top_left = center - QPointF(w / 2, h / 2)
         if "tail" in state:  # the callout's pointer keeps pointing at the same thing
-            tip = t.map(pos + QPointF(*state["tail"])) - top_left
+            tip = remap.map(pos + QPointF(*state["tail"])) - top_left
             state["tail"] = [tip.x(), tip.y()]
         state["pos"], state["size"] = [top_left.x(), top_left.y()], [w, h]
     elif state["kind"] == "text":  # positioned by its top-left corner; its size comes from the font
         box = item.boundingRect()
-        center = t.map(pos + box.center())
+        center = remap.map(pos + box.center())
         margin = 2 * item.document().documentMargin()  # doesn't scale with the font
         k = state["style"]["font_size"] / max(1, int(old_style["font_size"]))
         w, h = (box.width() - margin) * k + margin, (box.height() - margin) * k + margin
         top_left = center - QPointF(w / 2, h / 2)
         state["pos"] = [top_left.x(), top_left.y()]
     else:  # step: positioned by its centre
-        center = t.map(pos)
+        center = remap.map(pos)
         state["pos"] = [center.x(), center.y()]

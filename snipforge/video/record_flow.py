@@ -17,6 +17,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QRect, Signal
 
+from ..library import write_recording_details
 from . import video_prefs
 from .area_frame import AreaFrame
 from .cursor import PointerEffects
@@ -169,12 +170,22 @@ class RecordFlow(QObject):
     def _finished(self, result) -> None:
         why = ENDED_BY.get(getattr(self.recorder, "ended_by", None) or "")
         note = f"Recording saved ({duration_text(result.duration)})"
+        self._mark_finished(result)
         try:
             self._open_video(result.path)
         except Exception as exc:  # the recording is saved whatever happens to the window showing it
             log.exception("Couldn't open the recording %s", result.path)
             note = f"{note}, but it couldn't be opened: it's at {result.path} ({exc})"
         self._end(f"{note}: it stopped because {why}" if why else note)
+
+    def _mark_finished(self, result) -> None:
+        """The recorder process marks it finished for the Library; if that didn't work (a file held
+        by antivirus, say), SnipForge does, so the recording isn't left out of the Library."""
+        settings = getattr(self.recorder, "settings", None)
+        try:
+            write_recording_details(result.path, result.duration, settings.output_size, only_if_missing=True)
+        except Exception:  # the recording is saved whatever happens here
+            log.exception("Couldn't mark %s finished for the Library", result.path)
 
     def _failed(self, message: str) -> None:
         self._end(f"The recording failed: {message}")

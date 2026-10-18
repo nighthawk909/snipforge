@@ -253,6 +253,12 @@ class RecorderChild(QObject):
     # --- to SnipForge ----------------------------------------------------------------------------
 
     def _finished(self, result) -> None:
+        try:  # the Library lists it from now on (SnipForge tries again if this fails)
+            from ..library import write_recording_details
+
+            write_recording_details(result.path, result.duration, self.recorder.settings.output_size)
+        except Exception:  # never in the way of telling SnipForge the recording is saved
+            log.exception("Couldn't mark the recording finished for the Library")
         try:
             self.channel.send("finished", path=str(result.path), duration=result.duration, stats=result.stats,
                               ended_by=self.ended_by)

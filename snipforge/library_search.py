@@ -63,10 +63,12 @@ class Item:
     created: dt.datetime
     meta: EntryMeta
     edited_at: float | None = None  # when its markup was last saved (None: never edited)
+    duration: float | None = None  # a recording's length in seconds (None: a snip, or unknown)
 
     @cached_property
     def haystack(self) -> str:  # lowercased once per item, not on every keystroke
-        return haystack(self.meta)
+        words = haystack(self.meta)
+        return f"{words} recording video" if getattr(self.entry, "is_recording", False) else words
 
 
 VIEWS = ("all", "favorites", "edited")

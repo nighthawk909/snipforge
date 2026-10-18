@@ -74,13 +74,15 @@ class ImageCommand(QUndoCommand):
     """Rotate, flip or resize: the image's geometry, the crop and every annotation, as one step."""
 
     def __init__(self, canvas, text: str, geometries: tuple, crops: tuple[QRectF, QRectF],
-                 changes: list[tuple[object, dict, dict]]) -> None:
+                 changes: list[tuple[object, dict, dict]], edges: tuple | None = None) -> None:
         super().__init__(text)
-        self._canvas, self._geometries, self._changes = canvas, geometries, changes
+        self._canvas, self._geometries, self._changes, self._edges = canvas, geometries, changes, edges
         self._crops = (QRectF(crops[0]), QRectF(crops[1]))
 
     def _apply(self, side: int) -> None:
         self._canvas.set_image_geometry(self._geometries[side])
+        if self._edges is not None:
+            self._canvas._apply_edges(self._edges[side])
         self._canvas.set_crop_rect(self._crops[side])
         for item, *states in self._changes:
             item.set_state(states[side])
@@ -91,6 +93,31 @@ class ImageCommand(QUndoCommand):
 
     def undo(self) -> None:
         self._apply(0)
+
+
+class EdgesCommand(QUndoCommand):
+    """A border or torn edges: consecutive changes with the same merge key are one step."""
+
+    MERGE_ID = 2
+
+    def __init__(self, canvas, old, new, merge_key=None) -> None:
+        super().__init__("Edges")
+        self._canvas, self._old, self._new, self._merge_key = canvas, old, new, merge_key
+
+    def id(self) -> int:
+        return self.MERGE_ID if self._merge_key is not None else -1
+
+    def mergeWith(self, other) -> bool:  # noqa: N802 - Qt API
+        if other._merge_key != self._merge_key:
+            return False
+        self._new = other._new
+        return True
+
+    def redo(self) -> None:
+        self._canvas._apply_edges(self._new)
+
+    def undo(self) -> None:
+        self._canvas._apply_edges(self._old)
 
 
 class CropCommand(QUndoCommand):

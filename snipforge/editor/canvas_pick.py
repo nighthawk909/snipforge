@@ -23,8 +23,9 @@ class PickMixin:
         self._cancel_drag()
         if self.tool == "crop":
             self.set_tool("select")  # leaving Crop applies it, so you pick from what you'll export
-        # Without markup the snip itself is the picture (shared, not copied).
-        source = self._render_rect(self._image_rect.toAlignedRect()) if self.annotations() else self.base_image
+        # Without markup or edges the snip itself is the picture (shared, not copied).
+        drawn_on = self.annotations() or not self._edges.is_plain()
+        source = self._render_rect(self._image_rect.toAlignedRect()) if drawn_on else self.base_image
         if source.isNull():
             return  # out of memory for the picture: no eyedropper rather than wrong colors
         self._pick_source = source

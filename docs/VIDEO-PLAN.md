@@ -330,7 +330,7 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    (a software graphics driver, a busy GPU) only makes the picture lag. "Record video" / "Stop
    recording" in the tray, and a "Record video, or stop recording" shortcut of your own (no
    combination until one is chosen); a finished recording opens in the video editor. Recordings are
-   saved in the Library folder, one folder each (`recordings.py`); the Library lists them later.
+   saved in the Library folder, one folder each (`recordings.py`), and listed there (step 8).
    The webcam's switch comes with step 7.
 7. **Webcam**. Device choice, the movable bubble (shape and size), hidden from the recording, drawn
    into each frame.
@@ -348,6 +348,18 @@ recording UI appears in step 6; before that the pieces are tested on their own.
 8. **Video editor and Library**. Recordings in the Library with a thumbnail and length; a player
    built on `QMediaPlayer` and `QVideoSink` (no `QtMultimediaWidgets`); a timeline with thumbnails;
    trim; export MP4 or GIF (adds Pillow); copy, share, drag out.
+   Built: the editor (#47: player, timeline, trim, GIF). The Library lists a recording beside snips
+   once it's finished: the recorder process writes `recording.json` (length and size) after the
+   file is, so one still being recorded never shows. Its card is a frame from half a second in
+   (saved as `preview.png` the first time), with a play badge and its length; opening it opens the
+   video editor (the one already showing it, if there is one); Copy puts the file on the clipboard
+   to paste into a chat, an email or a folder; favourites, tags, search ("recording", "video"),
+   Show in folder and Delete work as for snips (Delete asks first if trimmed copies or GIFs saved
+   beside it would go too). Its picture is made one video at a time, apart from snips' pictures,
+   and not for a OneDrive file that's online only (that would download it); if the recorder
+   process can't write `recording.json`, SnipForge does. It's never read for text. A recording's folder has
+   no `original.png`, so older SnipForge versions sharing the folder don't list it, and
+   `Library.entries()` (what opens images) still gives snips only.
 9. **Hardening and docs**. One-hour soak test (drift, memory), low disk space, a device unplugged
    mid-recording, UAC, lock and sleep, several monitors with mixed scaling, rotation, HDR; the
    `IT-REVIEW.md` and README sections. If needed: the Media Foundation hardware encoder.
