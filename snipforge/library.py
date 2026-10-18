@@ -296,10 +296,33 @@ class Library:
             raise ValueError(f"unknown snip details: {', '.join(sorted(unknown))}")
         with self._meta_lock:
             meta = replace(self.read_meta(entry), **_normalized(changes))
+            if meta.title and is_private_window(meta.title, meta.app):
+                meta = replace(meta, title="")  # never written, whoever passes it
             data = {f.name: getattr(meta, f.name) for f in fields(EntryMeta)}
             data["tags"] = list(meta.tags)
             _write_text_atomic(json.dumps(data, ensure_ascii=False), entry.path / META)
         return meta
+
+    def forget_private_titles(self) -> int:
+        """Clear the saved title of every snip from a private browsing window: ones saved by a
+        version whose check didn't know that browser or language. Returns how many changed. Safe on
+        a worker thread (writes go through update_meta's lock)."""
+        changed = 0
+        for entry in self.entries():
+            try:
+                data = json.loads((entry.path / META).read_bytes().decode("utf-8"))
+            except (OSError, ValueError, RecursionError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            title, app = data.get("title"), data.get("app")
+            if isinstance(title, str) and title and is_private_window(title, app if isinstance(app, str) else ""):
+                try:
+                    self.update_meta(entry)
+                    changed += 1
+                except OSError as exc:
+                    log.info("Couldn't clear a private title from snip %s yet: %s", entry.id, exc)
+        return changed
 
     def scan(self) -> list[Snapshot]:
         """Every snip, newest first, from one directory listing per snip (no file is opened)."""

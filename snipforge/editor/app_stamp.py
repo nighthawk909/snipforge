@@ -13,7 +13,7 @@ import unicodedata
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetricsF
 
-from ..privacy import is_private_title  # noqa: F401 - the stamp's check (re-exported for its users)
+from ..privacy import is_private_title
 
 SEPARATOR = " · "
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")

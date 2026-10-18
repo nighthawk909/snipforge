@@ -31,6 +31,7 @@ KEYS = {
     "shortcut_snip": "shortcuts/snip",
     "shortcut_repeat": "shortcuts/repeat",
     "shortcut_library": "shortcuts/library",
+    "private_titles_checked": "privacy/titles_checked",
     "shortcut_record": "shortcuts/record",
     "export_dir": "output/folder",
     "export_format": "output/format",
@@ -165,6 +166,18 @@ def set_last_area(area: LastArea) -> None:
         raise ValueError(f"not a usable area: {area!r}")
     _set("capture_last_area", json.dumps({"screen": area.screen, "geometry": list(area.geometry),
                                           "scale": area.scale, "rect": list(area.rect)}))
+
+
+def private_titles_checked() -> int:
+    """The version of the private-window check the Library's saved titles were last swept with."""
+    try:
+        return int(app_settings().value(KEYS["private_titles_checked"], 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_private_titles_checked(version: int) -> None:
+    _set("private_titles_checked", int(version))
 
 
 def shortcut(action: str) -> str:
