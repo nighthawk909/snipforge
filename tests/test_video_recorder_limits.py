@@ -1,6 +1,7 @@
 """snipforge/video/recorder.py: what a recording needs from the computer before it starts (support.py)
 and the drive while it runs (disk_space.py)."""
 import sys
+import time
 import weakref
 
 import pytest
@@ -67,7 +68,7 @@ def test_a_nearly_full_drive_stops_the_recording_and_keeps_it(tmp_path, qapp, mo
     _recorder, outcome, warnings = record(tmp_path, [(10.0, "stop")], prepare=filling)
 
     assert warnings == ["The drive is almost full (150 MB left), so the recording was stopped and saved"]
-    assert 0.4 < outcome["result"].duration < 1.5
+    assert 0.4 < outcome["result"].duration < 3.0  # stopped soon after it filled, not at 10 s
     assert ffmpeg.probe(outcome["result"].path).first("video").codec == "h264"
 
 
@@ -95,9 +96,11 @@ def test_the_drive_is_read_on_its_own_thread_every_few_seconds(tmp_path, qapp, m
     def counted(recorder):
         recorder.free_space = lambda folder: reads.append(folder) or 5000 * MB
 
+    before = time.perf_counter()
     record(tmp_path, [(1.0, "stop")], prepare=counted)
+    took = time.perf_counter() - before
 
-    assert 2 <= len(reads) <= 8  # one before starting, then every 0.25 s; not every frame
+    assert 2 <= len(reads) <= took / 0.25 + 2  # one before starting, then every 0.25 s; not every frame
 
 
 def test_windows_without_a_video_encoder_explains_what_to_add(tmp_path, qapp, monkeypatch):

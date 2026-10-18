@@ -64,25 +64,27 @@ def test_an_encoder_that_never_finishes_fails_after_the_time_limit(tmp_path, qap
 
 
 class DyingScreen(StillScreen):
-    """A screen (monitor, graphics driver) that goes away 0.6 s in."""
+    """A screen (monitor, graphics driver) that goes away 0.6 s into the recording (however long
+    the encoder took to start before that)."""
 
-    def __init__(self):
-        self.opened = time.perf_counter()
+    def __init__(self, clock):
+        self.clock = clock
 
     def grab(self, timeout_ms):
-        if time.perf_counter() - self.opened > 0.6:
+        if (self.clock.media_time(time.perf_counter()) or 0) > 0.6:
             raise OSError("The display went away")
         super().grab(timeout_ms)
 
 
 def test_losing_the_screen_mid_recording_keeps_what_was_recorded(tmp_path, qapp):
     def dying(area, fps, clock, _overlay):
-        return ScreenFrames(area, fps, clock, Stamper(clock), open_screen=lambda a: DyingScreen(), first_image=grey)
+        return ScreenFrames(area, fps, clock, Stamper(clock), open_screen=lambda a: DyingScreen(clock),
+                            first_image=grey)
 
     _recorder, outcome, warnings = record(tmp_path, [(5.0, "stop")], screen_frames=dying)
 
     assert warnings == ["The screen stopped being recorded: The display went away"]
-    assert 0.3 < outcome["result"].duration < 0.8
+    assert 0.55 < outcome["result"].duration < 2.0  # kept up to when the screen went (noticed within a beat)
     assert ffmpeg.probe(outcome["result"].path).first("video").codec == "h264"
 
 

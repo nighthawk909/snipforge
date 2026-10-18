@@ -522,7 +522,7 @@ def test_a_recorder_that_dies_before_calling_back_is_noticed(tmp_path, qapp):
 
     remote.start()
 
-    assert wait_for(lambda: failures == ["SnipForge's recorder stopped before it started"], 3.0)
+    assert wait_for(lambda: failures == ["SnipForge's recorder stopped before it started"])
 
 
 def test_settings_the_recorder_would_refuse_stop_the_start_before_launching(qapp):

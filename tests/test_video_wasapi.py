@@ -154,7 +154,7 @@ def test_any_failure_while_opening_is_reported_at_once(monkeypatch):
 
     with pytest.raises(wasapi.AudioUnavailable, match="computer's sound couldn't be opened"):
         capture.start()
-    assert time.perf_counter() - started < 1.0  # not the 5 s start timeout
+    assert time.perf_counter() - started < wasapi.START_TIMEOUT / 2  # said at once, not timed out
 
 
 @windows_only

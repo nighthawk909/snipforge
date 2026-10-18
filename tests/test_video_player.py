@@ -85,6 +85,15 @@ def pump(seconds: float) -> None:
         time.sleep(0.005)
 
 
+def pump_until(condition, seconds: float = 5.0) -> bool:
+    """Run Qt's events until `condition()` (a busy machine's timers come late), up to `seconds`."""
+    end = time.perf_counter() + seconds
+    while not condition() and time.perf_counter() < end:
+        QApplication.processEvents()
+        time.sleep(0.005)
+    return condition()
+
+
 def test_nothing_is_opened_until_the_first_play(qapp, tmp_path):
     made = []
     p = Player(make_backend=lambda: made.append(1) or (FakeMedia(), FakeMedia()))
@@ -144,7 +153,7 @@ def test_the_empty_frame_at_the_end_is_ignored(player, media):
 
 def test_a_start_that_stalls_loads_the_file_again(player, media):
     player.play(0.5)
-    pump(0.1)  # longer than the 30 ms the test player waits for a first frame
+    assert pump_until(lambda: len([c for c in media.calls if c[0] == "source"]) >= 3)  # after its 30 ms wait
 
     sources = [c for c in media.calls if c[0] == "source"]
     assert [s[1] for s in sources[1:3]] == ["", sources[0][1]]  # let go of the file, then opened again
@@ -174,7 +183,8 @@ def test_playing_resumes_from_the_last_frame_shown_after_a_reload(player, media)
 def test_it_gives_up_after_a_few_tries_and_says_so(player, media):
     failed = caught(player.failed)
     player.play(0.0)
-    pump(0.4)
+    assert pump_until(lambda: failed)
+    pump(0.1)  # and nothing more after that
 
     assert len(failed) == 1
     assert "play" in failed[0][0].lower()
