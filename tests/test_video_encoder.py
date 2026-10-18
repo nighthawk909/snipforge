@@ -8,7 +8,7 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter
 
 from snipforge.video import clip, ffmpeg, frames
-from snipforge.video.encoder import Encoder, fit
+from snipforge.video.encoder import Encoder, EncoderError, fit
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
                                 reason="Qt's FFmpeg isn't usable here (ffmpeg.unavailable_reason() says why)")
@@ -112,14 +112,37 @@ def test_the_encoder_says_when_it_is_ready_for_frames(tmp_path, qapp, audio):
     encoder = Encoder(tmp_path / "ready.mp4", (320, 240), (320, 240), FPS, audio=audio)
     loop = QEventLoop()
     encoder.ready.connect(loop.quit)
-    QTimer.singleShot(10_000, loop.quit)
+    timeout = QTimer(singleShot=True, interval=10_000)
+    timeout.timeout.connect(loop.quit)
     assert not encoder.is_ready
     encoder.start()
     try:
+        timeout.start()
         loop.exec()
+        timeout.stop()
         assert encoder.is_ready
+        encoder.add_frame(0, numbered(0))
+        assert encoder.frames_sent == 1  # ready means it takes a frame there and then
     finally:
         encoder.close()
+
+
+def test_a_closed_encoder_can_discard_its_file(tmp_path, qapp):
+    path = tmp_path / "unwanted.mp4"
+    encoder = Encoder(path, (320, 240), (320, 240), FPS, audio=False)
+    encoder.start()
+    for i in range(5):
+        encoder.add_frame(i, numbered(i))
+
+    encoder.close(discard=True)
+
+    loop = QEventLoop()
+    for _ in range(100):  # Qt lets go of the file a moment after it stops
+        if not path.exists():
+            break
+        QTimer.singleShot(50, loop.quit)
+        loop.exec()
+    assert not path.exists()
 
 
 def test_an_encoder_that_falls_behind_drops_frames_instead_of_queueing_them(tmp_path, qapp):
@@ -142,10 +165,12 @@ def test_an_encoder_that_falls_behind_drops_frames_instead_of_queueing_them(tmp_
 def test_a_file_that_cant_be_written_fails(tmp_path, qapp):
     encoder = Encoder(tmp_path / "missing folder" / "out.mp4", (320, 240), (320, 240), FPS)
     try:
-        encoder.start()
-        encoder.add_frame(0, numbered(0))
-        assert wait_for(encoder, 5000) != "finished"
-    except Exception as exc:  # the recorder may refuse at once instead
-        assert "output" in str(exc).lower() or "open" in str(exc).lower() or str(exc)
+        try:
+            encoder.start()
+            encoder.add_frame(0, numbered(0))
+            outcome = wait_for(encoder, 5000)
+        except EncoderError:  # Qt refuses at once (today), or fails while recording
+            outcome = "refused"
+        assert outcome not in ("finished", "timed out")
     finally:
         encoder.close()

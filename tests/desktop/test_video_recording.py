@@ -7,7 +7,6 @@ Run with: QT_QPA_PLATFORM=windows python -m pytest -m desktop
 import array
 import ctypes
 import math
-import time
 
 import pytest
 from PySide6.QtCore import QEventLoop, QRect, Qt, QTimer, QUrl
@@ -104,29 +103,31 @@ def run_recording(qapp, tmp_path, *, sound: bool):
     ctypes.windll.user32.SetWindowDisplayAffinity(int(hidden.winId()), WDA_EXCLUDEFROMCAPTURE)
     beeper = Beeper() if sound else None
     recorder = Recorder(Settings(physical(pattern), tmp_path / "recording.mp4", microphone=False, system_audio=sound))
-    loop, outcome, started = QEventLoop(), {}, {}
+    loop, outcome = QEventLoop(), {}
     recorder.finished.connect(lambda result: (outcome.update(result=result), loop.quit()))
     recorder.failed.connect(lambda message: (outcome.update(failure=message), loop.quit()))
 
     def flash(on: bool):
-        if on:
-            started.setdefault("at", []).append(recorder.media_time())
-            if beeper:
-                beeper.beep()
+        if on and beeper:
+            beeper.beep()
         pattern.flash = on
         pattern.repaint()
 
+    def began(state: str):  # timed from when recording begins, after the encoder's warm-up
+        if state == "recording":
+            for at in FLASHES:
+                QTimer.singleShot(int(at * 1000), lambda: flash(True))
+                QTimer.singleShot(int((at + FLASH_SECONDS) * 1000), lambda: flash(False))
+            QTimer.singleShot(int(SECONDS * 1000), recorder.stop)
+
+    recorder.state_changed.connect(began)
     try:
         recorder.start()
     except RecordingError as exc:
         pattern.close()
         hidden.close()
         pytest.skip(f"this machine can't record its screen: {exc}")
-    for at in FLASHES:
-        QTimer.singleShot(int(at * 1000), lambda: flash(True))
-        QTimer.singleShot(int((at + FLASH_SECONDS) * 1000), lambda: flash(False))
-    QTimer.singleShot(int(SECONDS * 1000), recorder.stop)
-    QTimer.singleShot(int(SECONDS * 1000) + 30_000, loop.quit)
+    QTimer.singleShot(int(SECONDS * 1000) + 45_000, loop.quit)
     loop.exec()
     pattern.close()
     hidden.close()
@@ -140,7 +141,7 @@ def flash_times(path, pattern_box: QRect, scale: float) -> tuple[list[float], in
     centre = pattern_box.center()
     on, onsets, magenta = False, [], 0
     for t, image in frames.read(path):
-        point = (round(centre.x() * scale * image.width() / image.width()), round(centre.y() * scale))
+        point = (round(centre.x() * scale), round(centre.y() * scale))
         lit = image.pixelColor(*point).lightness() > 200
         if lit and not on:
             onsets.append(t)
@@ -150,8 +151,8 @@ def flash_times(path, pattern_box: QRect, scale: float) -> tuple[list[float], in
     return onsets, magenta
 
 
-def beep_times(path) -> list[float]:
-    """When the 1 kHz beeps start in the file's sound, decoded with Qt."""
+def loudness(path) -> list[tuple[float, float]]:
+    """(time, RMS) of every 5 ms of the file's sound, decoded with Qt."""
     from PySide6.QtMultimedia import QAudioDecoder, QAudioFormat
 
     decoder = QAudioDecoder()
@@ -160,19 +161,15 @@ def beep_times(path) -> list[float]:
     fmt.setChannelCount(1)
     fmt.setSampleFormat(QAudioFormat.SampleFormat.Float)
     decoder.setAudioFormat(fmt)
-    loop, onsets, state = QEventLoop(), [], {"on": False}
+    loop, windows = QEventLoop(), []
 
     def ready():
         buffer = decoder.read()
         samples = array.array("f")
         samples.frombytes(bytes(buffer.constData())[: buffer.byteCount()])
         start = buffer.startTime() / 1e6
-        for i in range(0, len(samples) - 240, 240):  # 5 ms windows
-            rms = math.sqrt(sum(v * v for v in samples[i:i + 240]) / 240)
-            t = start + i / 48000
-            if rms > 0.03 and not state["on"] and (not onsets or t - onsets[-1] > 0.2):
-                onsets.append(t)
-            state["on"] = rms > 0.03
+        for i in range(0, len(samples) - 240, 240):
+            windows.append((start + i / 48000, math.sqrt(sum(v * v for v in samples[i:i + 240]) / 240)))
 
     decoder.bufferReady.connect(ready)
     decoder.finished.connect(loop.quit)
@@ -180,6 +177,23 @@ def beep_times(path) -> list[float]:
     decoder.setSource(QUrl.fromLocalFile(str(path)))
     decoder.start()
     loop.exec()
+    return windows
+
+
+def beep_times(path) -> list[float]:
+    """When the beeps start in the file's sound. Loud is relative to the loudest moment: what the
+    speakers' loopback hears depends on the output device and its volume (a Bluetooth headset at
+    13% volume made the beeps a tenth as loud as on the laptop's speakers)."""
+    windows = loudness(path)
+    peak = max((rms for _t, rms in windows), default=0.0)
+    if peak < 0.001:
+        pytest.skip("nothing played on the default speakers reached the recording (muted, or asleep?)")
+    onsets, on = [], False
+    for t, rms in windows:
+        loud = rms > 0.3 * peak
+        if loud and not on and (not onsets or t - onsets[-1] > 0.2):
+            onsets.append(t)
+        on = loud
     return onsets
 
 
@@ -190,7 +204,9 @@ def test_a_recording_shows_the_screen_and_leaves_out_hidden_windows(qapp, tmp_pa
     flashes, magenta = flash_times(result.path, pattern.box(), scale)
     assert [round(t, 1) for t in flashes] == pytest.approx([1.0, 2.5], abs=0.2)
     assert magenta == 0  # the window hidden from capture never shows
-    assert result.stats["frames_made"] >= 0.9 * SECONDS * 30
+    stats = result.stats
+    lost = stats["frames_skipped_late"] + stats["frames_dropped_queue"] + stats["frames_dropped_encoder"]
+    assert lost <= max(2, 0.03 * SECONDS * 30), stats  # the plan's limit: at most 3% dropped
 
 
 def test_sound_and_picture_stay_together(qapp, tmp_path):
@@ -204,4 +220,3 @@ def test_sound_and_picture_stay_together(qapp, tmp_path):
     for flash, beep in zip(flashes, beeps, strict=True):
         # The beep reaches the file ~0.1 s after the flash: Windows' own audio-output latency.
         assert -0.05 < beep - flash < 0.25, (flashes, beeps)
-    time.sleep(0.1)

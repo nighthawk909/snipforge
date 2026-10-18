@@ -44,6 +44,7 @@ class ScreenFrames:
         self.made = self.late_skipped = self.queue_dropped = self.screen_updates = self.reopens = 0
         self.protected_content = False
         self.error: Exception | None = None
+        self.overlay_error: Exception | None = None  # drawing the pointer failed: frames go on without it
         self._stop = threading.Event()
         self._ready = threading.Event()
         self._thread: threading.Thread | None = None
@@ -106,13 +107,21 @@ class ScreenFrames:
                 self.late_skipped += behind
                 index += behind
             frame = self._latest.copy()
-            self.overlay.draw(frame, now)
+            self._draw_pointer(frame, now)
             try:
                 self.frames.put_nowait((index, frame))
                 self.made += 1
             except queue.Full:
                 self.queue_dropped += 1
             index += 1
+
+    def _draw_pointer(self, frame: QImage, now: float) -> None:
+        if self.overlay_error is None:
+            try:
+                self.overlay.draw(frame, now)
+            except Exception as exc:  # the recording matters more than the pointer in it
+                log.exception("Drawing the pointer failed; recording without it")
+                self.overlay_error = exc
 
     def _watch(self, seconds: float) -> None:
         got = self._screen.grab(max(1, int(seconds * 1000)))

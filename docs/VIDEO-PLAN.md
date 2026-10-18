@@ -295,11 +295,15 @@ recording UI appears in step 6; before that the pieces are tested on their own.
 4. **Screen and pointer** (`dxgi.py`, `pointer.py` additions, compositor). Adapter and monitor
    lookup, desktop switches, rotation, protected content; pointer shape cache, highlight, click
    rings. Desktop test: records a test window's area and checks its pixels.
-5. **Recorder engine** (`recorder.py`, `encoder.py`, `screen_frames.py`, `gdi.py`). Frame clock on
-   its own thread, the encoder's bounded queue (never dropping frame 0), pause, stop → MP4 checked
-   with FFmpeg; sound sources that can't open or get lost become warnings. Tests with a fake screen
-   whose frames show their due time, a desktop test of the real thing (flash and beep in the file
-   together, a window hidden from capture never in it), and the stress test.
+5. **Recorder engine** (`recorder.py`, `encoder.py`, `screen_frames.py`, `gdi.py`,
+   `recording_check.py`). Frame clock on its own thread, the encoder's bounded queue (never dropping
+   frame 0), pause, stop → MP4 checked with FFmpeg stream by stream; sound sources that can't open or
+   get lost become warnings, and so does losing the screen mid-recording (what was recorded is
+   kept). The clock starts only once Qt's encoder takes frames ("starting": ~0.1 s, 1.3 s on a
+   saturated CPU, which used to cost the first second of video); starting and finishing each have a
+   time limit; `cancel()` keeps nothing and `finish_now()` finishes the file there and then. Tests with
+   a fake screen whose frames show their due time, a desktop test of the real thing (flash and beep
+   in the file together, a window hidden from capture never in it), and the stress test.
    **5b. The recorder process**: `SnipForge.exe --record`, its channel to SnipForge (the
    `QLocalSocket` that `single_instance.py` already uses), and finishing the file when Windows
    announces sleep, shutdown or sign-out.

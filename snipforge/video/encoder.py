@@ -16,11 +16,14 @@ conversion. Use from the Qt main thread.
 from __future__ import annotations
 
 import array
+import logging
 from collections import deque
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QObject, QSize, QUrl, Signal
+from PySide6.QtCore import QByteArray, QObject, QSize, QTimer, QUrl, Signal
 from PySide6.QtGui import QImage
+
+log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 48000
 CHANNELS = 2
@@ -61,6 +64,7 @@ class Encoder(QObject):
         self._pending_video: deque = deque()
         self._pending_audio: deque = deque()
         self._finishing = False
+        self._discarding = False
         self._first_sent = False  # frame 0 must reach the encoder: Qt times everything from it
         self._ready_inputs: set[str] = set()
         self._inputs = {"video", "audio"} if audio else {"video"}
@@ -113,9 +117,10 @@ class Encoder(QObject):
         return self.recorder.recorderState() == self.M.QMediaRecorder.RecorderState.RecordingState
 
     def start(self) -> None:
+        """Start the recorder; raises EncoderError if Qt refuses at once (it may also fail later)."""
         self.recorder.record()
-        if self.recorder.error() != self.M.QMediaRecorder.Error.NoError:
-            raise EncoderError(self.recorder.errorString() or "the recorder wouldn't start")
+        if self.error or self.recorder.error() != self.M.QMediaRecorder.Error.NoError:
+            raise EncoderError(self.error or self.recorder.errorString() or "the recorder wouldn't start")
 
     def add_frame(self, index: int, image: QImage) -> None:
         """Frame number `index` (shown from index/fps seconds). Frame 0 must come first."""
@@ -187,10 +192,34 @@ class Encoder(QObject):
         if state == self.M.QMediaRecorder.RecorderState.StoppedState and self._finishing and not self.error:
             self.finished.emit()
 
-    def close(self) -> None:
-        """Disconnect and stop: nothing keeps the recorder, or its file, alive afterwards."""
+    def close(self, discard: bool = False) -> None:
+        """Disconnect and stop: nothing keeps the recorder, or its file, alive afterwards. `discard`
+        deletes the file once Qt has let go of it. Closing again is fine."""
         for signal, slot in self._connections:
             signal.disconnect(slot)
         self._connections.clear()
-        if self.recorder.recorderState() != self.M.QMediaRecorder.RecorderState.StoppedState:
+        self._pending_video.clear()
+        self._pending_audio.clear()
+        stopped = self.M.QMediaRecorder.RecorderState.StoppedState
+        if discard and not self._discarding:
+            self._discarding = True
+            if self.recorder.recorderState() == stopped:
+                self._delete_file()
+            else:
+                self.recorder.recorderStateChanged.connect(self._delete_when_stopped)
+        if self.recorder.recorderState() != stopped:
             self.recorder.stop()
+
+    def _delete_when_stopped(self, state) -> None:
+        if state == self.M.QMediaRecorder.RecorderState.StoppedState:
+            self.recorder.recorderStateChanged.disconnect(self._delete_when_stopped)
+            self._delete_file()
+
+    def _delete_file(self, tries: int = 10) -> None:
+        try:
+            self.path.unlink(missing_ok=True)
+        except OSError as exc:  # Windows: still open for a moment after Qt says it stopped
+            if tries:
+                QTimer.singleShot(200, self, lambda: self._delete_file(tries - 1))
+            else:
+                log.warning("Couldn't delete the unfinished recording %s: %s", self.path, exc)

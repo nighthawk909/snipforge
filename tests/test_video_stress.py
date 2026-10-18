@@ -1,7 +1,9 @@
-"""Stress: hundreds of recordings through Qt's encoder, every file checked with FFmpeg.
+"""Stress: hundreds of recordings through Qt's encoder, every file checked with FFmpeg, and whole
+recordings started and stopped one after another (fake screen and sound, real encoder).
 
 Looks for the rare bad file seen in early test runs (about 1 test run in 65, a fresh test clip read
-back as another format: docs/VIDEO-PLAN.md, Risks). Slow, so not in the regular run:
+back as another format: docs/VIDEO-PLAN.md, Risks), and for anything a recording leaves behind that
+trips up the next one. Slow, so not in the regular run:
 
     python -m pytest -m stress
 """
@@ -14,10 +16,12 @@ from PySide6.QtGui import QColor, QImage
 
 from snipforge.video import ffmpeg
 from snipforge.video.encoder import Encoder
+from tests.test_video_recorder import record
 
 pytestmark = pytest.mark.stress
 RECORDINGS = 200
 FRAMES = 12
+RECORDER_CYCLES = 30
 
 
 def one_recording(path, frame_size=(320, 240)) -> str:
@@ -55,3 +59,14 @@ def test_every_recording_comes_out_whole(tmp_path, qapp):
         except ffmpeg.FFmpegError as exc:
             problems.append((n, outcome, str(exc), path.read_bytes()[:16]))
     assert problems == []
+
+
+def test_whole_recordings_one_after_another(tmp_path, qapp):
+    outcomes = []
+    for n in range(RECORDER_CYCLES):
+        folder = tmp_path / f"r{n}"
+        folder.mkdir()
+        _recorder, outcome, warnings = record(folder, [(0.4, "stop")])
+        if "result" not in outcome or warnings:
+            outcomes.append((n, outcome, warnings))
+    assert outcomes == []
