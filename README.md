@@ -32,8 +32,8 @@ mode you used last. **Delay** counts down 3, 5 or 10 seconds first, so you can o
 tooltip you want to snip, and **Include the mouse pointer** draws the pointer into the snip.
 **Repeat last snip** (in the tray menu) takes the same area again, straight away. The snip is also
 copied to the clipboard, just like the built-in Snipping Tool. Either key can be handed back to
-Windows in Settings, and you can add **shortcuts of your own** there for New snip, Repeat last snip
-and the Library.
+Windows in Settings, and you can add **shortcuts of your own** there for New snip, Repeat last snip,
+the Library and recording a video.
 
 **Mark up.** Every snip opens in the editor: tools on the left, the snip in the middle, and a
 properties panel on the right with **quick styles**, colors, sizes and effects for whatever you've
@@ -71,10 +71,20 @@ shows through them.
 open a Teams chat with the people you pick, get a OneDrive link, or the Windows share sheet.
 **Drag out** drops the image straight into Teams, Outlook, PowerPoint or a folder.
 
-**Find it again.** The **Library** keeps every snip, grouped by day, with the app and window it came
+**Record a video.** Choose **Record video** in the tray (or switch on **Record** in the capture
+toolbar, or use a shortcut of your own) and drag an area. A panel beside it shows live levels for
+your microphone and your computer's sound, so you know they're heard before you start, with
+pointer effects (a highlight and click rings), a countdown, and **Camera**, which adds your webcam
+in a bubble you can drag, reshape and resize. While you record, a control bar (kept out of the
+video) pauses, stops or discards it. Windows stays awake, locking it pauses the recording, and
+sleep, sign-out or shutdown finish the file first, so a recording is never lost. It then opens in
+the **video editor**: play it, trim it to the exact frame, and save a trimmed copy or a GIF.
+
+**Find it again.** The **Library** keeps every snip and recording, grouped by day, with the app and window it came
 from. Search finds the words *inside* your snips (read offline with Windows' built-in OCR), as
 well as titles, apps and tags. Star favorites, tag snips, and filter by time or app. Reopen any
-snip and keep editing.
+snip and keep editing. Recordings show with a picture and their length; open one in the video
+editor, or copy it to paste the video into Teams, Outlook or a folder.
 
 **Make it yours.** Light and dark themes that follow Windows, accent colors, and organization theme
 packs ([docs/THEMES.md](docs/THEMES.md)). **Settings** covers startup, shortcuts, the save folder
@@ -107,7 +117,9 @@ Everything stays on your PC. SnipForge has no accounts, telemetry or analytics, 
 requests except the update checks and downloads you choose in **Settings > Updates** (once a day by
 default, or only when you click Check now) and the **Share** actions you use. Every update is
 verified against its published checksum before it installs. Text recognition for Library search
-runs offline. See [docs/IT-REVIEW.md](docs/IT-REVIEW.md) for a full security and IT review guide.
+runs offline. Screen recordings are made and saved on your PC; the microphone, computer sound and
+camera are opened only when you record (and, while you get ready, to show their levels and your
+bubble). See [docs/IT-REVIEW.md](docs/IT-REVIEW.md) for a full security and IT review guide.
 
 ## Build from source
 
