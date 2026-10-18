@@ -3,7 +3,7 @@ active tool, with only the sections that tool uses."""
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
@@ -25,10 +25,9 @@ from PySide6.QtWidgets import (
 from .. import theme
 from ..icons import icon
 from ..widgets import Segmented, ToggleSwitch
-from .items import readable_on
-from .quick_styles import QUICK_STYLES, QuickStyle, changes_for
+from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
-from .style import CALLOUT_SHAPES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style
+from .style import CALLOUT_SHAPES, COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style
 
 PANEL_WIDTH = 288
 TITLES = {
@@ -59,8 +58,6 @@ IMAGE_ACTIONS = (
     ("flip_horizontal", "flip", "Flip horizontal"),
     ("flip_vertical", "flip_vertical", "Flip vertical"),
 )
-COLOR_NAMES = {"#ff3b30": "Red", "#ff9500": "Orange", "#ffd60a": "Yellow", "#34c759": "Green",
-               "#0a84ff": "Blue", "#bf5af2": "Purple", "#ffffff": "White", "#1c1c1e": "Black"}
 
 
 class Swatch(QPushButton):
@@ -97,54 +94,12 @@ class NoWheelSlider(QSlider):
         e.ignore()
 
 
-class QuickStyleTile(QAbstractButton):
-    def __init__(self, quick: QuickStyle) -> None:
-        super().__init__()
-        self.quick = quick
-        self.setMinimumSize(44, 40)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(quick.label)
-        self.setAccessibleName(f"Quick style: {quick.label}")
-
-    def sizeHint(self) -> QSize:
-        return QSize(56, 40)
-
-    def paintEvent(self, _e) -> None:
-        t = theme.current()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(QPen(QColor(t.palette.text3 if self.underMouse() else t.palette.border), 1))
-        p.setBrush(QColor(t.palette.surface2))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8)
-        color = QColor(self.quick.color)
-        sample = QRectF(0, 0, 36, 22)
-        sample.moveCenter(QRectF(self.rect()).center())
-        p.setPen(QPen(color if self.quick.color.lower() != "#ffffff" else QColor("#1c1c1e"), 2))
-        p.setBrush(color if self.quick.fill_on else QColor("#ffffff"))
-        p.drawRoundedRect(sample, 6, 6)
-        p.setPen(readable_on(color) if self.quick.fill_on else QColor("#1c1c1e"))
-        font = QFont(self.font())
-        font.setBold(True)
-        font.setPointSizeF(8)
-        p.setFont(font)
-        p.drawText(sample, Qt.AlignCenter, "Aa")
-        p.end()
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
-
-
 class PropertiesPanel(QScrollArea):
     changed = Signal(dict)          # style field -> new value
     crop_action = Signal(str)       # apply | cancel | reset
     image_action = Signal(str)      # rotate_left | rotate_right | flip_horizontal | flip_vertical | resize
     pick_color = Signal()           # the eyedropper button: start (or stop) picking a color from the snip
+    style_saved = Signal(str)       # the selection's look was saved as a quick style for this tool
     editing_done = Signal()         # finished typing in a field: give the keyboard back to the canvas
 
     def __init__(self, parent=None) -> None:
@@ -226,13 +181,11 @@ class PropertiesPanel(QScrollArea):
 
     def _build_quick(self) -> None:
         col = self._section("quick", "Quick styles")
-        grid = QGridLayout()
-        grid.setSpacing(8)
-        self._tiles = [QuickStyleTile(q) for q in QUICK_STYLES]
-        for i, tile in enumerate(self._tiles):
-            tile.clicked.connect(lambda _=False, q=tile.quick: self._emit(**changes_for(self._kind, q)))
-            grid.addWidget(tile, i // 4, i % 4)
-        col.addLayout(grid)
+        self._quick = QuickStyles()
+        self._quick.apply.connect(lambda changes: self._emit(**changes))
+        self._quick.saved.connect(self.style_saved)
+        self._tiles = self._quick.tiles
+        col.addWidget(self._quick)
 
     def _build_shape(self) -> None:
         col = self._section("shape", "Shape")
@@ -405,7 +358,8 @@ class PropertiesPanel(QScrollArea):
         self._hint.setText("" if has_selection else HINTS.get(kind, ""))
         self._hint.setVisible(bool(self._hint.text()))
         show = {
-            "quick": "color" in fields, "shape": "shape" in fields, "stamp": "stamp" in fields,
+            "quick": bool(fields) and self._quick.worth_showing(kind, has_selection), "shape": "shape" in fields,
+            "stamp": "stamp" in fields,
             "color": "color" in fields, "size": "width" in fields, "text": "font_size" in fields,
             "effects": any(f in fields for f in SWITCHES), "crop": kind == "crop", "image": kind == "select",
         }
@@ -419,6 +373,7 @@ class PropertiesPanel(QScrollArea):
         self._slider.setAccessibleName(self.size_label())
         if style:
             self._load_style(style)
+        self._quick.load(kind, style, has_selection)
         self._loading = False
 
     def _load_style(self, style: Style) -> None:
@@ -446,7 +401,7 @@ class PropertiesPanel(QScrollArea):
         for action, icon_name, _tip in IMAGE_ACTIONS:
             self._image_buttons[action].setIcon(icon(icon_name))
         self.viewport().update()
-        for w in (*self._swatches.values(), *self._tiles, *self._switches.values()):
+        for w in (*self._swatches.values(), *self._tiles, *self._quick.saved_tiles, *self._switches.values()):
             w.update()
 
     def _pick_swatch(self, color: str) -> None:
@@ -498,6 +453,15 @@ class PropertiesPanel(QScrollArea):
 
     def quick_tile(self, index: int) -> QuickStyleTile:
         return self._tiles[index]
+
+    def saved_tile(self, index: int) -> SavedStyleTile:
+        return self._quick.saved_tiles[index]
+
+    def saved_count(self) -> int:
+        return len(self._quick.saved_tiles)
+
+    def save_button(self) -> QPushButton:
+        return self._quick.save_button
 
     def crop_button(self, action: str) -> QPushButton:
         return self._crop_buttons[action]
