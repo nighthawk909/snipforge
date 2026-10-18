@@ -21,7 +21,8 @@ def visible(panel, name):
 def test_quick_style_changes_only_touch_fields_the_tool_has():
     solid_red = next(q for q in QUICK_STYLES if q.fill_on)
     assert changes_for("arrow", solid_red) == {"color": solid_red.color}
-    assert changes_for("callout", solid_red) == {"color": solid_red.color, "fill": True}
+    assert changes_for("callout", solid_red) == {"color": solid_red.color, "fill": True,
+                                                 "fill_color": "", "fill_opacity": -1}  # its exact look
     assert changes_for("blur", solid_red) == {}
     for q in QUICK_STYLES:
         for kind, fields in STYLE_FIELDS.items():
@@ -56,11 +57,11 @@ def test_controls_emit_style_changes(qapp):
     panel.load("rect", Style(color="#ff3b30", width=4, fill=False, dash=False, shadow=True), has_selection=True)
     seen = []
     panel.changed.connect(seen.append)
-    panel.switch("dash").click()
+    panel.line_control().button("dashed").click()
     panel.switch("shadow").click()
     panel.slider().setValue(9)
     click(panel.swatch("#34c759"))
-    assert {"dash": True} in seen and {"shadow": False} in seen
+    assert {"dash": True, "dotted": False} in seen and {"shadow": False} in seen
     assert {"width": 9.0} in seen and {"color": "#34c759"} in seen
 
 

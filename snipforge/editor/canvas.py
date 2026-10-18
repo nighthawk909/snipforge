@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem, QGraphicsScene,
 
 from .. import theme
 from .beautify import BeautifyStyle
+from .canvas_clipboard import ClipboardMixin
 from .canvas_draw import DrawMixin
 from .canvas_image import ImageMixin
 from .canvas_input import InputMixin
@@ -37,7 +38,7 @@ class UnsupportedDocument(ValueError):
     """Saved by a newer SnipForge, in a way this version can't show correctly."""
 
 
-class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsView):
+class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsView):
     tool_changed = Signal(str)
     selection_changed = Signal()
     zoom_changed = Signal(float)
@@ -45,6 +46,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
     picking_changed = Signal(bool)  # the eyedropper started or ended
     color_picked = Signal(str)  # "#rrggbb", now the selection's or the tool's color
     notice = Signal(str)  # something to tell you in the status bar
+    copy_requested = Signal()  # the right-click menu's Copy: the window copies (the snip, with Beautify)
 
     def __init__(self, image: QImage, tool_styles: dict[str, Style] | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -99,6 +101,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         self._unparsed: list[dict] = []  # saved items this version couldn't load; written back untouched
         self._pick_source: QImage | None = None  # the snip as you see it, while the eyedropper is on
         self._just_picked = False
+        self._skip_menu = False  # this right-click cancelled the eyedropper: no menu for it
         self._pick_point: QPointF | None = None  # the pixel the loupe shows (the arrow keys move it)
         self._pick_by_key = False  # the keys placed it (not the pointer), so zooming keeps it
         self._refreshing = False

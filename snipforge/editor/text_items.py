@@ -8,8 +8,8 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextOption
 from PySide6.QtWidgets import QGraphicsTextItem, QStyle, QStyleOptionGraphicsItem
 
 from ..fonts import ui_font
-from .items import HIT_SLOP, Annotation, BoxItem, make_pen, readable_on, stroke_band
-from .style import Style
+from .items import HIT_SLOP, Annotation, BoxItem, fill_ink, make_pen, stroke_band
+from .style import Style, fill_qcolor
 
 
 class EditableText(QGraphicsTextItem):
@@ -100,8 +100,7 @@ class TextItem(Annotation, EditableText):
 
     def _apply_text_style(self) -> None:
         self.setFont(_font(self.style.font_size, QFont.Bold))
-        color = QColor(self.style.color)
-        self.setDefaultTextColor(readable_on(color) if self.style.fill else color)
+        self.setDefaultTextColor(fill_ink(self.kind, self.style) if self.style.fill else QColor(self.style.color))
 
     def _geometry(self) -> dict:
         return {"text": self.toPlainText()}
@@ -124,7 +123,7 @@ class TextItem(Annotation, EditableText):
         if self.style.fill:
             p.setRenderHint(QPainter.Antialiasing)
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(self.style.color))
+            p.setBrush(fill_qcolor(self.kind, self.style))
             p.drawRoundedRect(self.boundingRect(), 7, 7)
         super().paint(p, option, widget)
 
@@ -184,9 +183,11 @@ class CalloutItem(BoxItem):
         if self.text is None:
             return
         self.text.setFont(_font(self.style.font_size, QFont.DemiBold))
-        color = QColor(self.style.color)
-        self.text.setDefaultTextColor(readable_on(color) if self.style.fill else QColor("#1c1c1e"))
+        self.text.setDefaultTextColor(self._text_color())
         self._relayout()
+
+    def _text_color(self) -> QColor:
+        return fill_ink(self.kind, self.style) if self.style.fill else QColor("#1c1c1e")  # else on the white box
 
     def _insets(self) -> tuple[float, float]:
         r = self._rect
@@ -323,8 +324,9 @@ class CalloutItem(BoxItem):
         color = QColor(self.style.color)
         p.setRenderHint(QPainter.Antialiasing)
         if self.style.fill:
-            p.setPen(make_pen(color.darker(125), max(1.0, self.style.width)))
-            p.setBrush(color)
+            border = color if self.style.fill_color else color.darker(125)  # usual look: a darker edge
+            p.setPen(make_pen(border, max(1.0, self.style.width)))
+            p.setBrush(fill_qcolor(self.kind, self.style))
         else:
             p.setPen(make_pen(color, max(1.0, self.style.width)))
             p.setBrush(QColor("#ffffff"))

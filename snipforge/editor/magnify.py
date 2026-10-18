@@ -215,7 +215,8 @@ class MagnifyItem(BoxItem):
         source = self._local_source()
         lens = lens_path(self._rect, self.style.shape)
         self._paint_connector(p, source, lens, color)
-        p.setPen(QPen(color, max(1.0, self.style.width / 2), Qt.DashLine if self.style.dash else Qt.SolidLine))
+        frame = (Qt.DotLine if self.style.dotted else Qt.DashLine) if self.style.dash else Qt.SolidLine
+        p.setPen(QPen(color, max(1.0, self.style.width / 2), frame))
         p.setBrush(Qt.NoBrush)
         p.drawRect(source)
         if self._rect.isEmpty() or self._source.isEmpty():
@@ -227,7 +228,7 @@ class MagnifyItem(BoxItem):
         if not picture.isNull():
             p.drawImage(self._rect, picture, inside)
         p.restore()
-        p.setPen(make_pen(color, max(1.0, self.style.width), self.style.dash))
+        p.setPen(make_pen(color, max(1.0, self.style.width), self.style.dash, self.style.dotted))
         p.setBrush(Qt.NoBrush)
         p.drawPath(lens)
 
