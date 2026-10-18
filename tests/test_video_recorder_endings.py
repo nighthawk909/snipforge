@@ -206,4 +206,6 @@ def test_a_camera_that_cant_be_drawn_is_left_out_and_the_pointer_stays(tmp_path,
     _recorder, outcome, warnings = record(tmp_path, [(0.8, "stop")], screen_frames=frames)
 
     assert warnings == ["The camera can't be drawn, so it's left out: no picture format"]
-    assert "result" in outcome and len(drawn) > 10  # the pointer went on being drawn
+    # The pointer went on being drawn through the recording (however few frames a busy machine made).
+    assert "result" in outcome and len(drawn) >= 2
+    assert drawn[-1] - drawn[0] >= 0.5 * outcome["result"].duration, drawn

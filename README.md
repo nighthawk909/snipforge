@@ -82,6 +82,12 @@ one and type its new words. The old line is smart-erased and the new words are w
 matching size and colour, as a text box you can still change (Windows' built-in text recognition,
 offline).
 
+**Combine snips.** Select two or more snips in the Library and choose **Combine** (or Ctrl+G), or
+use **Combine** in the editor to add others to the one you're on. Put them side by side, stacked,
+in a grid, or as **numbered steps** with a caption for each, with a preview as you choose. The result
+is a new snip that opens in the editor, where the step numbers and captions are markup you can still
+change.
+
 **Edit the snip itself.** With the Select tool, the panel's **Image** section turns the snip left or
 right (Ctrl+Shift+R, Ctrl+R), flips it, and resizes it by pixels or percent with the aspect ratio
 kept. Your markup follows: shapes and blurs turn with the image, while text, callouts and stamps

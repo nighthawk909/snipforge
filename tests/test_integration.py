@@ -293,6 +293,8 @@ def test_selftest_report(tmp_path, monkeypatch, qapp):
     monkeypatch.setattr(selftest, "_ocr", lambda: "skipped in unit tests")
     monkeypatch.setattr(selftest, "_search_index", lambda: "skipped in unit tests")
     monkeypatch.setattr(selftest, "_hotkey", lambda: "skipped in unit tests")
+    monkeypatch.setattr(selftest, "_startup_imports", lambda: "tested in tests/test_performance.py")
+    monkeypatch.setattr(selftest, "_speed", lambda: "tested in tests/test_performance.py")
     report = tmp_path / "report.json"
     assert selftest.run(str(report)) == 0
     data = json.loads(report.read_text(encoding="utf-8"))
@@ -320,6 +322,8 @@ def test_selftest_reports_failures(tmp_path, monkeypatch, qapp):
     monkeypatch.setattr(selftest, "_ocr", lambda: "ok")
     monkeypatch.setattr(selftest, "_search_index", lambda: "skipped in unit tests")
     monkeypatch.setattr(selftest, "_hotkey", lambda: "ok")
+    monkeypatch.setattr(selftest, "_startup_imports", lambda: "ok")
+    monkeypatch.setattr(selftest, "_speed", lambda: "ok")
     assert selftest.run(str(tmp_path / "r.json")) == 1
 
 
@@ -333,7 +337,7 @@ def test_selftest_on_a_mac_skips_the_windows_only_checks(tmp_path, monkeypatch, 
 
     on_a_mac(selftest)
     for name in ("_theme", "_editor", "_library", "_icons", "_windows", "_share", "_video", "_video_editor",
-                 "_recorder_process", "_screen_access", "_fonts", "_app_folders"):
+                 "_recorder_process", "_screen_access", "_fonts", "_app_folders", "_startup_imports", "_speed"):
         monkeypatch.setattr(selftest, name, lambda: "ok")
     for name in ("_ocr", "_search_index", "_hotkey"):
         monkeypatch.setattr(selftest, name, windows_only)
