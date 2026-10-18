@@ -7,10 +7,13 @@ time.perf_counter() reads. So sound lines up with the video's frames (video/mixe
 
 Loopback sends nothing at all while nothing plays; the mixer turns those gaps into silence.
 
-Recording Windows' default device (no device chosen), the capture follows it: when Windows makes
-another device the default (headphones plugged in, a Bluetooth headset connecting) or the one being
-recorded goes away, it carries on from the new default, checked every FOLLOW_SECONDS. Otherwise the
-computer's sound would quietly go missing from the rest of the recording once it plays elsewhere.
+Recording Windows' default device (no device chosen), the capture follows it, checking every
+FOLLOW_SECONDS: when Windows makes another device the default (headphones plugged in, a Bluetooth
+headset connecting), it opens that one and only then lets go of the old, keeping the old if the new
+won't open yet (tried again at the next check). When the device being recorded goes away, it waits
+up to REOPEN_GRACE for Windows to settle on another; if there's none, it says so once and carries on
+looking, so a headset that reconnects is picked up again. Otherwise the computer's sound would
+quietly go missing from the rest of the recording once it plays elsewhere.
 """
 from __future__ import annotations
 
@@ -55,6 +58,8 @@ BUFFER_100NS = 10_000_000  # one second of room on Windows' side, so a busy mome
 POLL_SECONDS = 0.005
 START_TIMEOUT = 5.0
 FOLLOW_SECONDS = 1.0  # following Windows' default device: how often it's checked
+REOPEN_GRACE = 5.0  # after the device being recorded went: how long to wait for another before saying so
+RETRY_SECONDS = 0.25  # meanwhile, how often to try
 
 E_ACCESSDENIED = 0x80070005
 AUDCLNT_E_DEVICE_INVALIDATED = 0x88890004
@@ -180,9 +185,11 @@ def _device_id(device: c_void_p) -> str:
 
 
 def _id_or_none(device: c_void_p) -> str | None:
+    """The device's id, or None (logged) if Windows won't say."""
     try:
-        return _device_id(device)
-    except ComError:
+        return _device_id(device) or None
+    except ComError as exc:
+        log.debug("Couldn't read a sound device's id: %s", exc)
         return None
 
 
@@ -367,25 +374,65 @@ class WasapiCapture:
 
     def _record(self, enumerator, held: list) -> None:
         """Hand on packets until stop(). Following Windows' default device, move to the new one when
-        it changes or the one being recorded goes away (and there's another to go to)."""
-        if self.device_id is not None:  # a device chosen: that one, or nothing
+        it changes or the one being recorded goes away (see the module's notes)."""
+        recording = {"id": None if self.device_id else _id_or_none(held[0])}
+        if recording["id"] is None:  # a device chosen (that one, or nothing), or one that can't be told apart
             self._pump(held[2])
             return
-        recording = _id_or_none(held[0])
+
+        def moved() -> bool:
+            return _default_id(enumerator, self.kind) not in (None, recording["id"])
+
         while True:
             try:
-                moved = lambda was=recording: _default_id(enumerator, self.kind) not in (None, was)  # noqa: E731
-                if self._pump(held[2], moved):
-                    return
+                stopped, lost = self._pump(held[2], moved), False
             except ComError as exc:
                 if exc.hresult not in (AUDCLNT_E_DEVICE_INVALIDATED, E_NOTFOUND):
                     raise
-            self._close_device(held)
-            held[:] = self._open_device(enumerator)  # AudioUnavailable if there's no device left
-            recording = _id_or_none(held[0])
+                stopped, lost = False, True
+            if stopped or self._stop.is_set():
+                return
+            if lost:
+                self._close_device(held)
+                new = self._reopen_after_loss(enumerator)
+                if new is None:  # stopped while waiting
+                    return
+            else:
+                new = self._try_open(enumerator)  # the new default, before letting go of this one
+                if new is None:
+                    continue  # it won't open yet: on with this one, and tried again at the next check
+                self._close_device(held)
+            held[:] = new
+            recording["id"] = _id_or_none(new[0])
             self.switches += 1
             self._glitch_next = True
             log.info("Recording the %s from Windows' new default device", _what(self.kind))
+
+    def _try_open(self, enumerator) -> list | None:
+        """Windows' default device, opened; None if there's none or it won't open (yet)."""
+        try:
+            return self._open_device(enumerator)
+        except (ComError, AudioUnavailable) as exc:
+            log.info("The %s's new default device didn't open: %s", _what(self.kind), exc)
+            return None
+
+    def _reopen_after_loss(self, enumerator) -> list | None:
+        """After the device being recorded went: the next default, tried every RETRY_SECONDS while
+        Windows settles on one; past REOPEN_GRACE, said once, and looked for every FOLLOW_SECONDS
+        until one comes back. None if stop() came first."""
+        deadline, said = time.perf_counter() + REOPEN_GRACE, False
+        while not self._stop.is_set():
+            new = self._try_open(enumerator)
+            if new is not None:
+                return new
+            if not said and time.perf_counter() >= deadline:
+                self._report(AudioUnavailable(
+                    "The microphone was disconnected, and there's no other: recording without it until one is "
+                    "connected." if self.kind == MICROPHONE else "The speakers or headphones were disconnected, "
+                    "and there are no others: recording without the computer's sound until some are connected."))
+                said = True
+            self._stop.wait(FOLLOW_SECONDS if said else RETRY_SECONDS)
+        return None
 
     def _report(self, error: AudioUnavailable) -> None:
         if self._on_error:

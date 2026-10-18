@@ -367,10 +367,13 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    recording stops and is kept, since a full drive can't finish the file), Windows "N" editions
    (`support.py`: the recorder and the self-test say to add the Media Feature Pack), a sound device
    unplugged (a warning, step 5; recording Windows' default device, the capture now carries on
-   from the next default instead), Windows' default sound device changing mid-recording
-   (headphones plugged in, a Bluetooth headset connecting: `wasapi.py` checks the default's id
-   every second and moves to the new one, so the computer's sound doesn't quietly go missing; a
-   chosen device is kept), the screen lost (kept, step 5), sleep, shutdown and sign-out
+   from the next default instead, waiting up to 5 s for Windows to pick one; with none, it says so
+   once and picks up one that's connected later), Windows' default sound device changing
+   mid-recording (headphones plugged in, a Bluetooth headset connecting: `wasapi.py` checks the
+   default's id every second, opens the new one and only then lets go of the old, keeping the old
+   if the new won't open yet; so up to a second of the computer's sound can be missed, not the rest
+   of the recording; the microphone follows too, silently, unless one was chosen), the screen lost
+   (kept, step 5), sleep, shutdown and sign-out
    (the file is finished first, step 5b). Staying awake: while recording (or starting, or
    finishing; not while paused), Windows isn't to sleep or turn the screen off for inactivity
    (`power.stay_awake`, `SetThreadExecutionState` on the recorder process's main thread, following
