@@ -11,8 +11,10 @@ corners and shadow around the kept area, exactly as exports will.
 """
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsItem
 
 from .. import theme
@@ -91,6 +93,7 @@ class CropMask(QGraphicsItem):
         self.editing = False
         self.beautify: BeautifyStyle | None = None
         self._backdrop: tuple[tuple, QPixmap] | None = None  # (key, pixmap): drawn once, not every frame
+        self._behind: tuple[tuple, QPixmap] | None = None  # the same, under the snip too (for torn edges)
         self.setZValue(1000)
         self.setAcceptedMouseButtons(Qt.NoButton)
 
@@ -119,7 +122,7 @@ class CropMask(QGraphicsItem):
     def set_beautify(self, style: BeautifyStyle | None) -> None:
         self.beautify = style
         if style is None:
-            self._backdrop = None
+            self._backdrop = self._behind = None  # let the pictures go
         self.update()
 
     def boundingRect(self) -> QRectF:
@@ -161,12 +164,34 @@ class CropMask(QGraphicsItem):
         shadow when it's on, exactly as an export draws them, else the canvas's dots. Torn edges
         use it to look torn away."""
         if self.beautify is not None:
+            # Filled (antialiased), not clipped, so the torn edge's soft pixels blend as in the export.
             p.save()
-            p.setClipPath(path, Qt.IntersectClip)
-            paint_backdrop(p, self.crop, self.beautify)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.fillPath(path, self._behind_brush(self.beautify))
             p.restore()
         else:
             self._fill_cut(p, path)
+
+    def _behind_brush(self, style: BeautifyStyle) -> QBrush:
+        """Beautify's backdrop and shadow under the whole snip, drawn once, as a brush in scene units."""
+        pad = style.padding
+        backdrop = self.crop.adjusted(-pad, -pad, pad, pad)
+        scale = min(1.0, BACKDROP_CACHE_PX / max(backdrop.width(), backdrop.height()))
+        width, height = round(self.crop.width()), round(self.crop.height())
+        key = (width, height, style, scale)
+        if self._behind is None or self._behind[0] != key:
+            image = QImage(math.ceil((width + pad * 2) * scale), math.ceil((height + pad * 2) * scale),
+                           QImage.Format_ARGB32_Premultiplied)
+            image.fill(Qt.transparent)
+            painter = QPainter(image)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.scale(scale, scale)
+            paint_backdrop(painter, QRectF(pad, pad, width, height), style)
+            painter.end()
+            self._behind = (key, QPixmap.fromImage(image))
+        brush = QBrush(self._behind[1])
+        brush.setTransform(QTransform.fromTranslate(backdrop.x(), backdrop.y()).scale(1 / scale, 1 / scale))
+        return brush
 
     def _fill_cut(self, p: QPainter, outside: QPainterPath) -> None:
         """The canvas's dots on screen, so a cut area blends in; plain background otherwise."""

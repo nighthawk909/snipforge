@@ -266,18 +266,53 @@ class EllipseItem(_OutlineShape):
         return path
 
 
-class EffectItem(BoxItem):
+class HidesContent:
+    """For markup that hides part of the snip (blur, pixelate, smart erase). A magnifier draws it into
+    its lens, and keeps a picture of itself while it has a shadow, so any change to this markup
+    (moved, resized, restyled, added, removed, undone) redraws every lens."""
+
+    hides_content = True
+
+    def _follow_lenses(self) -> None:
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+
+    def _redraw_lenses(self, scene=None) -> None:
+        scene = scene if scene is not None else self.scene()
+        if scene is None:
+            return
+        for item in scene.items():
+            if getattr(item, "kind", "") == "magnify":
+                item.update()
+
+    def _geometry_changed(self) -> None:
+        super()._geometry_changed()
+        self._redraw_lenses()
+
+    def set_style(self, style: Style) -> None:
+        super().set_style(style)
+        self._redraw_lenses()
+
+    def itemChange(self, change, value):  # noqa: N802 - Qt API
+        if change == QGraphicsItem.ItemSceneChange and self.scene() is not None:
+            self._redraw_lenses()  # leaving a scene: its lenses no longer show it
+        elif change in (QGraphicsItem.ItemPositionHasChanged, QGraphicsItem.ItemSceneHasChanged,
+                        QGraphicsItem.ItemVisibleHasChanged, QGraphicsItem.ItemZValueHasChanged):
+            self._redraw_lenses()
+        return super().itemChange(change, value)
+
+
+class EffectItem(HidesContent, BoxItem):
     """Redaction region that pixelates or blurs the screenshot beneath it."""
 
     supports_shadow = False
     keep_square_with_shift = False
-    hides_content = True  # a magnifier draws it over what it enlarges
 
     def __init__(self, style: Style, base: QImage, mode: str) -> None:
         self._base = base
         self.mode = mode
         self._cache: tuple[tuple, QImage] | None = None
         super().__init__(style)
+        self._follow_lenses()
 
     @property
     def kind(self) -> str:  # type: ignore[override]

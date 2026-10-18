@@ -16,7 +16,7 @@ import math
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter
 
-from .items import BoxItem
+from .items import BoxItem, HidesContent
 from .style import Style
 
 RING = 3  # pixels around the area it fills from
@@ -101,18 +101,19 @@ def bake(image: QImage, erases) -> QImage:
     return out
 
 
-class EraseItem(BoxItem):
-    """A rectangle filled in from its surroundings; move or resize it like any box."""
+class EraseItem(HidesContent, BoxItem):
+    """A rectangle filled in from its surroundings; move or resize it like any box. A magnifier
+    shows the erased snip, not what was erased."""
 
     kind = "erase"
     supports_shadow = False
     keep_square_with_shift = False
-    hides_content = True  # a magnifier shows the erased snip, not what was erased
 
     def __init__(self, style: Style, base: QImage) -> None:
         self._base = base
         self._cache: tuple[tuple, QImage] | None = None
         super().__init__(style)
+        self._follow_lenses()
 
     def set_base(self, base: QImage) -> None:
         """The snip was turned or resized: fill from the new pixels."""

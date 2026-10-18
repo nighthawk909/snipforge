@@ -265,7 +265,7 @@ encoding, or a Windows-only ffmpeg.exe, would each be a second encoder to write 
 | Qt's recorder and player now and then misbehaved in the test runner: Qt's player sometimes loaded a fresh clip with no tracks or stalled before its first frame, and in about 1 run in 65 a clip read back as a different format | Files are checked with FFmpeg directly, not Qt's player (the editor step must test the player the same way). After recorders were made to always shut down and let go of their file, the stress test (`pytest -m stress`: 200 recordings, every file checked) passed four times in a row, 800 recordings, none bad; the recorder also checks every real recording before reporting it finished. |
 | On macOS CI, Qt 6.12 crashed (segfault) while deleting a recorder that had failed or been abandoned (the two tests of those paths are Windows-only for now) | Reproduce on a Mac in the Mac phase; the recorder process isolates such a crash from the rest of SnipForge either way. |
 | Windows "N" editions (sold in Europe) ship without Media Foundation, so without the H.264 encoder | **Done (step 9, `support.py`):** the self-test and the recorder check for it; recording explains how to add the free Media Feature Pack instead of failing. |
-| Audio clocks drift from the system clock (up to ~0.01-0.1%, up to a few seconds an hour) | The mixer (`snipforge/video/mixer.py`) keeps each source within 2 ms of its timestamps by adding one sample (the average of its neighbours) or dropping one, in the middle of a 10 ms packet: inaudible, and enough for drift up to 0.2%. Tested over a simulated minute both ways; a one-hour soak test in the hardening step. |
+| Audio clocks drift from the system clock (up to ~0.01-0.1%, up to a few seconds an hour) | The mixer (`snipforge/video/mixer.py`) keeps each source within 2 ms of its timestamps by adding one sample (the average of its neighbours) or dropping one, in the middle of a 10 ms packet: inaudible, and enough for drift up to 0.2%. Tested over a simulated minute both ways, then for an hour (`scripts/soak_recording.py`): with clocks 0.1% fast and slow, beeps stayed within 4 ms of their flashes throughout. |
 | A wrong audio timestamp (Windows flags some, virtual and remote-desktop devices can be off) | The mixer never trusts a stamp from the future or one that jumps backwards: the packet follows on from the last one, so one bad stamp can't silence a source. Packets that arrive after their time was handed to the encoder are counted (`late_frames`); the recorder keeps 0.25 s back for them. |
 | Qt changes between releases (frame timestamps, container quirks, codec fallbacks, FFmpeg's DLL versions) | Tests pin each behaviour the design relies on (see the build plan); the ctypes layer refuses to run with an FFmpeg major version it wasn't tested with, and says so, instead of misbehaving. Dependabot's PySide6 updates run those tests. |
 | Monitors: several, mixed scaling, rotated, HDR | One monitor per recording; physical pixels throughout; rotation handled when drawing; DXGI hands HDR screens over in normal colour (the prototype requests 8-bit BGRA). Each gets a manual check in the hardening PR. |
@@ -382,6 +382,30 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    control bar (`power.py` listens with `WTSRegisterSessionNotification`). The screen turning off anyway (a closed lid set to do
    nothing, say) is mentioned: the video shows the last picture until it's back
    (`RegisterPowerSettingNotification`, `GUID_CONSOLE_DISPLAY_STATE`).
+   Soak test (`scripts/soak_recording.py`): one long recording through the real recorder and
+   Qt's encoder, by default of a made-up screen (a moving band, a white box flashing every 5 s)
+   with two made-up sound cards whose clocks run 0.1% fast and 0.1% slow, beeping in turn on the
+   flashes and stamping their packets as Windows does. It passes if every beep is within 50 ms of
+   its flash (uncorrected, they'd wander 3.6 s an hour), the mixer kept each card in time by
+   adding or dropping single samples (never jumping), memory grew no more than 100 MB, and the
+   file's streams start at 0; samples every 30 s go to `samples.jsonl`. It runs below normal
+   priority and records nothing real unless asked to (`--real-screen`, `--real-sound`: ask before
+   using those on someone's PC). Short runs are in the stress tests, one with the flashes 0.2 s
+   late, which it must catch. What it can't tell: real devices' clocks (flashes and beeps both
+   follow the recorder's clock), stamps Windows gets wrong, and pauses.
+   **One hour at 1080p (2026-10-18, this laptop, while it was in use):** 107,998 frames made,
+   none skipped or dropped; all 720 beeps within 4 ms of their flashes from start to end (the
+   fast card within 1 ms, the slow one 2.7-3.7 ms early, steady); the mixer added or dropped
+   172,717 samples a card, the 0.1% asked for, with no jumps; memory (committed private bytes)
+   702 MB at the first sample, 727 MB at the end (about 0.35 MB a minute, slowing), 56 MB once
+   finished; about half a CPU core.
+   Memory found on the way: a 1080p recording holds ~0.55 GB more than a 360p one (702 against
+   156 MB) while it runs, all of it from the moment frames reach Qt's encoder (Windows' software
+   H.264 encoder, as above; Qt's FFmpeg here also has `h264_d3d12va`, and no x264, being LGPL);
+   it's let go when the recording ends. `QT_FFMPEG_ENCODING_HW_DEVICE_TYPES` doesn't change it.
+   Python's own memory stays flat over a recording (tracemalloc): the slow growth is in Qt and
+   FFmpeg (the MP4's index, kept in memory until the file is finished, would be about 15 MB an hour
+   of it by estimate).
 
 Later, not in Phase 4: following a moving or covered window (Windows.Graphics.Capture), editing the
 pointer effects after recording (by saving the pointer's path separately), noise suppression.

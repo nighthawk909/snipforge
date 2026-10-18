@@ -14,3 +14,6 @@ htmlcov/
 
 # Claude Code agents' worktrees (each a separate checkout)
 .claude/worktrees/
+
+# scripts/soak_recording.py results
+soak-results/
