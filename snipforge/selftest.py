@@ -310,9 +310,38 @@ def _recorder_process() -> str:
     return f"the recorder process answered (version {ping(timeout_ms=60_000)})"
 
 
+def _startup_imports() -> str:
+    """Starting SnipForge loaded only what it needs: the editor, recording, text recognition and
+    the like load when they're first used (docs/PERFORMANCE.md). First, before other checks load them."""
+    from . import perf
+
+    heavy = perf.heavy_modules()
+    if heavy:
+        raise RuntimeError(f"loaded at start: {', '.join(sorted(heavy))}")
+    budget = perf.module_budget()
+    if budget is not None and len(sys.modules) > budget:
+        raise RuntimeError(f"{len(sys.modules)} modules at start (budget {budget})")
+    return f"{len(sys.modules)} modules at start (budget {budget or 'none here'}), none of the heavy ones"
+
+
+def _speed() -> str:
+    """A snip's editor, and the Library window over 1,000 snips, open within their budgets."""
+    from . import perf
+
+    editor = perf.open_editor_s()
+    library = perf.big_library(1000)
+    measured = {"snip_to_editor_s": editor, "library_open_s": library["open_s"],
+                "library_refresh_s": library["refresh_s"]}
+    problems = perf.over_budget(measured)
+    if problems:
+        raise RuntimeError("; ".join(problems))
+    return ", ".join(f"{name} {value}" for name, value in measured.items())
+
+
 def run(report_path: str) -> int:
     windows, mac = sys.platform == "win32", sys.platform == "darwin"
     results: dict = {}
+    _check(results, "startup_imports", _startup_imports)
     _check(results, "theme", _theme)
     _check(results, "app_folders", _app_folders)
     _check(results, "fonts", _fonts, required=mac)
@@ -329,6 +358,7 @@ def run(report_path: str) -> int:
     _check(results, "video", _video)
     _check(results, "video_editor", _video_editor)
     _check(results, "recorder_process", _recorder_process, required=windows)
+    _check(results, "speed", _speed)
     passed = all(r["ok"] for r in results.values() if r["required"])
     report = {"version": __version__, "platform": sys.platform, "passed": passed, "checks": results}
     try:

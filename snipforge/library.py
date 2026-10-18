@@ -125,8 +125,12 @@ class Entry:
 
     @property
     def created(self) -> dt.datetime:
+        stamp = self.id[:15]  # 20261018-153012 (strptime took a tenth of a second for 1,200 snips)
         try:
-            return dt.datetime.strptime(self.id[:15], "%Y%m%d-%H%M%S")
+            if len(stamp) != 15 or stamp[8] != "-" or not (stamp[:8] + stamp[9:]).isdigit():
+                raise ValueError(stamp)
+            return dt.datetime(int(stamp[:4]), int(stamp[4:6]), int(stamp[6:8]), int(stamp[9:11]),
+                               int(stamp[11:13]), int(stamp[13:15]))
         except ValueError:
             return dt.datetime.fromtimestamp(self.path.stat().st_mtime)
 
@@ -227,10 +231,38 @@ def _kind(files: dict) -> str | None:
     return None
 
 
+PARALLEL_READS = 8  # folders listed, or details read, at the same time
+SETTLED_S = 3.0  # a folder changed more recently than this is listed again however its time looks
+PARALLEL_FROM = 64  # fewer than this: one at a time (starting threads costs more than it saves)
+
+
+def in_parallel(work, items: list) -> list:
+    """work(item) for each item, in order, a few at a time when there are many."""
+    if len(items) < PARALLEL_FROM:
+        return [work(item) for item in items]
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(PARALLEL_READS, thread_name_prefix="snipforge-library") as pool:
+        return list(pool.map(work, items))
+
+
+def _snapshot(folder: os.DirEntry) -> Snapshot | None:
+    try:
+        files = {f.name: f for f in os.scandir(folder.path)}
+    except OSError:
+        return None
+    kind = _kind(files)
+    if kind is None:
+        return None
+    return Snapshot(Entry(folder.name, Path(folder.path), kind), _mtime(files.get(META), ns=True),
+                    _mtime(files.get(DOCUMENT), ns=False), PREVIEW in files)
+
+
 class Library:
     def __init__(self, root: Path = DEFAULT_ROOT) -> None:
         self.root = Path(root)
         self._meta_lock = threading.Lock()  # the text indexer writes from its own thread
+        self._snapshots: dict[str, tuple[int, Snapshot | None]] = {}  # scan()'s last look at each folder
 
     def create(self, image: QImage, source=None) -> Entry:
         """`source` is the window the snip came from (a winrects.WindowInfo), if known."""
@@ -335,22 +367,33 @@ class Library:
         return changed, complete
 
     def scan(self) -> list[Snapshot]:
-        """Every snip, newest first, from one directory listing per snip (no file is opened)."""
-        found: list[Snapshot] = []
+        """Every snip, newest first, from one directory listing per snip (no file is opened).
+
+        A snip's folder is listed again only when its own modification time says something in it
+        changed: every write here renames a finished file into place, which updates it. Folders
+        changed in the last few seconds are always listed (some file systems keep coarse times)."""
         try:
-            folders = [d for d in os.scandir(self.root) if d.is_dir()]
+            with os.scandir(self.root) as listing:
+                folders = [d for d in listing if d.is_dir()]
         except OSError:
             return []
+        now, known, current, to_list = time.time(), self._snapshots, {}, []
         for folder in folders:
             try:
-                files = {f.name: f for f in os.scandir(folder.path)}
+                changed = folder.stat().st_mtime_ns  # from the listing itself on Windows: no extra call
             except OSError:
                 continue
-            kind = _kind(files)
-            if kind is None:
-                continue
-            found.append(Snapshot(Entry(folder.name, Path(folder.path), kind), _mtime(files.get(META), ns=True),
-                                  _mtime(files.get(DOCUMENT), ns=False), PREVIEW in files))
+            cached = known.get(folder.name)
+            if cached is not None and cached[0] == changed and now - changed / 1e9 > SETTLED_S:
+                current[folder.name] = cached
+            else:
+                to_list.append((folder, changed))
+        # Listing a folder waits on the disk (and antivirus), not on Python: a few at a time
+        listed = in_parallel(lambda item: _snapshot(item[0]), to_list)
+        for (folder, changed), snapshot in zip(to_list, listed, strict=True):
+            current[folder.name] = (changed, snapshot)
+        self._snapshots = current
+        found = [snapshot for _changed, snapshot in current.values() if snapshot is not None]
         found.sort(key=lambda s: s.entry.id, reverse=True)
         return found
 
