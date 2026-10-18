@@ -216,6 +216,9 @@ _PATHS = {
     "shape_ellipse": '<ellipse cx="12" cy="12" rx="9" ry="6.5"/>',
     "shape_pill": '<rect x="3" y="7" width="18" height="10" rx="5"/>',
     "tail": '<path d="M4 4h16v10H11l-6 6 2-6H4z"/>',
+    "line_solid": '<path d="M3 12h18" stroke-width="2.4"/>',
+    "line_dashed": '<path d="M3 12h18" stroke-width="2.4" stroke-dasharray="4.5 3.5"/>',
+    "line_dotted": '<path d="M3.5 12h17" stroke-width="2.6" stroke-dasharray="0.1 4.2"/>',
 }
 
 _PATHS["magnify"] = _PATHS["zoom_in"]  # the Magnify tool

@@ -29,9 +29,10 @@ from ..icons import icon
 from ..widgets import Segmented, ToggleSwitch
 from ..wording import keys
 from .edge_controls import CutoutControls, EdgeControls
+from .fill_controls import FillControls
 from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
-from .style import CALLOUT_SHAPES, COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style
+from .style import CALLOUT_SHAPES, COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style, line_style
 
 PANEL_WIDTH = 288
 TITLES = {
@@ -59,7 +60,10 @@ HINTS = {
     "erase": "Drag over something to remove it. The area is filled in from what's around it.",
 }
 SHAPE_LABELS = {"rounded": "Rounded box", "rect": "Box", "ellipse": "Ellipse", "pill": "Pill"}
-SWITCHES = ("tail", "fill", "dash", "shadow")
+SWITCHES = ("tail", "fill", "shadow")
+LINE_STYLES = (("solid", "Solid"), ("dashed", "Dashed"), ("dotted", "Dotted"))
+LINE_CHANGES = {"solid": {"dash": False, "dotted": False}, "dashed": {"dash": True, "dotted": False},
+                "dotted": {"dash": True, "dotted": True}}  # dotted keeps dash: older versions draw dashes
 STAMP_COLUMNS = 6
 EDGE_SWATCHES = {"#ffffff", "#1c1c1e"}  # need an outline to show against the panel
 # action, icon, tooltip: the snip's own buttons in the Image section
@@ -150,6 +154,7 @@ class PropertiesPanel(QScrollArea):
         self._build_size()
         self._build_text()
         self._build_effects()
+        self._build_fill()  # right under the Fill switch, so turning it on doesn't move the switch
         self._build_crop()
         self._build_cutout()
         self._build_image()
@@ -278,6 +283,12 @@ class PropertiesPanel(QScrollArea):
         row.addStretch(1)
         col.addLayout(row)
 
+    def _build_fill(self) -> None:
+        col = self._section("fill", None)
+        self._fill = FillControls(Swatch, NoWheelSlider)
+        self._fill.changed.connect(lambda changes: self._emit(**changes))
+        col.addWidget(self._fill)
+
     def _build_size(self) -> None:
         col = self._section("size", None)
         head = QHBoxLayout()
@@ -322,9 +333,31 @@ class PropertiesPanel(QScrollArea):
 
     def _build_effects(self) -> None:
         col = self._section("effects", "Effects")
-        for key, label in (("tail", "Pointer"), ("fill", "Fill"), ("dash", "Dashed line"), ("shadow", "Shadow")):
+        self._line_row = QWidget()
+        row = QHBoxLayout(self._line_row)
+        row.setContentsMargins(0, 2, 0, 2)
+        row.addWidget(QLabel("Line"), 1)
+        self._line = Segmented(list(LINE_STYLES), value="solid")
+        for key, label in LINE_STYLES:  # icons, as for the callout's shapes; the name stays in the tooltip
+            b = self._line.button(key)
+            b.setToolTip(f"{label} line")
+            b.setAccessibleName(f"{label} line")
+            b.setText("")
+            b.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            b.setIconSize(QSize(20, 20))
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._line_loaded = "solid"
+        self._line.changed.connect(self._line_chosen)
+        row.addWidget(self._line)
+        col.addWidget(self._line_row)
+        for key, label in (("tail", "Pointer"), ("fill", "Fill"), ("shadow", "Shadow")):
             switch = self._switch_row(col, key, label)
             switch.toggled.connect(lambda on, k=key: self._emit(**{k: on}))
+
+    def _line_chosen(self, key: str) -> None:
+        if key != self._line_loaded:  # clicking the line you have already adds nothing to undo
+            self._line_loaded = key
+            self._emit(**LINE_CHANGES[key])
 
     def _build_crop(self) -> None:
         col = self._section("crop", "Crop")
@@ -399,13 +432,17 @@ class PropertiesPanel(QScrollArea):
             "quick": bool(fields) and self._quick.worth_showing(kind, has_selection), "shape": "shape" in fields,
             "stamp": "stamp" in fields,
             "color": "color" in fields, "size": "width" in fields, "text": "font_size" in fields,
-            "effects": any(f in fields for f in SWITCHES), "crop": kind == "crop", "image": kind == "select",
+            "fill": "fill_color" in fields and bool(style and style.fill),
+            "effects": any(f in fields for f in (*SWITCHES, "dash")), "crop": kind == "crop",
+            "image": kind == "select",
             "cutout": kind == "cutout", "edges": kind == "select",
         }
         for name, box in self._sections.items():
             box.setVisible(show[name])
         for key in SWITCHES:
             self._switches[key].parentWidget().setVisible(key in fields)
+        self._line_row.setVisible("dash" in fields)
+        self._fill.set_noun("background" if kind == "text" else "fill")
         self._switches["fill"].property("rowLabel").setText(
             {"text": "Background", "callout": "Filled"}.get(kind, "Fill"))
         self._size_label.setText(self.size_label().upper())
@@ -424,6 +461,9 @@ class PropertiesPanel(QScrollArea):
         self._font.setValue(int(style.font_size))
         for key in SWITCHES:
             self._switches[key].setChecked(bool(getattr(style, key)))
+        self._line_loaded = line_style(style)
+        self._line.set_value(self._line_loaded)
+        self._fill.load(self._kind, style)
         if style.shape in CALLOUT_SHAPES:
             self._shapes.set_value(style.shape)
         if style.stamp in self._stamp_buttons:
@@ -457,13 +497,17 @@ class PropertiesPanel(QScrollArea):
     def retheme(self) -> None:
         for shape in CALLOUT_SHAPES:
             self._shapes.button(shape).setIcon(icon(f"shape_{shape}"))
+        for key, _label in LINE_STYLES:
+            self._line.button(key).setIcon(icon(f"line_{key}"))
         self._custom.setIcon(icon("plus"))
+        self._fill.custom.setIcon(icon("plus"))
         self._cutout.retheme()
         self._picker.setIcon(icon("pipette"))
         for action, icon_name, _tip in IMAGE_ACTIONS:
             self._image_buttons[action].setIcon(icon(icon_name))
         self.viewport().update()
-        for w in (*self._swatches.values(), *self._tiles, *self._quick.saved_tiles, *self._switches.values()):
+        for w in (*self._swatches.values(), *self._fill.swatches.values(), self._fill.same, *self._tiles,
+                  *self._quick.saved_tiles, *self._switches.values()):
             w.update()
 
     def _pick_swatch(self, color: str) -> None:
@@ -510,6 +554,12 @@ class PropertiesPanel(QScrollArea):
 
     def slider(self) -> QSlider:
         return self._slider
+
+    def line_control(self) -> Segmented:
+        return self._line
+
+    def fill_controls(self) -> FillControls:
+        return self._fill
 
     def swatch(self, color: str) -> Swatch:
         return self._swatches[color]
