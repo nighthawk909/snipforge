@@ -6,6 +6,10 @@ timestamps and plays buffers end to end, so the sound must be one unbroken strea
 video/mixer.py makes). When the encoder falls behind, the oldest waiting frames are dropped rather
 than queued: the video skips a frame but stays in time, and memory stays bounded.
 
+Qt opens the video encoder after record() returns, on a thread of its own: ~0.1 s, but over a
+second on a busy machine, and until then it takes no frames. `ready` says when it has, so a
+recording can start its clock then instead of losing what it made in the meantime.
+
 Big areas are scaled down by the encoder itself (output_size), in the same pass as its colour
 conversion. Use from the Qt main thread.
 """
@@ -40,6 +44,7 @@ def fit(size: tuple[int, int], limit: tuple[int, int] | None) -> tuple[int, int]
 class Encoder(QObject):
     """Writes `path` (MP4) from frames of `frame_size` at `fps`, scaled to `output_size`."""
 
+    ready = Signal()  # it takes frames (and sound) now
     finished = Signal()  # the file is complete
     failed = Signal(str)
 
@@ -57,6 +62,8 @@ class Encoder(QObject):
         self._pending_audio: deque = deque()
         self._finishing = False
         self._first_sent = False  # frame 0 must reach the encoder: Qt times everything from it
+        self._ready_inputs: set[str] = set()
+        self._inputs = {"video", "audio"} if audio else {"video"}
         self.session = M.QMediaCaptureSession()
         video_format = M.QVideoFrameFormat(QSize(*frame_size), M.QVideoFrameFormat.PixelFormat.Format_BGRX8888)
         video_format.setStreamFrameRate(fps)
@@ -75,9 +82,9 @@ class Encoder(QObject):
         self._configure(output_size)
         self._connections = [(self.recorder.errorOccurred, self._on_error),
                              (self.recorder.recorderStateChanged, self._on_state),
-                             (self.video.readyToSendVideoFrame, self._send_video)]
+                             (self.video.readyToSendVideoFrame, self._video_ready)]
         if self.sound is not None:
-            self._connections.append((self.sound.readyToSendAudioBuffer, self._send_audio))
+            self._connections.append((self.sound.readyToSendAudioBuffer, self._audio_ready))
         for signal, slot in self._connections:
             signal.connect(slot)
 
@@ -95,6 +102,11 @@ class Encoder(QObject):
         self.recorder.setVideoResolution(*output_size)
         self.recorder.setVideoFrameRate(self.fps)
         self.recorder.setOutputLocation(QUrl.fromLocalFile(str(self.path)))
+
+    @property
+    def is_ready(self) -> bool:
+        """Qt has opened every input's encoder (`ready` has been emitted)."""
+        return self._ready_inputs >= self._inputs
 
     @property
     def recording(self) -> bool:
@@ -135,6 +147,20 @@ class Encoder(QObject):
         """Hand over what's waiting, then close the file; `finished` (or `failed`) follows."""
         self._finishing = True
         self._maybe_stop()
+
+    def _video_ready(self) -> None:
+        self._input_ready("video")
+        self._send_video()
+
+    def _audio_ready(self) -> None:
+        self._input_ready("audio")
+        self._send_audio()
+
+    def _input_ready(self, which: str) -> None:
+        if which not in self._ready_inputs:
+            self._ready_inputs.add(which)
+            if self.is_ready:
+                self.ready.emit()
 
     def _send_video(self) -> None:
         while self._pending_video and self.video.sendVideoFrame(self._pending_video[0]):

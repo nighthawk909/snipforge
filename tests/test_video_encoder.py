@@ -106,6 +106,22 @@ def test_video_without_sound(tmp_path, qapp):
     assert info.first("audio") is None and info.first("video").codec == "h264"
 
 
+@pytest.mark.parametrize("audio", [True, False])
+def test_the_encoder_says_when_it_is_ready_for_frames(tmp_path, qapp, audio):
+    # Qt opens the video encoder after record() returns: ~0.1 s, over a second on a busy machine.
+    encoder = Encoder(tmp_path / "ready.mp4", (320, 240), (320, 240), FPS, audio=audio)
+    loop = QEventLoop()
+    encoder.ready.connect(loop.quit)
+    QTimer.singleShot(10_000, loop.quit)
+    assert not encoder.is_ready
+    encoder.start()
+    try:
+        loop.exec()
+        assert encoder.is_ready
+    finally:
+        encoder.close()
+
+
 def test_an_encoder_that_falls_behind_drops_frames_instead_of_queueing_them(tmp_path, qapp):
     encoder = Encoder(tmp_path / "behind.mp4", (320, 240), (320, 240), FPS, audio=False, max_pending_frames=2)
     encoder.start()

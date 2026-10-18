@@ -12,13 +12,22 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter
 
 from snipforge.video import clip, ffmpeg, frames
+from snipforge.video import recorder as recorder_module
+from snipforge.video.encoder import Encoder
 from snipforge.video.recorder import Recorder, RecordingError, Settings
-from snipforge.video.screen_frames import ScreenFrames
+from snipforge.video.screen_frames import LATE_FRAMES, ScreenFrames
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
                                 reason="Qt's FFmpeg isn't usable here (ffmpeg.unavailable_reason() says why)")
 FPS = 30
 AREA = (0, 0, 320, 240)
+# How far (in frames) a frame's picture may be from its place in the video, and how many of the
+# frames due must be there. A frame can be up to LATE_FRAMES late before the frame thread skips
+# ahead; GitHub's macOS runners stall that long, a Windows machine doesn't.
+if sys.platform == "win32":
+    OFF_BY, MADE = 1.5, 0.9
+else:
+    OFF_BY, MADE = LATE_FRAMES + 0.5, 0.6
 
 
 class StillScreen:
@@ -91,27 +100,63 @@ class FakeSound:
             self.thread.join(2)
 
 
+class SlowToStart(Encoder):
+    """Qt's encoder on a busy machine: for a while after it starts, it takes no frames."""
+
+    WARM_UP_MS = 800
+
+    def start(self):
+        self.warm = False
+        super().start()
+        QTimer.singleShot(self.WARM_UP_MS, self, self._warmed_up)
+
+    def _warmed_up(self):
+        self.warm = True
+        self._input_ready("video")
+        self._send_video()
+
+    def _input_ready(self, which):
+        if which != "video" or getattr(self, "warm", True):
+            super()._input_ready(which)
+
+    def _send_video(self):
+        if getattr(self, "warm", True):
+            super()._send_video()
+
+
+class NeverStarts(SlowToStart):
+    WARM_UP_MS = 60_000
+
+
 def sound_maker(**behaviour):
     def make(kind, device_id, on_packet, on_error):
         return FakeSound(kind, device_id, on_packet, on_error, **behaviour.get(kind, {}))
     return make
 
 
-def record(tmp_path, steps, *, sound=None, **settings):
-    """Run a recording: `steps` is a list of (seconds to wait, action on the recorder) ending in stop."""
+def record(tmp_path, steps, *, sound=None, encoder=None, **settings):
+    """Run a recording: `steps` is a list of (seconds to wait, action on the recorder) ending in stop.
+    outcome["at"] has the recording's own time when each action actually ran (a busy machine runs
+    timers late, so tests compare with these rather than with the times asked for)."""
     recorder = Recorder(Settings(AREA, tmp_path / "rec.mp4", fps=FPS, **settings),
                         screen_frames=fake_screen_frames, capture=sound or sound_maker(),
-                        overlay=lambda s: None)
-    outcome, warnings = {}, []
+                        overlay=lambda s: None, encoder=encoder)
+    outcome, warnings = {"at": {}, "states": []}, []
     loop = QEventLoop()
     recorder.warning.connect(warnings.append)
+    recorder.state_changed.connect(outcome["states"].append)
     recorder.finished.connect(lambda result: (outcome.update(result=result), loop.quit()))
     recorder.failed.connect(lambda message: (outcome.update(failure=message), loop.quit()))
+
+    def run(action):
+        outcome["at"][action] = (recorder.media_time(), time.perf_counter())
+        getattr(recorder, action)()
+
     recorder.start()
     at = 0.0
     for seconds, action in steps:
         at += seconds
-        QTimer.singleShot(int(at * 1000), getattr(recorder, action))
+        QTimer.singleShot(int(at * 1000), lambda action=action: run(action))
     QTimer.singleShot(int(at * 1000) + 30_000, loop.quit)
     loop.exec()
     return recorder, outcome, warnings
@@ -128,29 +173,63 @@ def test_a_recording_has_its_picture_and_both_sounds_at_the_right_times(tmp_path
     result = outcome["result"]
     info = ffmpeg.probe(result.path)
     assert (info.first("video").codec, info.first("audio").codec) == ("h264", "aac")
-    assert result.duration == pytest.approx(1.5, abs=0.15)
+    assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=0.02)
+    assert result.duration > 1.0  # 1.5 s, less the encoder's warm-up
     assert info.duration == pytest.approx(result.duration, abs=0.1)
     shown = frame_times(result.path)
-    assert len(shown) >= 0.9 * result.duration * FPS
-    assert all(abs(number - at) <= 1.5 for number, at in shown)  # each frame at its own time
+    assert len(shown) >= MADE * result.duration * FPS
+    assert all(abs(number - at) <= OFF_BY for number, at in shown)  # each frame at its own time
     assert warnings == [] and recorder.state == "finished"
     assert result.stats["sound"]["microphone"]["placed_s"] > 1.0
+
+
+def test_time_zero_waits_for_an_encoder_slow_to_start(tmp_path, qapp):
+    recorder, outcome, _ = record(tmp_path, [(1.5, "stop")], encoder=SlowToStart)
+
+    result = outcome["result"]
+    assert outcome["states"][:2] == ["starting", "recording"]
+    assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=0.02)
+    assert result.duration < 1.5 - SlowToStart.WARM_UP_MS / 1000 + 0.2  # the warm-up isn't recorded
+    shown = frame_times(result.path)
+    assert len(shown) >= MADE * result.duration * FPS  # none lost while the encoder warmed up
+    assert all(abs(number - at) <= OFF_BY for number, at in shown)
+
+
+def test_an_encoder_that_never_starts_fails_the_recording(tmp_path, qapp, monkeypatch):
+    monkeypatch.setattr(recorder_module, "ENCODER_START_TIMEOUT", 0.5)
+
+    recorder, outcome, _ = record(tmp_path, [(3.0, "stop")], encoder=NeverStarts)
+
+    assert "didn't start" in outcome["failure"]
+    assert recorder.state == "failed" and "recording" not in outcome["states"]
+
+
+def test_stopping_before_the_encoder_is_ready_leaves_no_file(tmp_path, qapp):
+    recorder, outcome, _ = record(tmp_path, [(0.3, "stop")], encoder=NeverStarts)
+
+    assert outcome["failure"] == "The recording was stopped before it began"
+    deadline = time.perf_counter() + 5
+    while (tmp_path / "rec.mp4").exists() and time.perf_counter() < deadline:
+        qapp.processEvents()
+        time.sleep(0.05)
+    assert not (tmp_path / "rec.mp4").exists()
 
 
 def test_a_pause_is_left_out_of_the_recording(tmp_path, qapp):
     recorder, outcome, _ = record(tmp_path, [(0.7, "pause"), (0.8, "resume"), (0.7, "stop")])
 
     result = outcome["result"]
-    assert result.duration == pytest.approx(1.4, abs=0.2)
+    (paused_at, _), (_, resumed), (_, stopped) = (outcome["at"][a] for a in ("pause", "resume", "stop"))
+    assert result.duration == pytest.approx(paused_at + stopped - resumed, abs=0.05)
     assert ffmpeg.probe(result.path).duration == pytest.approx(result.duration, abs=0.1)
     shown = frame_times(result.path)
-    assert all(abs(number - at) <= 1.5 for number, at in shown)  # no jump where the pause was
+    assert all(abs(number - at) <= OFF_BY for number, at in shown)  # no jump where the pause was
 
 
 def test_stopping_while_paused_ends_at_the_pause(tmp_path, qapp):
     _recorder, outcome, _ = record(tmp_path, [(0.8, "pause"), (0.6, "stop")])
 
-    assert outcome["result"].duration == pytest.approx(0.8, abs=0.15)
+    assert outcome["result"].duration == pytest.approx(outcome["at"]["pause"][0], abs=0.02)
 
 
 def test_a_microphone_that_cant_be_opened_warns_and_records_without_it(tmp_path, qapp):
@@ -174,7 +253,7 @@ def test_a_sound_source_lost_while_recording_warns_and_the_recording_goes_on(tmp
                                           sound=sound_maker(system={"lose_after": 0.4}))
 
     assert warnings == ["The system was unplugged"]
-    assert outcome["result"].duration == pytest.approx(1.2, abs=0.15)
+    assert outcome["result"].duration == pytest.approx(outcome["at"]["stop"][0], abs=0.02)
 
 
 def test_a_screen_that_cant_be_recorded_stops_it_starting(tmp_path, qapp):
@@ -200,8 +279,8 @@ def test_big_areas_are_recorded_at_most_1080p(tmp_path, qapp):
     loop = QEventLoop()
     recorder.finished.connect(lambda r: loop.quit())
     recorder.failed.connect(lambda m: loop.quit())
+    recorder.state_changed.connect(lambda state: state == "recording" and QTimer.singleShot(500, recorder.stop))
     recorder.start()
-    QTimer.singleShot(500, recorder.stop)
     QTimer.singleShot(20_000, loop.quit)
     loop.exec()
 

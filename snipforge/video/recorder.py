@@ -6,7 +6,8 @@
 
 Everything is placed by one Clock (QueryPerformanceCounter time, pauses taken out), so sound and
 picture stay together through pauses, stalls and dropped frames. A Recorder lives on the Qt main
-thread: a QTimer hands frames and mixed sound to the encoder as they come.
+thread: a QTimer hands frames and mixed sound to the encoder as they come. The clock starts once the
+encoder is ready for frames ("starting" until then), so a slow start loses nothing.
 
 A sound source that can't be opened (no microphone, Windows' privacy setting) becomes a warning and
 the recording goes on without it; one that disappears mid-recording likewise. The screen and the
@@ -31,7 +32,8 @@ from .mixer import HOLD_BACK, Mixer
 log = logging.getLogger(__name__)
 
 PUMP_MS = 10
-START_DELAY = 0.05  # seconds from start() to time zero, so the first frame is due straight away
+START_DELAY = 0.05  # seconds from the encoder being ready to time zero, so frame 0 is due at once
+ENCODER_START_TIMEOUT = 15.0  # seconds; Qt's encoder takes ~0.1 s, over 1 s on a busy machine
 DEFAULT_MAX_SIZE = (1920, 1080)  # the plan's default: recordings at most 1080p
 
 
@@ -63,14 +65,14 @@ class Recorder(QObject):
     """One recording. start(), then pause()/resume() as wanted, then stop(); `finished` or `failed`
     follows. `warning` reports problems the recording carries on through."""
 
-    state_changed = Signal(str)  # "recording", "paused", "finishing", "finished", "failed"
+    state_changed = Signal(str)  # "starting", "recording", "paused", "finishing", "finished", "failed"
     warning = Signal(str)
     finished = Signal(object)  # Result
     failed = Signal(str)
 
     def __init__(self, settings: Settings, *, screen_frames: Callable | None = None,
                  capture: Callable | None = None, overlay: Callable | None = None,
-                 now: Callable[[], float] = time.perf_counter) -> None:
+                 encoder: Callable | None = None, now: Callable[[], float] = time.perf_counter) -> None:
         super().__init__()
         self.settings, self.now = settings, now
         self.clock = Clock()
@@ -79,6 +81,7 @@ class Recorder(QObject):
         self._make_screen_frames = screen_frames or _real_screen_frames
         self._make_capture = capture or _real_capture
         self._make_overlay = overlay or _real_overlay
+        self._make_encoder = encoder or Encoder
         self._captures: list = []
         self._frames = None
         self._encoder: Encoder | None = None
@@ -90,27 +93,41 @@ class Recorder(QObject):
     # --- control ---------------------------------------------------------------------------------
 
     def start(self) -> None:
-        """Open everything and start recording; raises RecordingError if the screen or the encoder
-        can't be used (sound sources that can't be opened only warn)."""
+        """Open everything; raises RecordingError if the screen or the encoder can't be used (sound
+        sources that can't be opened only warn). Recording begins ("recording") once the encoder is
+        ready, or fails if it never is."""
         if self.state != "idle":
             raise RecordingError("This recording has already started")
         s = self.settings
         self._open_sound()
         frame_size = (s.area[2], s.area[3])
         try:
-            self._encoder = Encoder(s.output, frame_size, fit(frame_size, s.max_size), s.fps,
-                                    audio=bool(self._captures))
+            self._encoder = self._make_encoder(s.output, frame_size, fit(frame_size, s.max_size), s.fps,
+                                               audio=bool(self._captures))
             self._encoder.failed.connect(self._fail)
             self._encoder.finished.connect(self._done)
+            self._encoder.ready.connect(self._begin)
             self._frames = self._make_screen_frames(s.area, s.fps, self.clock, self._make_overlay(s))
             self._frames.start()
             self._encoder.start()
         except (OSError, ValueError, EncoderError) as exc:
             self._close()
             raise RecordingError(f"The recording couldn't start: {exc}") from exc
-        self.clock.begin(self.now() + START_DELAY)
-        self._pump.start(PUMP_MS)
-        self._set_state("recording")
+        self._set_state("starting")
+        QTimer.singleShot(int(ENCODER_START_TIMEOUT * 1000), self, self._check_started)
+        if self._encoder.is_ready:
+            self._begin()
+
+    def _begin(self) -> None:
+        if self.state == "starting":
+            self.clock.begin(self.now() + START_DELAY)
+            self._pump.start(PUMP_MS)
+            self._set_state("recording")
+
+    def _check_started(self) -> None:
+        if self.state == "starting":
+            self._fail(f"The video encoder didn't start within {ENCODER_START_TIMEOUT:g} seconds")
+            self._discard_output()
 
     def pause(self) -> None:
         if self.state == "recording":
@@ -126,6 +143,10 @@ class Recorder(QObject):
 
     def stop(self) -> None:
         """Finish the recording: `finished` (or `failed`) follows once the file is complete."""
+        if self.state == "starting":  # nothing recorded yet
+            self._fail("The recording was stopped before it began")
+            self._discard_output()
+            return
         if self.state not in ("recording", "paused"):
             return
         self._stop_media = self.media_time()
@@ -226,6 +247,16 @@ class Recorder(QObject):
             capture.stop()
         if self._encoder is not None:
             self._encoder.close()
+
+    def _discard_output(self, tries: int = 10) -> None:
+        """Delete the file of a recording that never began (Qt may hold it open a moment longer)."""
+        try:
+            self.settings.output.unlink(missing_ok=True)
+        except OSError as exc:
+            if tries:
+                QTimer.singleShot(300, self, lambda: self._discard_output(tries - 1))
+            else:
+                log.warning("Couldn't delete the unused recording file %s: %s", self.settings.output, exc)
 
     def _set_state(self, state: str) -> None:
         self.state = state
