@@ -85,7 +85,8 @@ class CommandBar(QWidget):
         row.addWidget(self._button("Pin", "pin", "Float this snip on top of other windows (Ctrl+P)", self.pin))
         self.share_button = self._button("Share", "share", "Email, Teams, OneDrive link and more", None)
         row.addWidget(self.share_button)
-        row.addWidget(self._button("Save", "save", "Save a PNG to Pictures\\SnipForge (Ctrl+S)", self.save))
+        row.addWidget(self._button("Save", "save", "Save to your Save folder, as PNG, JPG, WebP or PDF (set in "
+                                   "Settings). Ctrl+S; Ctrl+Shift+S to choose where", self.save))
         row.addSpacing(4)
         self.copy_button = self._button("Copy", "copy", "Copy to clipboard (Ctrl+C)", self.copy, variant="primary",
                                         keep_label=True)

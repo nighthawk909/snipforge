@@ -68,7 +68,8 @@ lost, so resizing down and back up gives you the original pixels. The **Edges** 
 border and tears the sides you pick; torn parts are transparent in a PNG, and Beautify's backdrop
 shows through them.
 
-**Share.** Copy (Ctrl+C), save (Ctrl+S), or use **Share**: a new Outlook email with the snip inline,
+**Share.** Copy (Ctrl+C), save (Ctrl+S) as PNG, JPG, WebP or PDF (choose in Settings › Saving, or
+pick in Save as), or use **Share**: a new Outlook email with the snip inline,
 open a Teams chat with the people you pick, get a OneDrive link, or the Windows share sheet.
 **Drag out** drops the image straight into Teams, Outlook, PowerPoint or a folder.
 

@@ -53,6 +53,23 @@ def _editor() -> str:
     return f"{len(canvas.annotations())} annotation(s) rendered"
 
 
+def _save_formats() -> str:
+    """Save writes every format Settings offers (WebP needs Qt's image-format plugin to be bundled)."""
+    from .editor.export import save_image
+    from .prefs import FORMATS
+
+    image = QImage(64, 40, QImage.Format_ARGB32)
+    image.fill(QColor("#336699"))
+    folder = Path(tempfile.mkdtemp(prefix="snipforge-selftest-"))
+    for fmt in FORMATS:
+        path = folder / f"snip.{fmt}"
+        if not save_image(image, path) or path.stat().st_size == 0:
+            raise RuntimeError(f"couldn't save a {fmt.upper()}")
+        if fmt != "pdf" and QImage(str(path)).size() != image.size():
+            raise RuntimeError(f"a saved {fmt.upper()} doesn't read back")
+    return ", ".join(f.upper() for f in FORMATS) + " saved"
+
+
 def _library() -> str:
     """The Library window, where SnipForge opens, builds and lists a snip."""
     from .home import HomeWindow
@@ -253,6 +270,7 @@ def run(report_path: str) -> int:
     results: dict = {}
     _check(results, "theme", _theme)
     _check(results, "editor", _editor)
+    _check(results, "save_formats", _save_formats)
     _check(results, "library", _library)
     _check(results, "icons", _icons)
     _check(results, "ocr", _ocr if windows else _not_on_this_platform, required=windows)

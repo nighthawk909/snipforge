@@ -44,7 +44,7 @@ SECTIONS = {
                 "shortcut keyboard win shift print screen hotkey magnifier mode area window full screen "
                 "delay timer countdown pointer cursor mouse repeat last snip own custom combination library"),
     "saving": ("Saving", "save", "Where Save puts files, and in which format.",
-               "save folder format png jpg beautify export"),
+               "save folder format png jpg webp pdf beautify export"),
     "appearance": ("Appearance", "palette", "Light or dark, and the accent color used across SnipForge.",
                    "theme dark light accent color match windows"),
     "updates": ("Updates", "refresh", "Choose how SnipForge stays up to date.",
@@ -433,14 +433,16 @@ class SettingsWindow(QMainWindow):
         brow.addWidget(change)
         self.folder_row = SettingRow("Save folder", str(prefs.export_dir()), buttons)
         self._reset_folder.setVisible(prefs.export_dir() != prefs.DEFAULT_EXPORT_DIR)
-        self.format = Segmented([("png", "PNG"), ("jpg", "JPG")], value=prefs.export_format())
+        self.format = Segmented([("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("pdf", "PDF")],
+                                value=prefs.export_format())
         self.format.changed.connect(prefs.set_export_format)
         self.beautify = ToggleSwitch("Beautify when copying, saving or dragging")
         self.beautify.setChecked(beautify.enabled())
         self.beautify.toggled.connect(beautify.set_enabled)
         return stack(
             self.folder_row,
-            SettingRow("File format", "PNG keeps every pixel sharp. JPG makes smaller files for photos.", self.format),
+            SettingRow("File format", "PNG keeps every pixel sharp, and WebP does too in a smaller file. JPG makes "
+                       "smaller files for photos. PDF is a page the size of your snip, to print or send.", self.format),
             SettingRow("Beautify when copying, saving or dragging",
                        "Backdrop, rounded corners and a shadow, shown in the editor as you mark up. "
                        "Also in the editor's bottom bar.", self.beautify))

@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence, QPainter
+from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -33,6 +33,7 @@ from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
+from .export import SAVE_FILTERS, save_image, with_suffix
 from .panel import PropertiesPanel
 from .quick_tiles import TOOL_NAMES
 from .resize_dialog import ResizeDialog
@@ -60,19 +61,6 @@ TOOLS = [
 ]
 AUTOSAVE_MS = 700
 PICK_HINT = "Click anywhere on the snip to pick its color. Esc or a right-click cancels."
-JPG_QUALITY = 92  # text in screenshots blurs at Qt's default of 75
-
-
-def on_white(image: QImage) -> QImage:
-    """`image` over white, for formats without transparency."""
-    if not image.hasAlphaChannel():
-        return image
-    out = QImage(image.size(), QImage.Format_RGB32)
-    out.fill(Qt.white)
-    painter = QPainter(out)
-    painter.drawImage(0, 0, image)
-    painter.end()
-    return out
 
 
 def load_tool_styles(settings: QSettings) -> dict[str, Style]:
@@ -432,7 +420,7 @@ class EditorWindow(QMainWindow):
 
     @staticmethod
     def _new_export_path() -> Path:
-        """In the Save folder chosen in Settings (Pictures\\SnipForge by default), PNG or JPG."""
+        """In the Save folder chosen in Settings (Pictures\\SnipForge by default), in its format."""
         folder = prefs.export_dir()
         folder.mkdir(parents=True, exist_ok=True)
         return folder / dt.datetime.now().strftime(f"snip-%Y%m%d-%H%M%S.{prefs.export_format()}")
@@ -451,20 +439,15 @@ class EditorWindow(QMainWindow):
             start = self._export_path or self._new_export_path()
         except OSError:
             start = Path.home() / "Pictures"
-        path, _ = QFileDialog.getSaveFileName(self, "Save snip", str(start),
-                                              "PNG (*.png);;JPEG (*.jpg *.jpeg);;Bitmap (*.bmp)")
+        path, chosen = QFileDialog.getSaveFileName(self, "Save snip", str(start), SAVE_FILTERS)
         if path:
-            self._export_path = Path(path)
+            self._export_path = with_suffix(path, chosen)
             self._write(self._export_path)
 
     def _write(self, path: Path) -> None:
-        jpg = path.suffix.lower() in (".jpg", ".jpeg")
-        image = self.final_image()
-        if jpg or path.suffix.lower() == ".bmp":
-            image = on_white(image)  # no transparency in these formats: torn edges would turn black
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            ok = image.save(str(path), "JPG" if jpg else None, JPG_QUALITY if jpg else -1)
+            ok = save_image(self.final_image(), path)
         except OSError:
             ok = False
         if ok:
