@@ -116,9 +116,10 @@ def test_a_slow_disk_moves_the_librarys_budget_not_its_code(monkeypatch):
     assert perf.library_budgets(0.1) == {"library_open_s": perf.BUDGETS["library_open_s"],
                                          "library_refresh_s": perf.BUDGETS["library_refresh_s"]}
     slow = perf.library_budgets(2.0)
-    assert slow["library_open_s"] == 5.0 and slow["library_refresh_s"] == 2.0
+    slower = perf.library_budgets(4.0)
+    assert slower["library_open_s"] == 9.0 and slow["library_refresh_s"] == 2.0
     assert perf.over_budget({"library_open_s": 3.6}, slow) == []
-    assert perf.over_budget({"library_open_s": 12.0}, slow) == ["library_open_s is 12.0 (budget 5.0)"]
+    assert perf.over_budget({"library_open_s": 12.0}, slower) == ["library_open_s is 12.0 (budget 9.0)"]
 
 
 def test_the_plain_read_is_measured(tmp_path, qapp):

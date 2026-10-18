@@ -12,7 +12,7 @@ the release build.
 | Memory at start-up (private bytes) | 47 MB | 39 MB | 150 MB on Windows | test suite |
 | Snip to editor (1920 × 1080, saved to the Library, editor painted) | 0.14–0.20 s | 0.18 s (0.12 s packaged) | 1.5 s | packaged self-test |
 | Idle in the tray: memory, CPU | 44 MB, 0 % | 40 MB, 0 % | | |
-| Library of 1,200 snips: opening its window | 0.57 s | 0.46 s (0.43 s packaged, 1,000 snips) | 3 s, or twice the plain read + 1 s on a slow disk | packaged self-test (500 snips) |
+| Library of 1,200 snips: opening its window | 0.57 s | 0.46 s (0.43 s packaged, 1,000 snips) | 6 s, or twice the plain read + 1 s on a slow disk | packaged self-test (500 snips) |
 | Library of 1,200 snips: opening it again | 0.20 s | 0.05 s (0.02 s packaged) | 1 s, or the plain read on a slow disk | packaged self-test (500 snips) |
 | Installer | 38.9 MB | about 36 MB (the release build's figure is in its log) | 38 MB | the build (`scripts/build.py`) |
 
@@ -23,7 +23,8 @@ asyncio (for text recognition), Outlook automation and Report a problem load whe
 not when SnipForge starts. The Library's budgets follow the machine: the self-test first reads the
 same Library the simplest way (each folder listed and its details read, one after another), and a
 machine whose disk is slow even for that (antivirus on a CI machine made it fifteen times slower
-than on a laptop) gets twice that, plus a second, to open the window. On a Mac, start-up also loads PyObjC's modules and memory is measured
+than on a laptop) gets twice that, plus a second, to open the window. The fixed 6 s leaves room for
+GitHub's Windows runner, whose CPU took 2.6 s to open 500 snips that a laptop opens in 0.1 s. On a Mac, start-up also loads PyObjC's modules and memory is measured
 as the peak resident size, so there only the heavy modules are checked (the rest is reported) until
 the Mac port measures it. The self-test also checks that Qt has a TLS back-end for update downloads
 (`tls`), since Python's own isn't packaged.

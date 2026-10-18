@@ -338,9 +338,12 @@ def _speed() -> str:
                 "library_refresh_s": library["refresh_s"]}
     problems = perf.over_budget(measured, perf.library_budgets(library["plain_read_s"]))
     if problems:
-        raise RuntimeError("; ".join(problems) + f" (the plain read took {library['plain_read_s']} s here)")
-    return ", ".join(f"{name} {value}" for name, value in measured.items()) + \
-        f" (the plain read: {library['plain_read_s']} s)"
+        raise RuntimeError("; ".join(problems) + f" (the plain read took {library['plain_read_s']} s here; "
+                           f"opening: {library.get('window_s')} s window, {library.get('refresh_on_show_s')} s "
+                           f"reading, {library.get('first_paint_s')} s painting)")
+    parts = ", ".join(f"{part} {library[part]}" for part in ("plain_read_s", "scan_s", "window_s",
+                                                              "refresh_on_show_s", "first_paint_s") if part in library)
+    return ", ".join(f"{name} {value}" for name, value in measured.items()) + f" ({parts})"
 
 
 def _tls() -> str:

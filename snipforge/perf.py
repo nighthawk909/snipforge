@@ -23,7 +23,9 @@ BUDGETS = {
     "startup_s": 3.0,  # import to the Library painted (0.3 s today)
     "startup_memory_mb": 150,  # private bytes on Windows: 39 MB today (offscreen; more with a display)
     "snip_to_editor_s": 1.5,  # a 1920 × 1080 snip saved and its editor painted (0.18 s today)
-    "library_open_s": 3.0,  # the Library window over 1,000 snips (0.4 s today)
+    # The Library window over 1,000 snips: 0.4 s on a laptop, 0.3 s on GitHub's Mac runner, 2.6 s
+    # on its Windows runner (its CPU, not its disk: reading the same files took 0.09 s there)
+    "library_open_s": 6.0,
     "library_refresh_s": 1.0,  # opening it again (0.05 s today)
 }
 
@@ -216,20 +218,26 @@ def big_library(snips: int = 1200) -> dict:
     app = _app()
     from . import theme
     theme.install(app)
+    from .library import Library
+
     root = _scratch("snipforge-perf-lib-")
     make_library(root, snips)
     for path in root.rglob("*"):  # as a Library on disk for a while is: antivirus has seen every file
         if path.is_file():
             path.read_bytes()
     disk_s = plain_read_s(root)
+    scan_started = time.perf_counter()
+    Library(root).scan()  # the folders listed, on their own (the window does it again, as it would)
+    scan_s = time.perf_counter() - scan_started
     before = memory_mb()
     from .home import HomeWindow
-    from .library import Library
 
     started = time.perf_counter()
     home = HomeWindow(Library(root), lambda: None, lambda _id: None)
     home.resize(1280, 800)
+    built = time.perf_counter()
     home.show()
+    listed = time.perf_counter()
     home.grab()
     shown = time.perf_counter()
     pump(1.5)  # previews load in the background
@@ -242,7 +250,9 @@ def big_library(snips: int = 1200) -> dict:
     home.close()
     return {"snips": snips, "open_s": round(shown - started, 3), "previews_settled_s": round(settled - started, 3),
             "refresh_s": round(refreshed - started_refresh, 3), "memory_mb": memory_mb(),
-            "memory_added_mb": round(memory_mb() - before, 1), "plain_read_s": round(disk_s, 3)}
+            "memory_added_mb": round(memory_mb() - before, 1), "plain_read_s": round(disk_s, 3),
+            "scan_s": round(scan_s, 3), "window_s": round(built - started, 3), "refresh_on_show_s":
+            round(listed - built, 3), "first_paint_s": round(shown - listed, 3)}
 
 
 def plain_read_s(root: Path) -> float:
