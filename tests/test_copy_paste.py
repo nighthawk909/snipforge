@@ -118,11 +118,17 @@ def test_text_from_another_app_pastes_as_a_text_box(editor):
     QGuiApplication.clipboard().setText("Order #1234 shipped")
     editor.paste()
     [item] = editor.canvas.annotations()
-    assert item.kind == "text" and item.toPlainText() == "Order #1234 shipped"
+    assert item.kind == "text" and " ".join(item.toPlainText().split()) == "Order #1234 shipped"  # wrapped to fit
     assert editor.canvas.crop_rect().contains(item.sceneBoundingRect().center())
 
 
-def test_paste_while_typing_goes_into_the_text(editor):
+def test_ctrl_v_while_typing_goes_into_the_text(editor, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    pasted = []
+    monkeypatch.setattr(editor.canvas, "paste", lambda: pasted.append(True))  # the window's Ctrl+V must not run
+    editor.activateWindow()
+    QApplication.processEvents()
     QGuiApplication.clipboard().setText(" world")
     editor.canvas.set_tool("text")
     send(editor.canvas, "press", (100, 50))
@@ -132,9 +138,72 @@ def test_paste_while_typing_goes_into_the_text(editor):
     cursor = editing.textCursor()
     cursor.movePosition(cursor.MoveOperation.End)
     editing.setTextCursor(cursor)
-    editor.paste()
-    assert editing.toPlainText() == "Hello world"
-    assert len(editor.canvas.annotations()) == 1
+    QTest.keyClick(editor.canvas, Qt.Key_V, Qt.ControlModifier)
+    assert editing.toPlainText() == "Hello world" and pasted == []
+
+
+def markup(*states) -> bytes:
+    import json
+    return json.dumps({"version": 1, "items": list(states)}).encode()
+
+
+def rect_state(**extra):
+    state = {"kind": "rect", "pos": [10, 10], "z": 1, "size": [40, 30], "style": {"color": "#ff3b30"}}
+    return {**state, **extra}
+
+
+@pytest.mark.parametrize("data", [
+    markup({"kind": "pen", "pos": [0, 0], "z": 1, "style": {}, "points": [[i % 50, 1] for i in range(25_000)]}),
+    markup({"kind": "callout", "pos": [0, 0], "z": 1, "style": {}, "size": [100, 40], "tail": [0, 60],
+            "text": "x" * 6_000}),
+    markup(*[{"kind": "blur", "pos": [0, 0], "z": 1, "style": {}, "size": [200, 100]} for _ in range(200)]),
+    b'{"version": 1, "items": [{"kind": "rect", "pos": [NaN, 1], "z": 1, "size": [4, 4], "style": {}}]}',
+    b'{"version": 1, "items": [{"kind": "step", "pos": [1, 1], "z": 1, "number": Infinity, "style": {}}]}',
+    markup(rect_state(size=[10 ** 400, 5])),
+    b'{"version": 1, "items": [{"kind": "rect", "pos": [' + b"9" * 5000 + b', 1]}]}',
+    b"[" * 200_000,
+], ids=["huge stroke", "huge text", "many big blurs", "NaN", "Infinity", "huge int", "endless digits", "deep"])
+def test_hostile_clipboard_markup_is_refused_quickly_and_safely(editor, data):
+    import time
+    notices = []
+    editor.canvas.notice.connect(notices.append)
+    clipboard_with(MARKUP_MIME, data)
+    started = time.monotonic()
+    assert not editor.canvas.paste()
+    assert time.monotonic() - started < 2.0
+    assert editor.canvas.annotations() == [] and editor.canvas.undo_stack.count() == 0
+    assert notices and "paste" in notices[-1]
+
+
+def test_an_unknown_stamp_pastes_as_the_check_stamp(editor):
+    clipboard_with(MARKUP_MIME, markup({"kind": "stamp", "pos": [20, 20], "z": 1, "size": [40, 40],
+                                        "style": {"stamp": "made-up-name"}}))
+    assert editor.canvas.paste()
+    assert editor.canvas.annotations()[0].style.stamp == "check"
+
+
+def test_a_pasted_paragraph_wraps_to_fit_the_snip(qapp):
+    big = QImage(800, 400, QImage.Format_RGB32)
+    big.fill(0xFFFFFF)
+    canvas = make_canvas(big)
+    canvas.paste_text("A fairly long sentence that would run far past the edge of the snip if it stayed on "
+                      "one line, which is what used to happen when you pasted a paragraph from an email. " * 3)
+    [item] = canvas.annotations()
+    assert item.sceneBoundingRect().width() <= 800 * 0.8 + 1
+    assert canvas.crop_rect().contains(item.sceneBoundingRect().center())
+
+
+def test_a_magnifier_brought_into_view_brings_what_it_shows(qapp, white_image):
+    big = QImage(800, 600, QImage.Format_RGB32)
+    big.fill(0xFFFFFF)
+    source = make_canvas(big)
+    drag(source, "magnify", (600, 450), (640, 480))
+    QGuiApplication.clipboard().setMimeData(source.copy_mime(QImage()))
+    small = make_canvas(white_image)  # 200 x 100
+    assert small.paste()
+    lens = small.annotations()[0]
+    assert lens.scene_rect().intersects(small.crop_rect())
+    assert lens.source().intersects(small.crop_rect())  # not left behind at (600, 450)
 
 
 def test_damaged_or_foreign_markup_pastes_nothing(editor):

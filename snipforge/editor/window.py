@@ -449,28 +449,12 @@ class EditorWindow(QMainWindow):
         self.statusBar().showMessage(message, 5000 if with_markup else 2500)
 
     def cut(self) -> None:
-        """Ctrl+X: the selected markup (or, while typing, the selected text)."""
-        editing = self.canvas.editing_text_item()
-        if editing is not None:
-            cursor = editing.textCursor()
-            if cursor.hasSelection():
-                QGuiApplication.clipboard().setText(cursor.selectedText().replace("\u2029", "\n"))
-                cursor.removeSelectedText()
-                editing.setTextCursor(cursor)
-            return
+        """Ctrl+X: the selected markup. (While you type, the text takes Ctrl+X, Ctrl+C and Ctrl+V itself.)"""
         if self.canvas.cut_selection():
             self.statusBar().showMessage(f"Cut. {key_text('Ctrl+V')} in a snip pastes it", 4000)
 
     def paste(self) -> None:
-        """Ctrl+V: markup copied in any snip, or text as a text box (while typing, into the text)."""
-        editing = self.canvas.editing_text_item()
-        if editing is not None:
-            text = QGuiApplication.clipboard().text()
-            if text:
-                cursor = editing.textCursor()
-                cursor.insertText(text)
-                editing.setTextCursor(cursor)
-            return
+        """Ctrl+V: markup copied in any snip, or text as a text box."""
         self.canvas.paste()
 
     @staticmethod
