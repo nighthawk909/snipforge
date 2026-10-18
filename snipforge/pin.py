@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPen, QPixm
 from PySide6.QtWidgets import QMenu, QWidget
 
 from . import theme
+from .wording import keys
 
 MIN_SCALE, MAX_SCALE = 0.1, 4.0
 
@@ -22,7 +23,8 @@ class PinWindow(QWidget):
             self._scale = avail.width() * 0.6 / image.width()
         self._resize()
         self.move(at or avail.center() - self.rect().center())
-        self.setToolTip("Drag to move • wheel to zoom • Ctrl+wheel opacity • double-click to close")
+        self.setToolTip(f"Drag to move • {keys('wheel')} to zoom • {keys('Ctrl+wheel')} opacity • "
+                        "double-click to close")
 
     def _resize(self) -> None:
         self.resize(max(24, int(self._pixmap.width() * self._scale)) + 2,

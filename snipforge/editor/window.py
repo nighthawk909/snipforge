@@ -29,6 +29,7 @@ from ..dragout import DragOutButton
 from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
+from ..wording import keys
 from . import beautify
 from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
@@ -529,7 +530,8 @@ class EditorWindow(QMainWindow):
             return
         _, ox, oy = self._ocr_source()
         count = self.canvas.add_redactions([f.rect.translated(ox, oy) for f in findings], mode="blur")
-        self.statusBar().showMessage(f"Blurred {count}: {redact.summarize(findings)}. Ctrl+Z to undo.", 6000)
+        self.statusBar().showMessage(f"Blurred {count}: {redact.summarize(findings)}. {keys('Ctrl+Z')} to undo.",
+                                     6000)
 
     # ------------------------------------------------------------------ persistence
     def _save_to_library(self) -> None:

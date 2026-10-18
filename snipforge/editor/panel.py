@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from .. import theme
 from ..icons import icon
 from ..widgets import Segmented, ToggleSwitch
+from ..wording import keys
 from .edge_controls import CutoutControls, EdgeControls
 from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
@@ -38,8 +39,8 @@ TITLES = {
     "magnify": "Magnify", "cutout": "Cut out", "erase": "Smart erase",
 }
 HINTS = {
-    "select": "Click any markup to change it. Drag to move, Ctrl+click to add to the selection, "
-              "Delete to remove, Ctrl+D to duplicate. Turn, flip or resize the snip under Image.",
+    "select": f"Click any markup to change it. Drag to move, {keys('Ctrl+click')} to add to the selection, "
+              f"Delete to remove, {keys('Ctrl+D')} to duplicate. Turn, flip or resize the snip under Image.",
     "crop": "Drag the edges in to cut and back out to restore. Drag inside to move. Enter applies, Esc cancels.",
     "spotlight": "Drag over the area to keep lit. Everything else dims.",
     "cutout": "Drag across the part to take out. What's left is joined together.",
@@ -58,8 +59,8 @@ STAMP_COLUMNS = 6
 EDGE_SWATCHES = {"#ffffff", "#1c1c1e"}  # need an outline to show against the panel
 # action, icon, tooltip: the snip's own buttons in the Image section
 IMAGE_ACTIONS = (
-    ("rotate_left", "rotate_left", "Rotate left (Ctrl+Shift+R)"),
-    ("rotate_right", "rotate_right", "Rotate right (Ctrl+R)"),
+    ("rotate_left", "rotate_left", f"Rotate left ({keys('Ctrl+Shift+R')})"),
+    ("rotate_right", "rotate_right", f"Rotate right ({keys('Ctrl+R')})"),
     ("flip_horizontal", "flip", "Flip horizontal"),
     ("flip_vertical", "flip_vertical", "Flip vertical"),
 )

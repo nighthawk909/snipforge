@@ -4,8 +4,6 @@ Every control here changes something real right away; nothing waits for an OK bu
 from __future__ import annotations
 
 import logging
-import os
-import sys
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, QUrl
@@ -27,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, autostart, prefs, project, theme
+from . import __version__, autostart, bundle, hotkey, prefs, project, theme, wording
 from .capture_toolbar import MODES
 from .editor import beautify
 from .icons import icon
@@ -46,18 +44,21 @@ SECTIONS = {
     "saving": ("Saving", "save", "Where Save puts files, and in which format.",
                "save folder format png jpg webp pdf beautify export"),
     "appearance": ("Appearance", "palette", "Light or dark, and the accent color used across SnipForge.",
-                   "theme dark light accent color match windows"),
+                   "theme dark light accent color match windows macos system"),
     "updates": ("Updates", "refresh", "Choose how SnipForge stays up to date.",
                 "update version channel preview stable rollback install automatic"),
     "about": ("About", "info", "Version, license and links.", "about version license privacy"),
 }
-THEME_CHOICES = (("system", "Match Windows"), ("light", "Light"), ("dark", "Dark"))
-
 FORMAT_LABELS = {"webp": "WebP"}  # how Settings names a save format (the rest in capitals)
 
 
+def theme_choices() -> tuple[tuple[str, str], ...]:
+    """The Appearance tiles: following the system ("Match Windows", "Match macOS"), Light, Dark."""
+    return (("system", f"Match {wording.os_name()}"), ("light", "Light"), ("dark", "Dark"))
+
+
 class ThemeTile(QAbstractButton):
-    """A small preview of a theme: half light, half dark for 'Match Windows'."""
+    """A small preview of a theme: half light, half dark for 'Match Windows' ('Match macOS')."""
 
     def __init__(self, key: str, label: str) -> None:
         super().__init__()
@@ -273,7 +274,9 @@ class SettingsWindow(QMainWindow):
         library_row = SettingRow("Library", str(self._library_root or ""), open_library)
         library_row.setVisible(self._library_root is not None)
         return stack(
-            SettingRow("Start SnipForge when I sign in", "So Win+Shift+S works right away", self.startup),
+            SettingRow("Start SnipForge when I sign in",
+                       "So Win+Shift+S works right away" if hotkey.SUPPORTED else "So it's ready to snip right away",
+                       self.startup),
             SettingRow("Copy every snip to the clipboard", "Paste it anywhere straight after you snip",
                        self.copy_on_capture),
             library_row)
@@ -284,8 +287,9 @@ class SettingsWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, "SnipForge", f"Couldn't change the startup setting: {exc}")
         if not on and autostart.enabled_for_all_users():
-            QMessageBox.information(self, "SnipForge", "SnipForge is set to start for everyone on this PC "
-                                    "(set by your administrator), so it will still start when you sign in.")
+            QMessageBox.information(self, "SnipForge", "SnipForge is set to start for everyone on "
+                                    f"{wording.this_computer()} (set by your administrator), so it will still "
+                                    "start when you sign in.")
         self.startup.blockSignals(True)  # show what really happened
         self.startup.setChecked(autostart.is_enabled())
         self.startup.blockSignals(False)
@@ -312,16 +316,20 @@ class SettingsWindow(QMainWindow):
         self.include_pointer = ToggleSwitch("Include the mouse pointer")
         self.include_pointer.setChecked(prefs.capture_pointer())
         self.include_pointer.toggled.connect(prefs.set_capture_pointer)
-        note = QLabel("A shortcut you turn off goes back to Windows (Win+Shift+S opens Snipping Tool). "
-                      "You can always snip from the tray icon or the Library.")
+        note = QLabel(self._keys_note())
         note.setProperty("sfRole", "muted")
         note.setWordWrap(True)
         note.setContentsMargins(0, 8, 0, 0)
-        return stack(
+        windows_keys = [
             SettingRow("Win+Shift+S opens SnipForge", "Instead of Snipping Tool, while SnipForge is running",
                        self.key_win_shift_s),
             SettingRow("Print Screen opens SnipForge", "Alt+Print Screen and Win+Print Screen stay with Windows",
-                       self.key_print_screen),
+                       self.key_print_screen)]
+        if not hotkey.SUPPORTED:  # Windows keys: a Mac has neither
+            for row in windows_keys:
+                row.hide()
+        return stack(
+            *windows_keys,
             *self._shortcut_rows(),
             SettingRow("Start in", "The capture toolbar's mode when a snip starts (it remembers the last one "
                        "you used; Scrolling is chosen afresh each time)", self.start_mode),
@@ -330,6 +338,14 @@ class SettingsWindow(QMainWindow):
             SettingRow("Show the magnifier", "Pixel-exact zoom next to the pointer while you choose an area",
                        self.magnifier),
             note)
+
+    @staticmethod
+    def _keys_note() -> str:
+        """Under the Capture page: where else a snip starts."""
+        if hotkey.SUPPORTED:
+            return ("A shortcut you turn off goes back to Windows (Win+Shift+S opens Snipping Tool). "
+                    "You can always snip from the tray icon or the Library.")
+        return f"You can always snip from SnipForge's {wording.tray_icon()} or the Library."
 
     def _shortcut_rows(self) -> list[QWidget]:
         """Shortcuts of your own: a key combination for each action, kept only if Windows lets
@@ -485,7 +501,7 @@ class SettingsWindow(QMainWindow):
         tiles = QHBoxLayout()
         tiles.setSpacing(12)
         self.theme_tiles: dict[str, ThemeTile] = {}
-        for key, label in THEME_CHOICES:
+        for key, label in theme_choices():
             tile = ThemeTile(key, label)
             tile.setChecked(self._themes.mode_preference == key)
             tile.clicked.connect(lambda _=False, k=key: self._set_theme(k))
@@ -561,8 +577,8 @@ class SettingsWindow(QMainWindow):
         notices.clicked.connect(self._open_notices)
         lrow.addWidget(notices)
         lrow.addStretch(1)
-        privacy = QLabel("Your snips stay on this PC. SnipForge has no accounts, telemetry or analytics. It only goes "
-                         "online to check for and download updates, and when you use Share.")
+        privacy = QLabel(f"Your snips stay on {wording.this_computer()}. SnipForge has no accounts, telemetry or "
+                         "analytics. It only goes online to check for and download updates, and when you use Share.")
         privacy.setWordWrap(True)
         privacy.setProperty("sfRole", "secondary")
         privacy.setContentsMargins(0, 12, 0, 0)
@@ -571,20 +587,22 @@ class SettingsWindow(QMainWindow):
 
     @staticmethod
     def _open_notices() -> None:
-        base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
-        path = base / "THIRD_PARTY_NOTICES.md"
+        """The notices that ship with SnipForge (next to SnipForge.exe, or in SnipForge.app's
+        Contents/Resources), or the repository's copy."""
+        path = bundle.resources_dir() / "THIRD_PARTY_NOTICES.md"
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)) if path.exists()
                                  else QUrl(f"{project.REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md"))
 
     def _open_folder(self, path: Path | None) -> None:
+        """Our own folder, in File Explorer or Finder."""
         if path is None:
             return
         try:
             path.mkdir(parents=True, exist_ok=True)
-            if sys.platform == "win32":
-                os.startfile(str(path))  # noqa: S606 - opens our own library folder in Explorer
-            else:
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))  # Finder
         except OSError as exc:
             log.info("Couldn't open %s: %s", path, exc)
             QMessageBox.warning(self, "SnipForge", f"Couldn't open {path}: {exc}")
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            log.info("Couldn't open %s in %s", path, wording.file_manager())
+            QMessageBox.warning(self, "SnipForge", f"Couldn't open {path} in {wording.file_manager()}.")

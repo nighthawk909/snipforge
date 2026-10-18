@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from .. import theme
 from ..icons import icon
 from ..widgets import ToggleSwitch
+from ..wording import keys, on_mac
 
 ZOOM_STEP = 1.25
 RECENT_COUNT = 10
@@ -59,37 +60,40 @@ class CommandBar(QWidget):
         self._labels: dict[QPushButton, str] = {}  # buttons that drop their label when the bar is narrow
         self._compact = False
 
-        self.new_button = self._button("New capture", "plus", "Take a new snip (Ctrl+N)", self.new_capture,
+        self.new_button = self._button("New capture", "plus", f"Take a new snip ({keys('Ctrl+N')})", self.new_capture,
                                        variant="outline", keep_label=True)
         row.addWidget(self.new_button)
         row.addSpacing(4)
         row.addWidget(_divider())
         row.addSpacing(4)
-        self.undo_button = self._tool("undo", "Undo (Ctrl+Z)", self.undo)
-        self.redo_button = self._tool("redo", "Redo (Ctrl+Y)", self.redo)
+        self.undo_button = self._tool("undo", f"Undo ({keys('Ctrl+Z')})", self.undo)
+        self.redo_button = self._tool("redo", f"Redo ({keys('Ctrl+Shift+Z') if on_mac() else 'Ctrl+Y'})", self.redo)
         row.addWidget(self.undo_button)
         row.addWidget(self.redo_button)
         row.addStretch(1)
-        row.addWidget(self._tool("zoom_out", "Zoom out (Ctrl+wheel)", self.zoom_out))
+        row.addWidget(self._tool("zoom_out", f"Zoom out ({keys('Ctrl+wheel')})", self.zoom_out))
         self.zoom_label = QLabel("100%")
         self.zoom_label.setObjectName("ZoomLabel")
         self.zoom_label.setAlignment(Qt.AlignCenter)
         self.zoom_label.setMinimumWidth(48)
         row.addWidget(self.zoom_label)
-        row.addWidget(self._tool("zoom_in", "Zoom in (Ctrl+wheel)", self.zoom_in))
-        row.addWidget(self._button("Fit", None, "Fit the snip in the window (Ctrl+0)", self.fit, keep_label=True))
+        row.addWidget(self._tool("zoom_in", f"Zoom in ({keys('Ctrl+wheel')})", self.zoom_in))
+        row.addWidget(self._button("Fit", None, f"Fit the snip in the window ({keys('Ctrl+0')})", self.fit,
+                                   keep_label=True))
         row.addStretch(1)
-        row.addWidget(self._button("Grab text", "ocr", "Copy the text in this snip (Ctrl+Shift+T)", self.grab_text))
+        row.addWidget(self._button("Grab text", "ocr", f"Copy the text in this snip ({keys('Ctrl+Shift+T')})",
+                                   self.grab_text))
         row.addWidget(self._button("Redact", "redact", "Blur emails, phone and card numbers automatically",
                                    self.redact))
-        row.addWidget(self._button("Pin", "pin", "Float this snip on top of other windows (Ctrl+P)", self.pin))
+        row.addWidget(self._button("Pin", "pin", f"Float this snip on top of other windows ({keys('Ctrl+P')})",
+                                   self.pin))
         self.share_button = self._button("Share", "share", "Email, Teams, OneDrive link and more", None)
         row.addWidget(self.share_button)
         row.addWidget(self._button("Save", "save", "Save to your Save folder, as PNG, JPG, WebP or PDF (set in "
-                                   "Settings). Ctrl+S; Ctrl+Shift+S to choose where", self.save))
+                                   f"Settings). {keys('Ctrl+S')}; {keys('Ctrl+Shift+S')} to choose where", self.save))
         row.addSpacing(4)
-        self.copy_button = self._button("Copy", "copy", "Copy to clipboard (Ctrl+C)", self.copy, variant="primary",
-                                        keep_label=True)
+        self.copy_button = self._button("Copy", "copy", f"Copy to clipboard ({keys('Ctrl+C')})", self.copy,
+                                        variant="primary", keep_label=True)
         row.addWidget(self.copy_button)
         self.theme_button = self._tool("moon", "Switch between light and dark", self.toggle_theme)
         row.addWidget(self.theme_button)

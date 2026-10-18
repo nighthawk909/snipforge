@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMenu, QMessageBox
 
 from .. import share
 from ..icons import icon
+from ..wording import keys
 from .teams_dialog import TeamsDialog, chat_link
 
 log = logging.getLogger(__name__)
@@ -59,7 +60,9 @@ class ShareController(QObject):
 
     def _populate(self, menu: QMenu) -> None:
         menu.clear()
-        menu.addAction(icon("mail"), "Email with Outlook\tCtrl+E", self.email)
+        windows = share.windows_shell_available()
+        menu.addAction(icon("mail"), ("Email with Outlook" if windows else "Email") + f"\t{keys('Ctrl+E')}",
+                       self.email)
         menu.addAction(icon("chat"), "Send in Teams…", self.teams)
         accounts = share.onedrive_accounts()
         if accounts:
@@ -70,7 +73,8 @@ class ShareController(QObject):
             menu.addAction(icon("cloud"), f"OneDrive ({account.label}): share with people…",
                            lambda a=account: self.onedrive(a, share.ONEDRIVE_SHARE_VERB))
         menu.addSeparator()
-        menu.addAction(icon("share"), "Teams chat, Outlook and more apps…", self.windows_share)
+        if windows:  # the Windows share sheet; a Mac's share sheet is still to come (docs/PARITY.md)
+            menu.addAction(icon("share"), "Teams chat, Outlook and more apps…", self.windows_share)
         menu.addAction(icon("folder"), "Save and show in folder", self.show_in_folder)
 
     # ------------------------------------------------------------------ helpers
@@ -127,15 +131,15 @@ class ShareController(QObject):
         QGuiApplication.clipboard().setImage(self._window.final_image())
         if result == QDialog.Accepted:
             opened = QDesktopServices.openUrl(QUrl(chat_link(dialog.recipients, dialog.message.text().strip())))
-            done = "Chat opened in Teams. Click in the message box, press Ctrl+V, then Enter."
+            done = f"Chat opened in Teams. Click in the message box, press {keys('Ctrl+V')}, then {keys('Enter')}."
         else:
             opened = share.open_teams()
-            done = "Image copied. Open a Teams chat and paste it (Ctrl+V)."
+            done = f"Image copied. Open a Teams chat and paste it ({keys('Ctrl+V')})."
         if opened:
             self._status(done, 15000)
         else:
             QMessageBox.information(self._window, "SnipForge", "The image is copied, but Teams didn't open. "
-                                    "Open Teams and paste it into a chat (Ctrl+V).")
+                                    f"Open Teams and paste it into a chat ({keys('Ctrl+V')}).")
 
     def onedrive(self, account: share.OneDriveAccount, verb: str) -> None:
         if self._pending is not None:
@@ -189,7 +193,7 @@ class ShareController(QObject):
         if text.startswith("http"):
             self._link_deadline = 0.0
             self._link_timer.stop()
-            self._status("OneDrive link copied. Paste it anywhere (Ctrl+V).", 10000)
+            self._status(f"OneDrive link copied. Paste it anywhere ({keys('Ctrl+V')}).", 10000)
 
     def _link_timed_out(self) -> None:
         if self._link_deadline:

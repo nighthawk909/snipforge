@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import theme
+from . import hotkey, theme, wording
 from .icons import icon
 from .library import DOCUMENT, META, EntryMeta, Library
 from .library_search import PERIODS, Item, group_by_date, select, tag_counts, top_apps
@@ -39,6 +39,19 @@ TAG_COLORS = ("#2F7BF6", "#2FA85A", "#F28C28", "#8E5BE8", "#E5372D", "#0E7C86")
 SIDEBAR_WIDTH = 236
 SEARCH_DELAY_MS = 150
 CONFIRM_TRASH_OVER = 20
+
+
+def snip_hint() -> str:
+    """How to snip from anywhere, as the empty Library tells it."""
+    if hotkey.SUPPORTED:
+        return "Press Win+Shift+S or Print Screen to snip from anywhere."
+    return f"To snip from anywhere, click SnipForge's {wording.tray_icon()}, then New snip."
+
+
+def trash_tip() -> str:
+    if wording.on_mac():
+        return "Snips you delete go to the Trash, so you can put them back"
+    return "Snips you delete go to the Windows Recycle Bin, so you can restore them"
 
 
 def _stamp(path, ns: bool):
@@ -109,9 +122,9 @@ class HomeWindow(QMainWindow):
         self._folder.setCheckable(False)
         self._folder.clicked.connect(lambda: self._reveal(self._library.root))
         col.addWidget(self._folder)
-        self._bin = NavItem("Recycle Bin", "trash", on_band=True)
+        self._bin = NavItem(wording.trash(), "trash", on_band=True)
         self._bin.setCheckable(False)
-        self._bin.setToolTip("Snips you delete go to the Windows Recycle Bin, so you can restore them")
+        self._bin.setToolTip(trash_tip())
         self._bin.clicked.connect(self._open_recycle_bin)
         col.addWidget(self._bin)
         self._settings = NavItem("Settings", "settings", on_band=True)
@@ -197,6 +210,9 @@ class HomeWindow(QMainWindow):
         # Only while the grid has focus, so typing in the search box never stars or tags anything.
         for keys, slot in (("F", self._favorite_current), ("T", self._tags_current)):
             QShortcut(QKeySequence(keys), self.grid, slot, Qt.WidgetShortcut)
+        if wording.on_mac():  # ⌘⌫ moves to the Trash, as in Finder (a Mac's Delete key is Backspace)
+            QShortcut(QKeySequence("Ctrl+Backspace"), self.grid, lambda: self._trash(self.grid.selected_ids()),
+                      Qt.WidgetShortcut)
 
     def _retheme(self, _theme=None) -> None:
         self._search_icon.setIcon(icon("search"))
@@ -329,7 +345,7 @@ class HomeWindow(QMainWindow):
         self._stack.setCurrentIndex(1)
         if not self._items:
             self._empty_title.setText("Your snips will show up here")
-            self._empty_hint.setText("Press Win+Shift+S or Print Screen to snip from anywhere.")
+            self._empty_hint.setText(snip_hint())
             self._empty_button.show()
         else:
             self._empty_title.setText(f"No snips match “{query}”" if query else "Nothing here yet")
@@ -450,7 +466,8 @@ class HomeWindow(QMainWindow):
                            lambda: self.toggle_favorite(entry_id))
             menu.addAction(icon("tag"), "Tags…\tT", lambda: self.edit_tags(entry_id))
         menu.addSeparator()
-        menu.addAction(icon("trash"), "Move to Recycle Bin", lambda: self._trash(ids))
+        trash_keys = f"\t{wording.keys('Ctrl+Backspace')}" if wording.on_mac() else ""
+        menu.addAction(icon("trash"), f"Move to {wording.trash()}{trash_keys}", lambda: self._trash(ids))
         menu.exec(self.grid.viewport().mapToGlobal(pos))
 
     def _open_ids(self, ids: list[str | None]) -> None:
@@ -487,39 +504,40 @@ class HomeWindow(QMainWindow):
             else:
                 gone.add(entry_id)
         if failed:
-            QMessageBox.warning(self, "SnipForge", f"Couldn't move {failed} snip(s) to the Recycle Bin. "
+            QMessageBox.warning(self, "SnipForge", f"Couldn't move {failed} snip(s) to the {wording.trash()}. "
                                 "Close any editor showing them and try again.")
         self._items = [i for i in self._items if i.entry.id not in gone]
         self._after_change()
 
     def _trash_question(self, ids: list[str]) -> str | None:
-        """What to ask before moving these to the Recycle Bin: many at once, or recordings with trimmed
-        copies or GIFs saved beside them (which go too); None to go ahead."""
+        """What to ask before moving these to the Recycle Bin (the Trash on a Mac): many at once, or
+        recordings with trimmed copies or GIFs saved beside them (which go too); None to go ahead."""
         exports = [name for entry_id in ids if (entry := self._library.get(entry_id))
                    for name in self._library.exports(entry)]
+        bin_name = wording.trash()
         if not exports:
-            return f"Move {len(ids)} snips to the Recycle Bin?" if len(ids) > CONFIRM_TRASH_OVER else None
+            return f"Move {len(ids)} snips to the {bin_name}?" if len(ids) > CONFIRM_TRASH_OVER else None
         named = ", ".join(exports[:3]) + (f" and {len(exports) - 3} more" if len(exports) > 3 else "")
         what = "this recording" if len(ids) == 1 else f"these {len(ids)} items"
-        return (f"Move {what} to the Recycle Bin?\n\nThe trimmed copies and GIFs saved with it go too: "
+        return (f"Move {what} to the {bin_name}?\n\nThe trimmed copies and GIFs saved with it go too: "
                 f"{named}.")
 
     def _open_recycle_bin(self) -> None:
+        """The Recycle Bin, or the Trash in Finder on a Mac."""
         try:
             if sys.platform == "win32":
                 os.startfile("shell:RecycleBinFolder")  # noqa: S606 - opens the Windows Recycle Bin
             else:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path.home() / ".Trash")))  # Finder
         except OSError as exc:
-            log.info("Couldn't open the Recycle Bin: %s", exc)
+            log.info("Couldn't open the %s: %s", wording.trash(), exc)
 
     @staticmethod
     def _reveal(path) -> None:
+        """Our own folder, in File Explorer or Finder."""
         path.mkdir(parents=True, exist_ok=True)
-        if sys.platform == "win32":
-            os.startfile(str(path))  # noqa: S606 - opens our own library folder in Explorer
-        else:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))  # Finder
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            log.info("Couldn't open %s", path)
 
     # compatibility with callers that list selected snips
     def _selected_ids(self) -> list[str]:

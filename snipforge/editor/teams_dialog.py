@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCompleter, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from ..settings import app_settings
+from ..wording import keys
 
 EMAIL = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 RECENT_KEY = "teams_recent"
@@ -57,7 +58,8 @@ class TeamsDialog(QDialog):
         self.error.setProperty("sfRole", "error")
         self.error.hide()
         layout.addWidget(self.error)
-        note = QLabel("The snip is copied for you. When the chat opens, press Ctrl+V, then Enter.")
+        note = QLabel(f"The snip is copied for you. When the chat opens, press {keys('Ctrl+V')}, then "
+                      f"{keys('Enter')}.")
         note.setWordWrap(True)
         note.setProperty("sfRole", "muted")
         layout.addWidget(note)
