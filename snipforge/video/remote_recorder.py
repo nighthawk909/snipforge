@@ -88,13 +88,16 @@ class RemoteRecorder(QObject):
         self._server = None
         self._launched_pid = 0
         self.channel: Channel | None = None
+        self._hold = False
         self._alive_check = QTimer(self, interval=ALIVE_CHECK_MS)
         self._alive_check.timeout.connect(self._check_alive)
 
-    def start(self) -> None:
-        """Start the recorder process; raises RecordingError if it can't be started at all."""
+    def start(self, hold: bool = False) -> None:
+        """Start the recorder process; raises RecordingError if it can't be started at all.
+        `hold`: it opens everything but begins only at go() (when a countdown ends)."""
         if self.state != "idle":
             raise RecordingError("This recording has already started")
+        self._hold = hold
         try:  # the same check the recorder makes, before starting a process for nothing
             settings_from_message(settings_to_message(self.settings))
         except ValueError as exc:
@@ -118,6 +121,13 @@ class RemoteRecorder(QObject):
         QTimer.singleShot(self._connect_timeout_ms, self, self._check_connected)
         if self._launched_pid:
             self._alive_check.start()
+
+    def go(self) -> None:
+        """Begin a recording started with hold=True (told now, or with its settings if it hasn't
+        called back yet)."""
+        if self._hold:
+            self._hold = False
+            self._send("go")
 
     def pause(self) -> None:
         self._send("pause")
@@ -152,7 +162,7 @@ class RemoteRecorder(QObject):
         self.channel = Channel(socket, self)
         self.channel.message.connect(self._on_message)
         self.channel.closed.connect(self._gone)
-        self.channel.send("start", settings=settings_to_message(self.settings))
+        self.channel.send("start", settings=settings_to_message(self.settings), hold=self._hold)
 
     def _check_connected(self) -> None:
         if self.state == "launching":

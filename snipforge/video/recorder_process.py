@@ -10,7 +10,8 @@ recording in progress is finished first, so the file is kept.
 
     SnipForge                              recorder process
       start ─► launches it ──────────────► hello {pid, window, version}
-      settings ─────────── start ────────►  Recorder.start()
+      settings ─────────── start ────────►  Recorder.start(hold)
+      (countdown) ───────── go ──────────►  Recorder.go()
                 ◄───────── state, warning ─
       pause / resume / stop / cancel ────►
                 ◄──────── finished {path, duration, stats, ended_by} | failed | cancelled
@@ -37,7 +38,7 @@ START_TIMEOUT_MS = 15_000  # from hello to being told what to record
 SLEEP_FINISH_SECONDS = 1.5  # Windows allows about 2 s before it sleeps
 END_FINISH_SECONDS = 4.0  # and about 5 s before it offers to end an app that holds up shutdown
 EXIT_FINISH_SECONDS = 10.0  # quitting for any other reason: finish the file first
-COMMANDS = ("pause", "resume", "stop", "cancel")
+COMMANDS = ("go", "pause", "resume", "stop", "cancel")
 
 
 def channel_name(argv: list[str]) -> str | None:
@@ -106,7 +107,7 @@ class RecorderChild(QObject):
         kind = message["type"]
         if self.recorder is None:
             if kind == "start":
-                self._start(message.get("settings"))
+                self._start(message.get("settings"), hold=message.get("hold") is True)
             elif kind == "ping":
                 self.channel.send("pong", version=__version__)
                 self._finish(0)
@@ -119,7 +120,7 @@ class RecorderChild(QObject):
         else:
             log.warning("The recorder ignored %r while recording", kind)
 
-    def _start(self, data) -> None:
+    def _start(self, data, hold: bool = False) -> None:
         try:
             settings = settings_from_message(data)
         except ValueError as exc:
@@ -132,7 +133,7 @@ class RecorderChild(QObject):
         recorder.failed.connect(self._report_failure)
         recorder.cancelled.connect(self._cancelled)
         try:
-            recorder.start()
+            recorder.start(hold=hold)
         except RecordingError as exc:
             self._report_failure(str(exc))
 

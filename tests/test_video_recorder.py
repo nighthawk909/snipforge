@@ -132,7 +132,8 @@ def sound_maker(**behaviour):
     return make
 
 
-def record(tmp_path, steps, *, sound=None, encoder=None, screen_frames=None, prepare=None, **settings):
+def record(tmp_path, steps, *, sound=None, encoder=None, screen_frames=None, prepare=None, hold=False,
+           **settings):
     """Run a recording: `steps` is a list of (seconds to wait, action) ending the recording, an action
     being a Recorder method's name or a function given the recorder. outcome["at"] has the
     recording's own time when each named action actually ran (a busy machine runs timers late, so
@@ -157,7 +158,7 @@ def record(tmp_path, steps, *, sound=None, encoder=None, screen_frames=None, pre
         outcome["at"][action] = (recorder.media_time(), time.perf_counter())
         getattr(recorder, action)()
 
-    recorder.start()
+    recorder.start(hold=hold)
     at = 0.0
     for seconds, action in steps:
         at += seconds
@@ -204,6 +205,25 @@ def test_time_zero_waits_for_an_encoder_slow_to_start(tmp_path, qapp):
     assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=0.02)
     assert result.duration < 1.5 - SlowToStart.WARM_UP_MS / 1000 + 0.2  # the warm-up isn't recorded
     assert_in_time(frame_times(result.path), result.duration)  # none lost while the encoder warmed up
+
+
+def test_a_held_start_begins_only_when_told_to_go(tmp_path, qapp):
+    # The recording UI opens everything while its countdown runs, and begins as it ends.
+    recorder, outcome, _ = record(tmp_path, [(0.8, "go"), (0.6, "stop")], hold=True)
+
+    result = outcome["result"]
+    assert outcome["at"]["go"][0] == 0.0  # nothing recorded while held
+    assert outcome["states"][:2] == ["starting", "recording"]
+    assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=0.02)
+    assert result.duration < 0.8  # the 0.8 s held isn't in it
+    assert_in_time(frame_times(result.path), result.duration)
+
+
+def test_go_before_the_encoder_is_ready_begins_once_it_is(tmp_path, qapp):
+    recorder, outcome, _ = record(tmp_path, [(0.1, "go"), (1.5, "stop")], hold=True, encoder=SlowToStart)
+
+    assert outcome["states"][:2] == ["starting", "recording"]
+    assert outcome["result"].duration < 1.5 - SlowToStart.WARM_UP_MS / 1000 + 0.2
 
 
 def test_an_encoder_that_never_starts_fails_the_recording(tmp_path, qapp, monkeypatch):

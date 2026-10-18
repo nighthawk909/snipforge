@@ -133,6 +133,7 @@ class Recorder(QObject):
         self._frames = None
         self._encoder: Encoder | None = None
         self._output_existed = False  # a file already there is never deleted
+        self._held = False  # started with hold=True, and go() not called yet
         self._overlay_warned = False
         self._stop_media = 0.0
         self._paused_media = 0.0  # recording time when the current pause began
@@ -141,13 +142,16 @@ class Recorder(QObject):
 
     # --- control ---------------------------------------------------------------------------------
 
-    def start(self) -> None:
+    def start(self, hold: bool = False) -> None:
         """Open everything; raises RecordingError if this computer can't record, the drive has no
         room, or the screen or the encoder can't be used (sound sources that can't be opened only
-        warn). Recording begins ("recording") once the encoder is ready, or fails if it never is."""
+        warn). Recording begins ("recording") once the encoder is ready, or fails if it never is.
+        `hold`: open everything now, but begin only at go() (a countdown runs meanwhile, so the
+        recording starts as it ends)."""
         if self.state != "idle":
             raise RecordingError("This recording has already started")
         self._check_can_record()
+        self._held = hold
         self._output_existed = self.settings.output.exists()
         try:
             self._open()
@@ -162,6 +166,12 @@ class Recorder(QObject):
         self._pump.start(PUMP_MS)  # also notices a screen lost while the encoder warms up
         QTimer.singleShot(int(ENCODER_START_TIMEOUT * 1000), self, self._check_started)
         if self._encoder.is_ready:
+            self._begin()
+
+    def go(self) -> None:
+        """Begin a recording started with hold=True: now, or as soon as the encoder is ready."""
+        self._held = False
+        if self.state == "starting" and self._encoder.is_ready:
             self._begin()
 
     def pause(self) -> None:
@@ -280,12 +290,12 @@ class Recorder(QObject):
         QTimer.singleShot(0, self, lambda: self.warning.emit(str(error)))
 
     def _begin(self) -> None:
-        if self.state == "starting":
+        if self.state == "starting" and not self._held:
             self.clock.begin(self.now() + START_DELAY)
             self._set_state("recording")
 
     def _check_started(self) -> None:
-        if self.state == "starting":
+        if self.state == "starting" and not self._encoder.is_ready:
             self._fail(f"The video encoder didn't start within {ENCODER_START_TIMEOUT:g} seconds", discard=True)
 
     # --- recording -------------------------------------------------------------------------------

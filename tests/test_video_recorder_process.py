@@ -40,14 +40,22 @@ class FakeRecorder(QObject):
         super().__init__()
         self.settings, self.state, self.calls = settings, "idle", []
 
-    def start(self):
-        self.calls.append("start")
+    def start(self, hold=False):
+        self.calls.append("start held" if hold else "start")
+        self.held = hold
         if self.settings.output.stem == "refuse":
             raise RecordingError("No screen to record")
         if self.settings.output.stem == "slow":
             return  # opening the devices takes a while: nothing said yet
         self._set("starting")
-        QTimer.singleShot(0, self, lambda: (self._set("recording"), self.warning.emit("No microphone here")))
+        if not hold:
+            QTimer.singleShot(0, self, lambda: (self._set("recording"), self.warning.emit("No microphone here")))
+
+    def go(self):
+        self.calls.append("go")
+        if self.state == "starting" and self.held:
+            self.held = False
+            self._set("recording")
 
     def pause(self):
         self.calls.append("pause")
@@ -407,3 +415,26 @@ def test_a_process_that_has_exited_isnt_alive():
 
     assert remote_recorder.process_alive(os.getpid())
     assert not remote_recorder.process_alive(gone.pid)
+
+
+def test_a_held_recording_begins_when_snipforge_says_go(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
+    remote.start(hold=True)
+    assert wait_for(lambda: remote.state == "starting")
+    wait_for(lambda: False, 0.2)
+    assert remote.state == "starting"  # held: devices open, nothing recorded
+
+    remote.go()
+
+    assert wait_for(lambda: remote.state == "recording")
+    assert process.recorder.calls == ["start held", "go"]
+
+
+def test_go_before_the_recorder_has_called_back_still_counts(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
+    remote.start(hold=True)
+
+    remote.go()  # the countdown ended before the recorder process was up
+
+    assert wait_for(lambda: remote.state == "recording")
+    assert process.recorder.calls == ["start"]
