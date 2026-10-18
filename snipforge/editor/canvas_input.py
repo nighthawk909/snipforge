@@ -39,6 +39,9 @@ class InputMixin:
 
     # ------------------------------------------------------------------ keyboard
     def keyPressEvent(self, e) -> None:
+        if self.picking() and e.key() == Qt.Key_Escape:
+            self.stop_picking()
+            return
         if self.editing_text_item() is not None:
             if e.key() == Qt.Key_Escape:
                 self.commit_text()
@@ -126,6 +129,10 @@ class InputMixin:
             self._cancel_drag()
         view_pos = e.position().toPoint()
         pos = self.mapToScene(view_pos)
+        self._just_picked = False
+        if self.picking():
+            self._pick_press(pos)  # the eyedropper's click picks; it never selects or draws
+            return
         editing = self.editing_text_item()
         if editing is not None:
             if self._annotation_at(view_pos) is editing.owner():
@@ -171,6 +178,9 @@ class InputMixin:
         pos = self.mapToScene(view_pos)
         shift = bool(e.modifiers() & Qt.ShiftModifier)
         drag = self._drag
+        if self.picking():
+            self._pick_hover(view_pos, pos)
+            return
         if drag is None:
             if not e.buttons():
                 self._update_hover(view_pos, pos)
@@ -204,6 +214,11 @@ class InputMixin:
         """Qt sends the second press of a quick double-click here, not to mousePressEvent."""
         if self._panning or e.button() != Qt.LeftButton:
             super().mouseDoubleClickEvent(e)
+            return
+        if self._just_picked or self.picking():  # a double-click with the eyedropper is just a pick
+            self._just_picked = False
+            if self.picking():
+                self.mousePressEvent(e)
             return
         view_pos = e.position().toPoint()
         hit = self._annotation_at(view_pos)
@@ -286,4 +301,5 @@ class InputMixin:
 
     def leaveEvent(self, e) -> None:
         self._overlay.set_hover(None)
+        self._loupe.hide()
         super().leaveEvent(e)

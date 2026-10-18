@@ -144,6 +144,7 @@ class PropertiesPanel(QScrollArea):
     changed = Signal(dict)          # style field -> new value
     crop_action = Signal(str)       # apply | cancel | reset
     image_action = Signal(str)      # rotate_left | rotate_right | flip_horizontal | flip_vertical | resize
+    pick_color = Signal()           # the eyedropper button: start (or stop) picking a color from the snip
     editing_done = Signal()         # finished typing in a field: give the keyboard back to the canvas
 
     def __init__(self, parent=None) -> None:
@@ -268,19 +269,33 @@ class PropertiesPanel(QScrollArea):
         col.addLayout(grid)
 
     def _build_colors(self) -> None:
-        col = self._section("color", "Color")
+        col = self._section("color", None)
+        head = QHBoxLayout()
+        head.setSpacing(4)
+        label = QLabel("COLOR")
+        label.setProperty("sfRole", "section")
+        head.addWidget(label)
+        head.addStretch(1)
+        self._custom = QToolButton()
+        self._custom.setObjectName("CustomColor")
+        self._custom.setToolTip("Custom color")
+        self._custom.setAccessibleName("Custom color")
+        self._custom.clicked.connect(self._pick_custom)
+        head.addWidget(self._custom)
+        self._picker = QToolButton()
+        self._picker.setObjectName("PickColor")
+        self._picker.setCheckable(True)
+        self._picker.setToolTip("Pick a color from the snip (Esc cancels)")
+        self._picker.setAccessibleName("Pick a color from the snip")
+        self._picker.clicked.connect(self._pick_clicked)
+        head.addWidget(self._picker)
+        col.addLayout(head)
         row = QHBoxLayout()
         row.setSpacing(2)
         self._swatches = {c: Swatch(c) for c in PALETTE}
         for color, swatch in self._swatches.items():  # checked by hand: a custom color clears every ring
             swatch.clicked.connect(lambda _=False, c=color: self._pick_swatch(c))
             row.addWidget(swatch)
-        self._custom = QToolButton()
-        self._custom.setObjectName("CustomColor")
-        self._custom.setToolTip("Custom color")
-        self._custom.setAccessibleName("Custom color")
-        self._custom.clicked.connect(self._pick_custom)
-        row.addWidget(self._custom)
         row.addStretch(1)
         col.addLayout(row)
 
@@ -427,6 +442,7 @@ class PropertiesPanel(QScrollArea):
         for shape in CALLOUT_SHAPES:
             self._shapes.button(shape).setIcon(icon(f"shape_{shape}"))
         self._custom.setIcon(icon("plus"))
+        self._picker.setIcon(icon("pipette"))
         for action, icon_name, _tip in IMAGE_ACTIONS:
             self._image_buttons[action].setIcon(icon(icon_name))
         self.viewport().update()
@@ -443,6 +459,13 @@ class PropertiesPanel(QScrollArea):
             self._size_value.setText(str(int(changes["width"])))
         if changes and not self._loading:
             self.changed.emit(changes)
+
+    def _pick_clicked(self) -> None:
+        self._picker.setChecked(not self._picker.isChecked())  # the canvas says when picking starts or ends
+        self.pick_color.emit()
+
+    def set_picking(self, on: bool) -> None:
+        self._picker.setChecked(on)
 
     def _pick_custom(self) -> None:
         color = QColorDialog.getColor(QColor(self._style_color or "#ff3b30"), self, "Annotation color")
@@ -479,6 +502,9 @@ class PropertiesPanel(QScrollArea):
 
     def stamp_button(self, name: str) -> QToolButton:
         return self._stamp_buttons[name]
+
+    def pick_button(self) -> QToolButton:
+        return self._picker
 
     def image_button(self, action: str) -> QAbstractButton:
         return self._image_buttons[action]
