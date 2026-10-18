@@ -227,6 +227,20 @@ def test_a_late_recorder_process_says_so_when_the_countdown_ends(tmp_path, qapp)
     assert notes == ["Starting the recorder: recording begins in a moment"]
 
 
+def test_snipforge_marks_a_recording_finished_if_the_recorder_couldnt(tmp_path, qapp):
+    import json
+
+    flow, made, notes, opened, ended = make_flow(tmp_path)
+    record_with(flow, RecordingChoices(countdown=0))
+    recorder = made["recorders"][0]
+    details = recorder.settings.output.with_name("recording.json")
+    assert not details.exists()
+
+    recorder.finish(4.2)
+
+    assert json.loads(details.read_text(encoding="utf-8"))["duration"] == 4.2  # so the Library lists it
+
+
 def test_a_recording_that_cant_be_opened_says_where_it_was_saved(tmp_path, qapp):
     flow, made, notes, *_ = make_flow(tmp_path)
     record_with(flow, RecordingChoices(countdown=0))

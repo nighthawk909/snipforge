@@ -1,10 +1,12 @@
 """The Library's grid: date headers and snip cards in one wrapping list, painted from the theme."""
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
+import logging
 import os
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -39,12 +41,16 @@ from .icons import icon
 from .library import THUMB_MAX, EntryMeta
 from .library_search import Item
 
+log = logging.getLogger(__name__)
+
 CARD_W, CARD_H, THUMB_H = 232, 204, 136
 GAP = 8
 HEADER_H = 40
 RADIUS = 10
 STAR_COLOR = "#F5B400"
 THUMB_CACHE = 120  # decoded thumbnails kept while the Library is open (cleared when it's hidden)
+VIDEO_PREVIEW_AT = 0.5  # seconds into a recording its card's picture is taken from
+RECALL_ON_OPEN, RECALL_ON_DATA_ACCESS = 0x40000, 0x400000  # FILE_ATTRIBUTE_*: a cloud file not on this PC
 ROW_ROLE = Qt.UserRole + 1
 
 
@@ -88,8 +94,12 @@ class LibraryModel(QAbstractListModel):
         if role in (Qt.DisplayRole, Qt.AccessibleTextRole):
             if row.is_header:
                 return row.label
-            meta = row.item.meta
-            parts = [meta.title or "Snip", meta.app, when_text(row.item.created)]
+            item = row.item
+            meta = item.meta
+            parts = [meta.title or ("Recording" if item.entry.is_recording else "Snip")]
+            if item.entry.is_recording:
+                parts.append(" ".join(p for p in ("video", duration_label(item)) if p))
+            parts += [meta.app, when_text(item.created)]
             if meta.favorite:
                 parts.append("favorite")
             if meta.tags:
@@ -114,9 +124,19 @@ class LibraryModel(QAbstractListModel):
         n = self.row_for(entry_id)
         if n < 0:
             return
-        old = self._rows[n].item
-        self._rows[n] = Row(item=Item(old.entry, old.created, meta, old.edited_at))
+        self._rows[n] = Row(item=replace(self._rows[n].item, meta=meta))
         self.dataChanged.emit(self.index(n), self.index(n))
+
+
+def duration_label(item: Item) -> str:
+    """A recording's length as its card shows it ("1:05"); empty for a snip or an unknown length."""
+    from .video.recordings import duration_text
+
+    return duration_text(item.duration) if item.duration is not None else ""
+
+
+def _cloud_only(info: os.stat_result) -> bool:
+    return bool(getattr(info, "st_file_attributes", 0) & (RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS))
 
 
 def _star(rect: QRectF) -> QPolygonF:
@@ -138,14 +158,19 @@ class _Loaded(QObject):
 
 class _ThumbJob(QRunnable):
     """Decodes one thumbnail off the UI thread, from preview.png when there is one. For older snips
-    without a preview it decodes the original once and saves a preview for next time."""
+    without a preview it decodes the original once and saves a preview for next time; for a
+    recording (`video`) it takes a frame from the video, once, likewise."""
 
-    def __init__(self, key: tuple, path: str, target: QSize, make_preview: str | None, signals: _Loaded) -> None:
+    def __init__(self, key: tuple, path: str, target: QSize, make_preview: str | None, signals: _Loaded,
+                 video: bool = False) -> None:
         super().__init__()
         self._key, self._path, self._target = key, path, target
-        self._make_preview, self._signals = make_preview, signals
+        self._make_preview, self._signals, self._video = make_preview, signals, video
 
     def run(self) -> None:
+        if self._video:
+            self._run_video()
+            return
         reader = QImageReader(self._path)
         size = reader.size()
         if size.isValid() and size.width() > 0 and size.height() > 0:
@@ -166,9 +191,45 @@ class _ThumbJob(QRunnable):
                     os.replace(tmp, self._make_preview)
             except OSError:
                 pass  # just slower next time
+        self._done(image)
+
+    def _run_video(self) -> None:
+        """The frame showing half a second in, saved as the recording's preview. The card's picture
+        is handed over under the preview's key too, so it isn't decoded again from the PNG."""
+        image = self._video_frame()
+        if image is None:
+            self._signals.done.emit(self._key, None)
+            return
+        if self._make_preview:
+            tmp = self._make_preview + ".tmp"
+            try:
+                if image.save(tmp, "PNG"):
+                    os.replace(tmp, self._make_preview)
+                    self._done(image, (self._key[0], os.stat(self._make_preview).st_mtime_ns, *self._key[2:]))
+            except OSError:
+                pass  # just slower next time
+        self._done(image)
+
+    def _video_frame(self) -> QImage | None:
+        """The last frame at or before VIDEO_PREVIEW_AT (the first, for a shorter video); None if
+        there's none. A video that breaks off after a good frame still gives that frame."""
+        from .video import frames
+
+        image = None
+        try:
+            with contextlib.closing(frames.read(self._path, width=THUMB_MAX)) as reader:
+                for seconds, frame in reader:
+                    if image is not None and seconds > VIDEO_PREVIEW_AT:
+                        break
+                    image = frame
+        except Exception as exc:  # FFmpegError: a damaged or unreadable video keeps its plain card
+            log.info("No picture for the recording %s: %s", self._path, exc)
+        return None if image is None or image.isNull() else image
+
+    def _done(self, image: QImage, key: tuple | None = None) -> None:
         scaled = image.scaled(self._target, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
         x = (scaled.width() - self._target.width()) // 2  # keep the top, where titles usually are
-        self._signals.done.emit(self._key, scaled.copy(x, 0, self._target.width(), self._target.height()))
+        self._signals.done.emit(key or self._key, scaled.copy(x, 0, self._target.width(), self._target.height()))
 
 
 class CardDelegate(QStyledItemDelegate):
@@ -180,13 +241,18 @@ class CardDelegate(QStyledItemDelegate):
         self._view = view
         self._thumbs: OrderedDict[tuple, QPixmap] = OrderedDict()
         self._loading: set[tuple] = set()
+        self._failed: set[tuple] = set()  # videos that couldn't be read: not opened again until they change
+        self._videos: set[tuple] = set()  # keys being read from a video
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(2)
+        self._video_pool = QThreadPool(self)  # one video at a time, never in the way of snips' pictures
+        self._video_pool.setMaxThreadCount(1)
         self._signals = _Loaded(self)
         self._signals.done.connect(self._thumb_ready)
 
     def clear_cache(self) -> None:
         self._thumbs.clear()
+        self._failed.clear()
 
     # ------------------------------------------------------------------ geometry
     def sizeHint(self, _option, index) -> QSize:  # noqa: N802 - Qt API
@@ -248,6 +314,8 @@ class CardDelegate(QStyledItemDelegate):
         pix = self._thumb(item, thumb_area.size().toSize(), self._view.devicePixelRatioF())
         if pix is not None:
             p.drawPixmap(thumb_area.topLeft(), pix)
+        if item.entry.is_recording:
+            self._paint_video_marks(p, thumb_area, item)
         p.restore()
         p.setPen(QPen(QColor(pal.border), 1))
         p.drawLine(QPointF(card.left(), card.top() + THUMB_H), QPointF(card.right(), card.top() + THUMB_H))
@@ -258,7 +326,8 @@ class CardDelegate(QStyledItemDelegate):
         p.setFont(title_font)
         p.setPen(QColor(pal.text))
         text_left, text_width = card.left() + 12, card.width() - 52
-        title = QFontMetrics(title_font).elidedText(meta.title or "Snip", Qt.ElideRight, int(text_width))
+        title = QFontMetrics(title_font).elidedText(meta.title or ("Recording" if item.entry.is_recording else "Snip"),
+                                                    Qt.ElideRight, int(text_width))
         p.drawText(QRectF(text_left, card.top() + THUMB_H + 10, text_width, 22), Qt.AlignLeft | Qt.AlignVCenter,
                    title)
         sub_font = QFont(option.font)
@@ -297,30 +366,70 @@ class CardDelegate(QStyledItemDelegate):
         p.setBrush(Qt.NoBrush)
         p.drawPath(shape)
 
+    @staticmethod
+    def duration_text(item: Item) -> str:
+        return duration_label(item)
+
+    def _paint_video_marks(self, p: QPainter, thumb: QRectF, item: Item) -> None:
+        """A play badge in the middle and the length at the bottom right: it's a video."""
+        centre = thumb.center()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 150))
+        p.drawEllipse(centre, 18, 18)
+        p.setBrush(QColor("#ffffff"))
+        p.drawPolygon(QPolygonF([QPointF(centre.x() - 6, centre.y() - 9), QPointF(centre.x() + 10, centre.y()),
+                                 QPointF(centre.x() - 6, centre.y() + 9)]))
+        text = self.duration_text(item)
+        if text:
+            font = QFont(p.font())
+            font.setBold(True)
+            p.setFont(font)
+            width = QFontMetrics(font).horizontalAdvance(text) + 12
+            chip = QRectF(thumb.right() - width - 8, thumb.bottom() - 26, width, 20)
+            p.setBrush(QColor(0, 0, 0, 170))
+            p.drawRoundedRect(chip, 6, 6)
+            p.setPen(QColor("#ffffff"))
+            p.drawText(chip, Qt.AlignCenter, text)
+
     def _thumb(self, item: Item, size: QSize, ratio: float) -> QPixmap | None:
         """The card's picture if it's ready; otherwise starts loading it and returns None (the card
         shows a plain placeholder for a moment)."""
         path = item.entry.preview_path
+        video = item.entry.is_recording and not path.exists()  # its first frame, made into a preview
+        if video:
+            path = item.entry.recording_path
         try:
-            stamp = path.stat().st_mtime_ns
+            info = path.stat()
         except OSError:
             return None
-        key = (item.entry.id, stamp, size.width(), size.height(), ratio)
+        key = (item.entry.id, info.st_mtime_ns, size.width(), size.height(), ratio)
         cached = self._thumbs.get(key)
         if cached is not None:
             self._thumbs.move_to_end(key)
             return cached
-        if key not in self._loading:
-            self._loading.add(key)
-            target = QSize(round(size.width() * ratio), round(size.height() * ratio))
-            preview = item.entry.path / "preview.png"
-            make_preview = None if path == preview else str(preview)
-            self._pool.start(_ThumbJob(key, str(path), target, make_preview, self._signals))
+        if key in self._loading or key in self._failed:
+            return None
+        if video and _cloud_only(info):  # OneDrive "online only": not downloading a whole video for a picture
+            return None
+        self._loading.add(key)
+        target = QSize(round(size.width() * ratio), round(size.height() * ratio))
+        preview = item.entry.path / "preview.png"
+        make_preview = None if path == preview else str(preview)
+        job = _ThumbJob(key, str(path), target, make_preview, self._signals, video=video)
+        if video:
+            self._videos.add(key)
+            self._video_pool.start(job)
+        else:
+            self._pool.start(job)
         return None
 
     def _thumb_ready(self, key: tuple, image) -> None:
         self._loading.discard(key)
+        video = key in self._videos
+        self._videos.discard(key)
         if image is None:
+            if video:  # not on every repaint: a broken video would be opened again and again
+                self._failed.add(key)
             return
         pix = QPixmap.fromImage(image)
         pix.setDevicePixelRatio(key[4])

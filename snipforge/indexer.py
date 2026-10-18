@@ -45,7 +45,10 @@ class TextIndexer(QObject):
 
     def index(self, entry: Entry, again: bool = False) -> bool:
         """Queue one snip. `again` re-reads a snip already tried this session (after an edit).
-        Returns False if it's already queued or reading is off/unavailable."""
+        Returns False if it's already queued or reading is off/unavailable, or it's a recording
+        (there's no image to read)."""
+        if getattr(entry, "is_recording", False):
+            return False
         with self._lock:
             if self._closed or self._unavailable or not self.enabled or entry.id in self._pending:
                 return False

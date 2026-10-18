@@ -1,12 +1,12 @@
 """Where recordings are saved: in the Library, a folder of their own like a snip's, named the same
-way (when it was made), holding recording.mp4. The Library lists only folders with a snip's image in
-them for now, so these don't show there until it learns about recordings."""
+way (when it was made), holding recording.mp4, and recording.json once it's finished, which is when
+the Library starts listing it (library.py)."""
 from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
 
-RECORDING = "recording.mp4"
+from ..library import RECORDING
 
 
 def new_recording(root: Path) -> Path:
@@ -29,3 +29,4 @@ def duration_text(seconds: float) -> str:
     hours, rest = divmod(whole, 3600)
     minutes, secs = divmod(rest, 60)
     return f"{hours}:{minutes:02}:{secs:02}" if hours else f"{minutes}:{secs:02}"
+

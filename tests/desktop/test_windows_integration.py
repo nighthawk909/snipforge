@@ -7,6 +7,7 @@ regular suite. Run them with:
 
 CI runs them on every change; run them locally before a release.
 """
+import os
 import tempfile
 import time
 import winreg
@@ -94,6 +95,39 @@ def test_clipboard_round_trip(qapp):
     QGuiApplication.clipboard().setImage(image)
     pump(0.2)
     assert QGuiApplication.clipboard().image().size() == image.size()
+
+
+def test_copying_a_recording_gives_windows_a_file_to_paste(qapp, tmp_path):
+    import ctypes
+    from ctypes import wintypes
+
+    from snipforge.home import HomeWindow
+    from snipforge.library import Library, write_recording_details
+    from snipforge.video import clip, recordings
+
+    lib = Library(tmp_path / "Library")
+    video = recordings.new_recording(lib.root)
+    clip.make_test_clip(video, seconds=0.5)
+    write_recording_details(video, 0.5, (320, 240))
+    home = HomeWindow(lib, on_new_snip=lambda: None, on_open_entry=lambda entry_id: None)
+    user32, shell32 = ctypes.windll.user32, ctypes.windll.shell32
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
+    try:
+        home._copy(video.parent.name)
+        pump(0.2)
+        assert user32.IsClipboardFormatAvailable(15)  # CF_HDROP: what Explorer, Outlook and Teams paste
+        assert user32.OpenClipboard(None)
+        try:
+            drop = user32.GetClipboardData(15)
+            count = shell32.DragQueryFileW(drop, 0xFFFFFFFF, None, 0)
+            name = ctypes.create_unicode_buffer(1024)
+            shell32.DragQueryFileW(drop, 0, name, 1024)
+        finally:
+            user32.CloseClipboard()
+        assert count == 1 and os.path.samefile(name.value, video)
+    finally:
+        home.close()
 
 
 def test_title_bar_follows_the_theme(window):
