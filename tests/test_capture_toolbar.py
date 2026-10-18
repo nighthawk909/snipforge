@@ -152,8 +152,11 @@ def test_toolbar_is_labelled_for_screen_readers_and_shows_shortcuts(qapp):
     from snipforge.capture_toolbar import MODES
     o = make_overlay(toolbar=True)
     assert o.toolbar.accessibleName() == "Capture"
-    for mode, spec in MODES.items():
-        button = o.toolbar.buttons[mode]
+    from snipforge import scroll_input
+    # Scrolling is offered only where SnipForge can scroll other windows (Windows, for now).
+    assert ("scroll" in o.toolbar.buttons) == scroll_input.available()
+    for mode, button in o.toolbar.buttons.items():
+        spec = MODES[mode]
         assert button.text().strip() == spec.label and button.accessibleName() == spec.label
         assert f"({spec.key})" in button.toolTip()
         assert button.focusPolicy() == Qt.TabFocus  # a click mustn't take the keyboard from the overlay

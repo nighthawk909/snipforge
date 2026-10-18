@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF, Qt
-from PySide6.QtGui import QImage, QTransform
+from PySide6.QtGui import QFont, QImage, QTransform
 
 from . import cutout
 from .cutout import Cut
@@ -226,7 +226,7 @@ def mapped_state(item, remap: Remap) -> dict:
     old_style = state["style"]
     state["style"] = scaled_style(kind, old_style, remap.sx, remap.sy)
     if kind in UPRIGHT_KINDS:
-        _map_upright(item, state, pos, remap, old_style)
+        _map_upright(item, state, pos, remap)
     elif "size" in state:
         rect = remap.map_rect(QRectF(pos, QSizeF(*state["size"])))
         state["pos"], state["size"] = [rect.x(), rect.y()], [rect.width(), rect.height()]
@@ -286,7 +286,7 @@ def _big_enough(item, state: dict) -> None:
         state["tail"] = [state["tail"][0] + (new_w - w) / 2, state["tail"][1] + (new_h - h) / 2]
 
 
-def _map_upright(item, state: dict, pos: QPointF, remap: Remap, old_style: dict) -> None:
+def _map_upright(item, state: dict, pos: QPointF, remap: Remap) -> None:
     """Keep the item's centre over the same spot, scaled but not turned."""
     if "size" in state:  # callout, stamp: a box
         w, h = state["size"]
@@ -300,12 +300,15 @@ def _map_upright(item, state: dict, pos: QPointF, remap: Remap, old_style: dict)
             state["tail"] = [tip.x(), tip.y()]
         state["pos"], state["size"] = [top_left.x(), top_left.y()], [w, h]
     elif state["kind"] == "text":  # positioned by its top-left corner; its size comes from the font
-        box = item.boundingRect()
-        center = remap.map(pos + box.center())
-        margin = 2 * item.document().documentMargin()  # doesn't scale with the font
-        k = state["style"]["font_size"] / max(1, int(old_style["font_size"]))
-        w, h = (box.width() - margin) * k + margin, (box.height() - margin) * k + margin
-        top_left = center - QPointF(w / 2, h / 2)
+        center = remap.map(pos + item.boundingRect().center())
+        # Measured with the new font, not scaled: text doesn't grow exactly in step with its font
+        # size, and how far it strays depends on the font (a Mac has no Segoe UI, for one).
+        font = QFont(item.font())
+        font.setPointSize(int(state["style"]["font_size"]))
+        document = item.document().clone()
+        document.setDefaultFont(font)
+        size = document.size()
+        top_left = center - QPointF(size.width() / 2, size.height() / 2)
         state["pos"] = [top_left.x(), top_left.y()]
     else:  # step: positioned by its centre
         center = remap.map(pos)
