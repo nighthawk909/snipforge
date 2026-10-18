@@ -6,6 +6,7 @@ the rest. Every read falls back to a safe default when the stored value is missi
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from .settings import app_settings
@@ -130,23 +131,39 @@ def set_capture_fixed_size(width: int, height: int) -> None:
     _set("capture_fixed_size", f"{int(width)}x{int(height)}")
 
 
-def last_area() -> tuple[str, tuple[int, int, int, int]] | None:
-    """The last snip's area, for Repeat last snip: the monitor's name and (x, y, width, height) in
-    that monitor's screen pixels. None before the first snip (or if what's stored is unusable)."""
+@dataclass(frozen=True)
+class LastArea:
+    """The last snip's area, for Repeat last snip. The monitor is known by its name, `geometry`
+    (where it sits and its size, in Windows' scaled pixels) and `scale`, all as they were; `rect`
+    is the area in that monitor's screen pixels."""
+    screen: str
+    geometry: tuple[int, int, int, int]
+    scale: float
+    rect: tuple[int, int, int, int]
+
+    def valid(self) -> bool:
+        ints = (*self.geometry, *self.rect)
+        return (isinstance(self.screen, str) and len(self.geometry) == len(self.rect) == 4
+                and all(type(n) is int and abs(n) < 2**31 for n in ints)
+                and self.geometry[2] > 0 and self.geometry[3] > 0 and self.rect[2] > 0 and self.rect[3] > 0
+                and isinstance(self.scale, (int, float)) and 0.5 <= self.scale <= 8)
+
+
+def last_area() -> LastArea | None:
+    """The last snip's area, or None before the first snip (or if what's stored is unusable)."""
     try:
         value = json.loads(str(app_settings().value(KEYS["capture_last_area"], "")))
-        screen, rect = value["screen"], tuple(value["rect"])
+        area = LastArea(value["screen"], tuple(value["geometry"]), value["scale"], tuple(value["rect"]))
     except (ValueError, TypeError, KeyError):
         return None
-    if not isinstance(screen, str) or len(rect) != 4 or not all(type(n) is int for n in rect):
-        return None
-    return (screen, rect) if rect[2] > 0 and rect[3] > 0 else None
+    return area if area.valid() else None
 
 
-def set_last_area(screen: str, x: int, y: int, width: int, height: int) -> None:
-    if width <= 0 or height <= 0:
-        raise ValueError(f"an area needs a size, got {width} x {height}")
-    _set("capture_last_area", json.dumps({"screen": str(screen), "rect": [int(x), int(y), int(width), int(height)]}))
+def set_last_area(area: LastArea) -> None:
+    if not area.valid():
+        raise ValueError(f"not a usable area: {area!r}")
+    _set("capture_last_area", json.dumps({"screen": area.screen, "geometry": list(area.geometry),
+                                          "scale": area.scale, "rect": list(area.rect)}))
 
 
 def shortcut(action: str) -> str:

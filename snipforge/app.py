@@ -5,7 +5,7 @@ import ctypes
 import logging
 import sys
 
-from PySide6.QtCore import QPoint, QRect, Qt, QTimer
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -75,7 +75,7 @@ class SnipForgeApp:
         self._build_tray()
         if shortcut_problems:
             self._tray.showMessage(
-                "SnipForge", "Some of your shortcuts couldn't be set: " + " ".join(
+                "SnipForge", "Some of your shortcuts couldn't be set. " + " ".join(
                     f"{SHORTCUT_TITLES[action]}: {problem}" for action, problem in shortcut_problems.items())
                 + " Change them in Settings > Capture.", QSystemTrayIcon.Warning)
         app.aboutToQuit.connect(self._hotkey.stop)
@@ -188,16 +188,16 @@ class SnipForgeApp:
         if self._session is not None:
             self._session.snip_now()
             return
-        last = prefs.last_area()
-        area = (last[0], QRect(*last[1])) if last is not None else None
-        if area is None or not on_screen(*area):
-            self._tray.showMessage(
-                "SnipForge", "Nothing to repeat yet: choose what to snip." if area is None
-                else "Your last snip's area isn't on screen any more, so choose what to snip.",
-                QSystemTrayIcon.Information, 4000)
+        area = prefs.last_area()
+        if area is None or not on_screen(area):
+            self._note("Nothing to repeat yet: choose what to snip." if area is None
+                       else "Your last snip's area isn't on screen any more, so choose what to snip.")
             self.capture()
             return
-        self._start(CaptureSession(self._on_captured, repeat=area))
+        self._start(CaptureSession(self._on_captured, repeat=area, on_note=self._note))
+
+    def _note(self, text: str) -> None:
+        self._tray.showMessage("SnipForge", text, QSystemTrayIcon.Information, 4000)
 
     def _start(self, session: CaptureSession) -> None:
         self._session = session
@@ -223,8 +223,7 @@ class SnipForgeApp:
         if image is None:
             return
         if area is not None:  # for Repeat last snip
-            name, rect = area
-            prefs.set_last_area(name, rect.x(), rect.y(), rect.width(), rect.height())
+            prefs.set_last_area(area)
             self._repeat_action.setEnabled(True)
         if prefs.copy_on_capture():  # like Win+Shift+S: the raw snip is on the clipboard too
             QGuiApplication.clipboard().setImage(image)

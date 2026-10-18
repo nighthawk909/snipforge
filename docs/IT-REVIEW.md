@@ -21,7 +21,7 @@ be checked in the source code; file references are given where useful.
 | What | Where | Removed on uninstall? |
 |---|---|---|
 | The user's snips (original capture, editable markup, rendered image) | `%USERPROFILE%\Pictures\SnipForge` | No (it's the user's work) |
-| Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses, update choices (mode, channel, pinned or skipped version, the waiting download) | `HKCU\Software\SnipForge\SnipForge` | Yes |
+| Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses, update choices (mode, channel, pinned or skipped version, the waiting download), capture choices (mode, delay, pointer, Fixed size), shortcuts of your own, and the last snip's area for Repeat last snip (the monitor's name, position, size and scale, and a rectangle on it; no image) | `HKCU\Software\SnipForge\SnipForge` | Yes |
 | Small theme images (check mark, arrows) regenerated at start | `%LOCALAPPDATA%\SnipForge\cache` | Yes |
 | Per snip in the library: `meta.json` with the app name and window title it came from, favorite, tags, and the words Windows OCR read in the finished snip (for Library search; read offline, cleared and re-read after each edit, so blurred or cropped text doesn't stay searchable) | `%USERPROFILE%\Pictures\SnipForge\Library\<snip>` | No (it's the user's work) |
 | Theme packs (optional, read-only JSON colors; see [THEMES.md](THEMES.md)) | `themes\` next to `SnipForge.exe`, and `%LOCALAPPDATA%\SnipForge\themes` | Install folder: yes. User folder: no |
@@ -47,7 +47,7 @@ add key combinations for New snip, Repeat last snip and Open the Library. These 
 pressed and never shows it any other keystroke. Each needs Ctrl, Alt or the Windows key; a
 combination another app already registered is refused. None are set by default.
 
-**Screen capture.** The screen is read only after the hotkey is pressed or the user chooses New snip.
+**Screen capture.** The screen is read only when the user asks for a snip: the hotkey, New snip, Repeat last snip, or one of their own shortcuts. Repeat last snip reads the same area again straight away, without the chooser. A second `SnipForge.exe --snip` or `--repeat` started by the same user is passed to the running copy over a local per-user pipe, which is how the Start menu and taskbar entries reach it.
 
 **Startup entry** (optional). Written to the `Run` key so the hotkey works after sign-in.
 

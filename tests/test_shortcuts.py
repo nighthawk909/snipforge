@@ -4,6 +4,8 @@ import sys
 import time
 
 import pytest
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QFocusEvent, QKeyEvent
 from PySide6.QtWidgets import QApplication
 
 from snipforge import autostart, prefs, shortcuts
@@ -64,7 +66,9 @@ def test_shortcuts_are_remembered_and_validated():
     ("Ctrl+Print", (MOD_CONTROL, 0x2C)),
     ("Ctrl+Alt+PgDown", (MOD_CONTROL | MOD_ALT, 0x22)),
     ("Ctrl+Alt+Shift+F24", (MOD_CONTROL | MOD_ALT | MOD_SHIFT, 0x87)),
-    ("Ctrl+Space", (MOD_CONTROL, 0x20)),
+    ("Ctrl+Shift+Space", (MOD_CONTROL | MOD_SHIFT, 0x20)),
+    ("Ctrl+Shift+Num+5", (MOD_CONTROL | MOD_SHIFT, 0x65)),  # the number pad's 5
+    ("Meta+Q", (MOD_WIN, 0x51)),
 ])
 def test_key_combinations_become_windows_hotkeys(text, expected):
     assert shortcuts.check(text) is None
@@ -79,6 +83,17 @@ def test_key_combinations_become_windows_hotkeys(text, expected):
     ("Ctrl+;", "a letter, a number"),
     ("Ctrl+X, Ctrl+Y", "one key combination"),
     ("Ctrl+", "a letter, a number"),
+    ("Ctrl+Alt+Q", "AltGr"),
+    ("Ctrl+Alt+Shift+2", "AltGr"),
+    ("Ctrl+Meta+Shift+S", "Win+Shift+S"),
+    ("Alt+F4", "closes windows"),
+    ("Ctrl+F4", "closes tabs"),
+    ("Ctrl+Alt+Del", "belongs to Windows"),
+    ("Alt+Shift+Print", "high contrast"),
+    ("Alt+Print", "Alt+Print Screen"),
+    ("Ctrl+C", "Apps already use"),
+    ("Alt+Space", "Apps already use"),
+    ("Ctrl+Home", "Apps already use"),
 ])
 def test_combinations_that_would_get_in_the_way_are_refused(text, problem):
     assert problem in shortcuts.check(text)
@@ -113,11 +128,11 @@ def test_a_shortcut_registers_and_runs_its_action(qapp):
 
 
 def test_a_combination_another_app_owns_is_refused_and_the_old_one_kept(qapp):
-    api = FakeApi(taken={(MOD_CONTROL | MOD_ALT, 0x4C)})
+    api = FakeApi(taken={(MOD_CONTROL | MOD_ALT, 0x79)})
     keys = shortcuts.GlobalShortcuts(api=api)
     assert keys.set("library", "Ctrl+Shift+L") is None
-    problem = keys.set("library", "Ctrl+Alt+L")
-    assert "Another app already uses Ctrl+Alt+L" in problem
+    problem = keys.set("library", "Ctrl+Alt+F10")
+    assert "Another app already uses Ctrl+Alt+F10" in problem
     assert keys.bindings() == {"library": "Ctrl+Shift+L"}
     assert list(api.registered.values()) == [(MOD_CONTROL | MOD_SHIFT, 0x4C)]
     keys.close()
@@ -141,12 +156,12 @@ def test_a_refused_combination_is_never_registered(qapp):
 
 def test_saved_shortcuts_are_registered_at_start_and_problems_reported(qapp):
     prefs.set_shortcut("snip", "Ctrl+Shift+X")
-    prefs.set_shortcut("library", "Ctrl+Alt+L")
-    api = FakeApi(taken={(MOD_CONTROL | MOD_ALT, 0x4C)})
+    prefs.set_shortcut("library", "Ctrl+Alt+F10")
+    api = FakeApi(taken={(MOD_CONTROL | MOD_ALT, 0x79)})
     keys = shortcuts.GlobalShortcuts(api=api)
     problems = keys.apply_saved()
     assert keys.bindings() == {"snip": "Ctrl+Shift+X"}
-    assert list(problems) == ["library"] and "Ctrl+Alt+L" in problems["library"]
+    assert list(problems) == ["library"] and "Ctrl+Alt+F10" in problems["library"]
     keys.close()
     assert api.registered == {}  # closing lets them all go
 
@@ -164,7 +179,7 @@ def test_without_windows_there_are_no_shortcuts_of_your_own(qapp, monkeypatch):
 @pytest.fixture
 def settings(qapp, tmp_path):
     from snipforge.settings_window import SettingsWindow
-    keys = shortcuts.GlobalShortcuts(api=FakeApi(taken={(MOD_CONTROL | MOD_ALT, 0x4C)}))
+    keys = shortcuts.GlobalShortcuts(api=FakeApi(taken={(MOD_CONTROL | MOD_ALT, 0x79)}))
     changed = []
     w = SettingsWindow(library_root=tmp_path, shortcuts=keys, on_shortcuts_changed=lambda: changed.append(1))
     w.changed = changed
@@ -186,11 +201,10 @@ def test_settings_set_a_shortcut_of_your_own(settings):
 
 
 def test_settings_explain_a_shortcut_that_cannot_be_used(settings):
-    prefs.set_shortcut("library", "Ctrl+Shift+L")
-    settings.refresh()
     edit = settings.shortcut_edits["library"]
-    edit.changed.emit("Ctrl+Alt+L")
-    assert "Another app already uses Ctrl+Alt+L" in settings.shortcut_problem.text()
+    edit.changed.emit("Ctrl+Shift+L")
+    edit.changed.emit("Ctrl+Alt+F10")
+    assert "Another app already uses Ctrl+Alt+F10" in settings.shortcut_problem.text()
     assert not settings.shortcut_problem.isHidden()
     assert prefs.shortcut("library") == "Ctrl+Shift+L" and edit.text() == "Ctrl+Shift+L"  # back to what works
 
@@ -202,23 +216,127 @@ def test_settings_hide_shortcuts_where_they_cannot_work(qapp, tmp_path):
     w.close()
 
 
-def test_the_shortcut_editor_records_one_combination(qapp):
-    from PySide6.QtCore import QEvent, Qt
-    from PySide6.QtGui import QKeyEvent
+def _key(widget, key, mods=Qt.NoModifier, text=""):
+    QApplication.sendEvent(widget, QKeyEvent(QEvent.KeyPress, key, mods, text))
+    QApplication.sendEvent(widget, QKeyEvent(QEvent.KeyRelease, key, mods, text))
 
+
+def _focus(widget, on: bool):
+    QApplication.sendEvent(widget, QFocusEvent(QEvent.FocusIn if on else QEvent.FocusOut, Qt.MouseFocusReason))
+
+
+def editor(text=""):
     from snipforge.shortcut_edit import ShortcutEdit
-    edit = ShortcutEdit("")
-    got = []
-    edit.changed.connect(got.append)
-    target = edit.edit
-    QApplication.sendEvent(target, QKeyEvent(QEvent.KeyPress, Qt.Key_X, Qt.ControlModifier | Qt.ShiftModifier, "X"))
-    QApplication.sendEvent(target, QKeyEvent(QEvent.KeyRelease, Qt.Key_X, Qt.ControlModifier | Qt.ShiftModifier, "X"))
-    edit.edit.editingFinished.emit()
-    assert got[-1] == "Ctrl+Shift+X" and edit.text() == "Ctrl+Shift+X"
+    edit = ShortcutEdit(text)
+    edit.got = []
+    edit.changed.connect(edit.got.append)
+    edit.editing_log = []
+    edit.editing.connect(edit.editing_log.append)
+    return edit
+
+
+def test_the_shortcut_editor_records_one_combination(qapp):
+    edit = editor()
+    _focus(edit.edit, True)
+    _key(edit.edit, Qt.Key_X, Qt.ControlModifier | Qt.ShiftModifier, "X")  # finishes by itself
+    assert edit.got == ["Ctrl+Shift+X"] and edit.text() == "Ctrl+Shift+X"
+    _focus(edit.edit, False)
+    assert edit.editing_log == [True, False] and edit.got == ["Ctrl+Shift+X"]
     edit.clear()
-    assert got[-1] == "" and edit.text() == ""
+    assert edit.got[-1] == "" and edit.text() == ""
     edit.set_text("Meta+Alt+1")  # shown, not announced
-    assert got[-1] == "" and edit.text() == "Meta+Alt+1"
+    assert edit.got[-1] == "" and edit.text() == "Meta+Alt+1"
+
+
+def test_a_lone_modifier_then_leaving_never_wipes_a_shortcut(qapp):
+    edit = editor("Ctrl+Shift+R")
+    for modifier, mods in ((Qt.Key_Control, Qt.ControlModifier), (Qt.Key_Meta, Qt.MetaModifier),
+                           (Qt.Key_Alt, Qt.AltModifier)):
+        _focus(edit.edit, True)
+        QApplication.sendEvent(edit.edit, QKeyEvent(QEvent.KeyPress, modifier, mods))
+        _focus(edit.edit, False)
+        edit.edit.editingFinished.emit()  # however Qt finishes it
+        assert edit.got == [] and edit.text() == "Ctrl+Shift+R", modifier
+        assert not edit.edit.keySequence().isEmpty()  # the field shows it again too
+
+
+def test_esc_cancels_and_backspace_clears(qapp):
+    edit = editor("Ctrl+Shift+R")
+    _focus(edit.edit, True)
+    _key(edit.edit, Qt.Key_Escape)
+    assert edit.got == [] and edit.text() == "Ctrl+Shift+R"
+    _focus(edit.edit, True)
+    _key(edit.edit, Qt.Key_Backspace)
+    assert edit.got == [""] and edit.text() == ""
+    _key(edit.edit, Qt.Key_Delete)  # nothing left to clear: nothing announced
+    assert edit.got == [""]
+
+
+def test_the_field_says_win_not_meta(qapp):
+    from PySide6.QtWidgets import QLineEdit
+    edit = editor("Meta+Shift+R")
+    assert edit.edit.findChild(QLineEdit).text() == "Win+Shift+R"
+
+
+def test_garbage_is_refused_and_keeps_the_old_shortcut(qapp):
+    api = FakeApi()
+    keys = shortcuts.GlobalShortcuts(api=api)
+    assert keys.set("snip", "Ctrl+Shift+X") is None
+    for junk in ("bogus", "Ctrl+", "Ctrl+Shift+Banana"):
+        assert "a letter, a number" in keys.set("snip", junk)
+    assert keys.bindings() == {"snip": "Ctrl+Shift+X"} and len(api.registered) == 1
+    keys.close()
+
+
+def test_shortcuts_step_aside_while_one_is_edited(qapp):
+    api = FakeApi()
+    keys = shortcuts.GlobalShortcuts(api=api)
+    keys.set("snip", "Ctrl+Shift+X")
+    keys.suspend()
+    assert api.registered == {}  # pressing Ctrl+Shift+X now records it instead of snipping
+    assert keys.set("repeat", "Ctrl+Shift+R") is None  # checked free, but not taken until editing ends
+    assert api.registered == {} and keys.bindings() == {"snip": "Ctrl+Shift+X", "repeat": "Ctrl+Shift+R"}
+    assert "already the shortcut for New snip" in keys.set("library", "Ctrl+Shift+X")
+    assert keys.resume() == {}
+    assert sorted(api.registered.values()) == [(MOD_CONTROL | MOD_SHIFT, 0x52), (MOD_CONTROL | MOD_SHIFT, 0x58)]
+    keys.close()
+
+
+def test_a_combination_taken_while_editing_is_reported(qapp):
+    api = FakeApi()
+    keys = shortcuts.GlobalShortcuts(api=api)
+    keys.set("snip", "Ctrl+Shift+X")
+    keys.suspend()
+    api.taken.add((MOD_CONTROL | MOD_SHIFT, 0x58))  # another app grabs it meanwhile
+    problems = keys.resume()
+    assert list(problems) == ["snip"] and "Ctrl+Shift+X" in problems["snip"]
+    assert keys.bindings() == {} and api.registered == {}
+    keys.close()
+
+
+def test_settings_suspend_shortcuts_while_a_field_has_the_keyboard(settings):
+    keys = settings._shortcuts
+    keys.set("repeat", "Ctrl+Shift+R")
+    api = keys._api
+    _focus(settings.shortcut_edits["snip"].edit, True)
+    assert api.registered == {}
+    _focus(settings.shortcut_edits["snip"].edit, False)
+    assert list(api.registered.values()) == [(MOD_CONTROL | MOD_SHIFT, 0x52)]
+
+
+def test_settings_show_a_saved_shortcut_that_failed_at_start(qapp, tmp_path):
+    from snipforge.settings_window import SettingsWindow
+    prefs.set_shortcut("library", "Ctrl+Alt+F10")
+    keys = shortcuts.GlobalShortcuts(api=FakeApi(taken={(MOD_CONTROL | MOD_ALT, 0x79)}))
+    keys.apply_saved()
+    w = SettingsWindow(library_root=tmp_path, shortcuts=keys)
+    try:
+        assert w.shortcut_edits["library"].text() == ""  # not shown as if it worked
+        assert "Ctrl+Alt+F10" in w.shortcut_problem.text() and not w.shortcut_problem.isHidden()
+        assert prefs.shortcut("library") == "Ctrl+Alt+F10"  # kept, so the next start tries again
+    finally:
+        w.close()
+        keys.close()
 
 
 # --- the real thing ------------------------------------------------------------------------------

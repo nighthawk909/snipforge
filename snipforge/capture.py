@@ -12,6 +12,7 @@ the mouse pointer, grabbed the moment the screen froze, can be drawn into the sn
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import replace
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
@@ -51,15 +52,33 @@ def _grab_screen(screen) -> QPixmap:
     return screen.grabWindow(0)
 
 
-def on_screen(name: str, rect: QRect) -> bool:
-    """Whether a remembered area (a monitor's name, and screen pixels on it) is still all on that
-    monitor, for Repeat last snip."""
-    screen = next((s for s in QGuiApplication.screens() if s.name() == name), None)
+def area_on(screen, rect: QRect) -> prefs.LastArea:
+    """A snip's area, with enough about its monitor to find that monitor again (Repeat last snip)."""
+    return prefs.LastArea(screen.name(), _geometry(screen), round(screen.devicePixelRatio(), 3),
+                          (rect.x(), rect.y(), rect.width(), rect.height()))
+
+
+def screen_for(area: prefs.LastArea):
+    """The monitor `area` was snipped on, if it's still there exactly as it was: same name, place,
+    size and scale. None otherwise, so a repeat never lands on a look-alike monitor or on a monitor
+    whose resolution or scaling changed."""
+    matches = [s for s in QGuiApplication.screens()
+               if (s.name(), _geometry(s), round(s.devicePixelRatio(), 3)) == (area.screen, area.geometry, area.scale)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _geometry(screen) -> tuple[int, int, int, int]:
+    g = screen.geometry()
+    return g.x(), g.y(), g.width(), g.height()
+
+
+def on_screen(area: prefs.LastArea) -> bool:
+    """Whether Repeat last snip can take `area` again."""
+    screen = screen_for(area)
     if screen is None:
         return False
-    dpr = screen.devicePixelRatio()
-    size = QSize(round(screen.geometry().width() * dpr), round(screen.geometry().height() * dpr))
-    return QRect(QPoint(0, 0), size).contains(rect)
+    w, h = area.geometry[2] * area.scale, area.geometry[3] * area.scale
+    return QRect(0, 0, math.ceil(w), math.ceil(h)).contains(QRect(*area.rect))
 
 
 def _pointer_unavailable_reason() -> str:
@@ -585,12 +604,13 @@ def _nudge_step(modifiers) -> int:
 class CaptureSession:
     """Owns the overlays for one capture; calls back with the image or None."""
 
-    def __init__(self, on_done, repeat: tuple[str, QRect] | None = None) -> None:
-        """`repeat`: Repeat last snip, (monitor name, area in its screen pixels) taken again with no
-        overlay."""
+    def __init__(self, on_done, repeat: prefs.LastArea | None = None, on_note=None) -> None:
+        """`repeat`: Repeat last snip, this area taken again with no overlay. `on_note(text)` tells
+        the person something straight away (e.g. that the area to repeat has gone)."""
         self._on_done = on_done
         self._repeat = repeat
-        self.area: tuple[str, QRect] | None = None  # where the snip came from, for the next repeat
+        self._on_note = on_note
+        self.area: prefs.LastArea | None = None  # where the snip came from, for the next repeat
         self._overlays: list[_ScreenOverlay] = []
         self._finished = False
         self.focus: _ScreenOverlay | None = None  # the overlay that has the keyboard
@@ -743,20 +763,24 @@ class CaptureSession:
     def _took(self, overlay: _ScreenOverlay, image: QImage) -> None:
         """A snip chosen on `overlay` (or repeated there): remember where, for Repeat last snip."""
         if overlay.last_rect is not None:
-            self.area = (overlay.capture_screen.name(), QRect(overlay.last_rect))
+            self.area = area_on(overlay.capture_screen, overlay.last_rect)
         self._finish(image, overlay.last_source)
 
     def _take_again(self) -> None:
         """Repeat last snip: the same area of the same monitor, straight away. It goes through an
         overlay that's never shown, so the pointer, the window it came from and the image come out
         exactly as a chosen snip's would. An area that's no longer on screen gets a normal snip."""
-        name, rect = self._repeat
-        self._repeat = None
-        screen = next((s for s in QGuiApplication.screens() if s.name() == name), None)
+        area, self._repeat = self._repeat, None
+        rect = QRect(*area.rect)
+        screen = screen_for(area)
         shot = pointer.grab() if screen is not None else None  # first, as for any snip
         pixmap = _grab_screen(screen) if screen is not None else None
         if pixmap is None or not QRect(QPoint(0, 0), pixmap.size()).contains(rect):
-            self.note = "Your last snip's area isn't on screen any more, so choose what to snip."
+            gone = "Your last snip's area isn't on screen any more, so choose what to snip."
+            if self._on_note is not None:
+                self._on_note(gone)  # now, while choosing, not after
+            else:
+                self.note = gone
             self._show_overlays()
             return
         try:

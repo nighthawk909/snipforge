@@ -245,8 +245,7 @@ class SettingsWindow(QMainWindow):
         self.format.set_value(prefs.export_format())
         self.start_mode.set_value(self._start_mode())
         self.delay.set_value(str(prefs.capture_delay()))
-        for action, edit in self.shortcut_edits.items():
-            edit.set_text(prefs.shortcut(action))
+        self._show_shortcuts()
         self._retheme()
 
     def _retheme(self, _theme=None) -> None:
@@ -339,9 +338,10 @@ class SettingsWindow(QMainWindow):
         self.shortcut_edits: dict[str, ShortcutEdit] = {}
         rows: list[QWidget] = []
         for action, title in SHORTCUT_TITLES.items():
-            edit = ShortcutEdit(prefs.shortcut(action))
+            edit = ShortcutEdit()
             edit.setAccessibleName(f"Shortcut for {title}")
             edit.changed.connect(lambda text, a=action: self._set_shortcut(a, text))
+            edit.editing.connect(self._shortcut_editing)
             self.shortcut_edits[action] = edit
             rows.append(SettingRow(title, descriptions[action], edit))
         self.shortcut_problem = QLabel()
@@ -352,17 +352,46 @@ class SettingsWindow(QMainWindow):
         available = self._shortcuts is not None and self._shortcuts.supported
         for row in rows:
             row.setVisible(available)
+        self._show_shortcuts()
         return [*rows, self.shortcut_problem]
 
-    def _set_shortcut(self, action: str, text: str) -> None:
-        problem = self._shortcuts.set(action, text) if self._shortcuts is not None else None
-        if problem:
-            self.shortcut_edits[action].set_text(prefs.shortcut(action))  # back to the one that works
-            self.shortcut_problem.setText(f"{SHORTCUT_TITLES[action]}: {problem}")
-            self.shortcut_problem.show()
+    def _show_shortcuts(self) -> None:
+        """What's really working: a saved combination another app took is shown empty, with why."""
+        bound = self._shortcuts.bindings() if self._shortcuts is not None else {}
+        for action, edit in self.shortcut_edits.items():
+            edit.set_text(bound.get(action, ""))
+        problems = self._shortcuts.problems if self._shortcuts is not None else {}
+        self._show_shortcut_problems({a: p for a, p in problems.items() if a not in bound})
+
+    def _show_shortcut_problems(self, problems: dict[str, str]) -> None:
+        text = " ".join(f"{SHORTCUT_TITLES[action]}: {problem}" for action, problem in problems.items())
+        self.shortcut_problem.setText(text)
+        self.shortcut_problem.setVisible(bool(text))
+
+    def _shortcut_editing(self, on: bool) -> None:
+        """While a combination is being typed, the others step aside, so pressing one records it
+        instead of running it."""
+        if self._shortcuts is None:
             return
-        prefs.set_shortcut(action, self._shortcuts.bindings().get(action, "") if self._shortcuts else text)
-        self.shortcut_problem.hide()
+        if on:
+            self._shortcuts.suspend()
+            return
+        problems = self._shortcuts.resume()
+        if problems:
+            for action in problems:
+                self.shortcut_edits[action].set_text("")
+            self._show_shortcut_problems(problems)
+
+    def _set_shortcut(self, action: str, text: str) -> None:
+        if self._shortcuts is None:
+            return
+        problem = self._shortcuts.set(action, text)
+        if problem:
+            self.shortcut_edits[action].set_text(self._shortcuts.bindings().get(action, ""))  # what works
+            self._show_shortcut_problems({action: problem})
+            return
+        prefs.set_shortcut(action, self._shortcuts.bindings().get(action, ""))
+        self._show_shortcut_problems({})
         if self._on_shortcuts_changed is not None:
             self._on_shortcuts_changed()
 

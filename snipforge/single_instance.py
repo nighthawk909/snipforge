@@ -31,6 +31,7 @@ class InstanceServer(QObject):
         super().__init__(parent)
         self._server = QLocalServer(self)
         QLocalServer.removeServer(SERVER_NAME)  # clear a stale socket left by a crash
+        self._server.setSocketOptions(QLocalServer.UserAccessOption)  # only this user can send commands
         self.listening = self._server.listen(SERVER_NAME)
         self._server.newConnection.connect(self._accept)
 
