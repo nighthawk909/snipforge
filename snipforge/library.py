@@ -32,6 +32,8 @@ from pathlib import Path
 from PySide6.QtCore import QFile, Qt
 from PySide6.QtGui import QImage
 
+from .privacy import is_private_window
+
 log = logging.getLogger(__name__)
 
 DEFAULT_ROOT = Path.home() / "Pictures" / "SnipForge" / "Library"
@@ -278,7 +280,14 @@ class Library:
             except OSError:
                 pass
             return EntryMeta()
-        return EntryMeta(**_normalized(data)) if isinstance(data, dict) else EntryMeta()
+        if not isinstance(data, dict):
+            return EntryMeta()
+        meta = EntryMeta(**_normalized(data))
+        if meta.title and is_private_window(meta.title, meta.app):
+            # Saved by an older version that didn't know this browser or language: never shown or
+            # searched, and gone from the file the next time the snip's details are saved.
+            meta = replace(meta, title="")
+        return meta
 
     def update_meta(self, entry: Entry, **changes) -> EntryMeta:
         known = {f.name for f in fields(EntryMeta)}
@@ -287,10 +296,43 @@ class Library:
             raise ValueError(f"unknown snip details: {', '.join(sorted(unknown))}")
         with self._meta_lock:
             meta = replace(self.read_meta(entry), **_normalized(changes))
+            if meta.title and is_private_window(meta.title, meta.app):
+                meta = replace(meta, title="")  # never written, whoever passes it
             data = {f.name: getattr(meta, f.name) for f in fields(EntryMeta)}
             data["tags"] = list(meta.tags)
             _write_text_atomic(json.dumps(data, ensure_ascii=False), entry.path / META)
         return meta
+
+    def forget_private_titles(self, stop=lambda: False) -> tuple[int, bool]:
+        """Clear the saved title of every snip from a private browsing window: ones saved by a
+        version whose check didn't know that browser or language. Returns (how many changed,
+        whether every snip was checked): a file that couldn't be read or written right now (locked
+        by sync or antivirus), or `stop()` turning true, leaves it False so it's tried again. Safe
+        on a worker thread (writes go through update_meta's lock)."""
+        changed, complete = 0, True
+        for entry in self.entries():
+            if stop():
+                return changed, False
+            try:
+                data = json.loads((entry.path / META).read_bytes().decode("utf-8"))
+            except FileNotFoundError:
+                continue  # no details saved: nothing to clear
+            except OSError:
+                complete = False
+                continue
+            except (ValueError, RecursionError):
+                continue  # damaged: reading it in the Library moves it aside
+            if not isinstance(data, dict):
+                continue
+            title, app = data.get("title"), data.get("app")
+            if isinstance(title, str) and title and is_private_window(title, app if isinstance(app, str) else ""):
+                try:
+                    self.update_meta(entry)
+                    changed += 1
+                except OSError as exc:
+                    complete = False
+                    log.info("Couldn't clear a private title from snip %s yet: %s", entry.id, exc)
+        return changed, complete
 
     def scan(self) -> list[Snapshot]:
         """Every snip, newest first, from one directory listing per snip (no file is opened)."""

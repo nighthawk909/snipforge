@@ -4,9 +4,10 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -19,6 +20,7 @@ from .hotkey import HotkeyListener
 from .indexer import TextIndexer
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
+from .privacy import CHECK_VERSION as PRIVACY_CHECK
 from .settings_window import SECTIONS, SettingsWindow
 from .shortcuts import ACTIONS as SHORTCUT_TITLES
 from .shortcuts import GlobalShortcuts
@@ -31,6 +33,11 @@ log = logging.getLogger(__name__)
 CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing the screen
 REHOOK_MS = 5 * 60 * 1000  # reinstall the keyboard hook in case Windows dropped it
 APP_ID = "SnipForge.SnipForge"
+
+
+class _Finished(QObject):
+    """Reports a worker thread's end back on the GUI thread."""
+    done = Signal()
 
 
 def build_icon(size: int = 256) -> QIcon:
@@ -82,8 +89,31 @@ class SnipForgeApp:
                 + " Change them in Settings > Capture.", QSystemTrayIcon.Warning)
         app.aboutToQuit.connect(self._hotkey.stop)
         app.aboutToQuit.connect(self._shortcuts.close)
+        self._forget_private_titles()
         app.aboutToQuit.connect(self.indexer.close)
         app.aboutToQuit.connect(self._stop_recording_on_quit)
+
+    def _forget_private_titles(self) -> None:
+        """Once per version of the private-window check, in the background: clear private
+        browsing windows' titles that older versions saved with snips."""
+        if prefs.private_titles_checked() >= PRIVACY_CHECK:
+            return
+        self._privacy_sweep = _Finished()
+        self._privacy_sweep.done.connect(lambda: prefs.set_private_titles_checked(PRIVACY_CHECK), Qt.QueuedConnection)
+        stop = threading.Event()
+        self._app.aboutToQuit.connect(stop.set)
+
+        def sweep() -> None:
+            try:
+                cleared, complete = self.library.forget_private_titles(stop.is_set)
+                if cleared:
+                    log.info("Cleared %d private browsing titles from the Library", cleared)
+                if complete:  # anything skipped (locked, or quitting) is tried again next start
+                    self._privacy_sweep.done.emit()
+            except Exception:
+                log.exception("Couldn't check the Library for private browsing titles")
+
+        threading.Thread(target=sweep, name="snipforge-privacy", daemon=True).start()
 
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
