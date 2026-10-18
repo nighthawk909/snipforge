@@ -17,14 +17,15 @@ collect_ignore = [] if sys.platform == "win32" else ["desktop"]
 
 
 def pytest_collection_modifyitems(config, items):
-    """Tests marked `windows` need Windows itself (registry, Explorer, Win32): skipped elsewhere,
-    e.g. in the macOS build workflow."""
-    if sys.platform == "win32":
-        return
-    skip = pytest.mark.skip(reason="needs Windows (docs/MAC-PLAN.md)")
+    """Tests marked `windows` need Windows itself (registry, Explorer, Win32), and tests marked `mac`
+    need macOS (AppKit, Quartz, Vision): each is skipped on the other platform
+    (docs/CROSS-PLATFORM.md)."""
+    skips = {"windows": (sys.platform != "win32", "needs Windows (docs/CROSS-PLATFORM.md)"),
+             "mac": (sys.platform != "darwin", "needs macOS (docs/CROSS-PLATFORM.md)")}
     for item in items:
-        if item.get_closest_marker("windows"):
-            item.add_marker(skip)
+        for marker, (skipped, reason) in skips.items():
+            if skipped and item.get_closest_marker(marker):
+                item.add_marker(pytest.mark.skip(reason=reason))
 
 
 class _MacSys:
