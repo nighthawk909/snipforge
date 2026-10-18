@@ -8,8 +8,12 @@ platform is in [PARITY.md](PARITY.md); the macOS APIs, permissions and Gatekeepe
 
 ## The rules
 
-1. **Every feature ships on both platforms in the same release.** If the Mac half genuinely can't
-   be built in the same PR (it needs a Mac to prove, or an API is missing), the PR:
+0. **Windows first, then the Mac port** (the maintainer's call; [ROADMAP.md](ROADMAP.md)). Until
+   the Windows roadmap is done, new features are built for Windows and step aside on the Mac (rule
+   1); then every Windows feature is ported in one go. Meanwhile the Mac version must keep building,
+   installing and starting in CI, and its shared features (editor, Library, Settings) keep working.
+1. **Every feature ships on both platforms in the same release** (once the Mac port is done; until
+   then, see rule 0). If the Mac half can't be built in the same PR, the PR:
    - makes the feature step aside cleanly on the other platform: hidden or disabled with a short
      explanation, never an error or a crash;
    - adds or updates its row in [PARITY.md](PARITY.md) with what's missing and the plan;
@@ -86,6 +90,10 @@ Things that look the same as on Windows and aren't. Add to this list whenever on
   permissions, login items and IT profiles to it, as the installer's `AppId` is on Windows.
 - **Gatekeeper.** The free build isn't notarized, so the first launch needs System Settings >
   Privacy & Security > Open Anyway. Release notes and the download page say so.
+- **Compiled dependencies must be universal2 or get fused.** SnipForge.app is one build for Apple
+  silicon and Intel, so every compiled file in it needs both. A dependency PyPI ships one
+  architecture at a time (Pillow) goes in `SPLIT_WHEELS` in `scripts/universal.py`, which fuses
+  both wheels with `lipo` before PyInstaller runs and checks the built app.
 
 ## Checklist for a pull request
 

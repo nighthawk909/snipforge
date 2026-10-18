@@ -175,6 +175,7 @@ Then run ruff and pytest as in step 2.
 | `SECURITY.md` | Where to report a vulnerability |
 | `docs/DISTRIBUTION.md` | Download link, download page, how to verify a release |
 | `docs/IT-REVIEW.md` | Update check and download addresses, how to verify a release |
+| `docs/ROADMAP.md` | Links to the `feedback` and `idea` issues (point them at your own repository's issues) |
 | `docs/site/index.html` | Download page links (`scripts/build_site.py` also re-points them when it builds the page) |
 | `.github/workflows/pages.yml` | The download page's address, in a comment (rewritten only with `--pages-url`) |
 

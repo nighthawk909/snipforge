@@ -366,7 +366,14 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    Done so far: disk space (no start below 500 MB free; a warning below 1 GB; below 200 MB the
    recording stops and is kept, since a full drive can't finish the file), Windows "N" editions
    (`support.py`: the recorder and the self-test say to add the Media Feature Pack), a sound device
-   unplugged (a warning, step 5), the screen lost (kept, step 5), sleep, shutdown and sign-out
+   unplugged (a warning, step 5; recording Windows' default device, the capture now carries on
+   from the next default instead, waiting up to 5 s for Windows to pick one; with none, it says so
+   once and picks up one that's connected later), Windows' default sound device changing
+   mid-recording (headphones plugged in, a Bluetooth headset connecting: `wasapi.py` checks the
+   default's id every second, opens the new one and only then lets go of the old, keeping the old
+   if the new won't open yet; so up to a second of the computer's sound can be missed, not the rest
+   of the recording; the microphone follows too, silently, unless one was chosen), the screen lost
+   (kept, step 5), sleep, shutdown and sign-out
    (the file is finished first, step 5b). Staying awake: while recording (or starting, or
    finishing; not while paused), Windows isn't to sleep or turn the screen off for inactivity
    (`power.stay_awake`, `SetThreadExecutionState` on the recorder process's main thread, following
@@ -399,6 +406,28 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    Python's own memory stays flat over a recording (tracemalloc): the slow growth is in Qt and
    FFmpeg (the MP4's index, kept in memory until the file is finished, would be about 15 MB an hour
    of it by estimate).
+
+   **Step 9 is done on Windows (2026-10-18).** The platform layer is in place for the Mac's
+   recording phase (`power.py` / `_power_win32.py`; `wasapi.py` and `dxgi.py` are the Windows
+   capture), and the video tests check what holds on any machine, so they pass on the macOS runner
+   too. What's left can only be checked by a person, on real hardware:
+
+   - [ ] **An hour of the real thing:** `python scripts/soak_recording.py --minutes 60 --real-screen
+     --real-sound` on a PC where recording the screen and microphone for an hour is fine.
+     `report.json` should say `"ok": true`, with no frames dropped and memory level.
+   - [ ] **A headset plugged in and unplugged mid-recording** (USB or Bluetooth, with the
+     microphone left on "Windows' default"): the sound carries on from the new device within about
+     a second, and from the next one when it's unplugged.
+   - [ ] **Two monitors with different scaling** (say 100% and 150%): record an area on each. The
+     area's frame, the ready panel, the control bar and the webcam bubble sit where they should,
+     and the video shows exactly the area.
+   - [ ] **A UAC prompt mid-recording:** the recording goes on (the secure desktop can't be
+     recorded, so the video holds the last picture) and picks up again when the prompt is gone.
+   - [ ] **Win+L mid-recording:** paused, with a note; after unlocking, Resume carries on.
+   - [ ] **Sleep and sign-out mid-recording** (close the lid; Start > Sign out): the file is
+     finished first and plays.
+   - [ ] **An HDR display and a rotated (portrait) monitor:** colours look normal, and the picture
+     is upright.
 
 Later, not in Phase 4: following a moving or covered window (Windows.Graphics.Capture), editing the
 pointer effects after recording (by saving the pointer's path separately), noise suppression.
