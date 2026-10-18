@@ -1,4 +1,6 @@
 """Moving, resizing and aiming markup: whatever tool is active, markup on the snip is easy to grab."""
+import sys
+
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent
 from PySide6.QtWidgets import QApplication
@@ -258,7 +260,7 @@ def test_the_draw_over_hint_names_option_on_a_mac(qapp, on_a_mac):
     from snipforge.editor.style import DEFAULT_TOOL_STYLES
     panel = panel_module.PropertiesPanel()
     panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], False)
-    assert "hold Alt" in panel._hint.text()
+    assert f"hold {'Option' if sys.platform == 'darwin' else 'Alt'}" in panel._hint.text()  # this machine
     on_a_mac(panel_module)
     panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], False)
     assert "hold Option" in panel._hint.text()
