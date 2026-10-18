@@ -100,7 +100,7 @@ def test_the_drive_is_read_on_its_own_thread_every_few_seconds(tmp_path, qapp, m
     record(tmp_path, [(1.0, "stop")], prepare=counted)
     took = time.perf_counter() - before
 
-    assert 2 <= len(reads) <= took / 0.25 + 2  # one before starting, then every 0.25 s; not every frame
+    assert 3 <= len(reads) <= took / 0.25 + 2  # one before starting, then every 0.25 s; not every frame
 
 
 def test_windows_without_a_video_encoder_explains_what_to_add(tmp_path, qapp, monkeypatch):

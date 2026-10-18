@@ -83,7 +83,7 @@ def assert_numbered_by_the_recordings_time(taken):
     timed = [(index, float(image.text("media"))) for index, image in taken if index and image.text("media")]
     assert timed
     for index, media in timed:
-        assert index <= media * FPS + 1e-6 < index + LATE_FRAMES + 1, (index, media * FPS)
+        assert index - 1e-6 <= media * FPS < index + LATE_FRAMES + 1 + 1e-6, (index, media * FPS)
 
 
 def run(until, limit=LIMIT, clock=None, screen=None, overlay=None, during=None, **kwargs):
@@ -163,13 +163,14 @@ def test_a_pause_leaves_no_gap_in_the_numbers():
         media = clock.media_time(now)
         if "paused" not in state and media and media > 0.3:
             clock.pause(now)
-            state["paused"] = now
+            state["paused"], state["media"] = now, media
         elif "paused" in state and "resumed" not in state and now - state["paused"] > 0.5:
             clock.resume(now)
             state["resumed"] = now
 
-    def well_after_the_pause(taken):
-        return "resumed" in state and bool(taken) and taken[-1][0] >= 0.3 * FPS + 10
+    def well_after_the_pause(taken):  # frames made 0.2 s of recording after it: they'd show a gap
+        return "resumed" in state and any(float(image.text("media")) > state["media"] + 0.2
+                                          for _i, image in taken if image.text("media"))
 
     clock = Clock()
     frames, taken, _screen = run(well_after_the_pause, clock=clock, overlay=Timing(clock), during=pause_for_a_while)
@@ -180,23 +181,24 @@ def test_a_pause_leaves_no_gap_in_the_numbers():
     # Numbered by the recording's time, which stood still for the 0.5 s pause: had the pause made
     # frames, those after it would be 25 numbers ahead of their time.
     assert_numbered_by_the_recordings_time(taken)
-    assert numbers[-1] >= 0.3 * FPS + 10
 
 
 def test_falling_behind_skips_ahead_and_counts_it():
-    class SlowOnce(NoPointer):
+    class SlowOnce(Timing):
         def draw(self, frame, now):
             super().draw(frame, now)
             if self.drawn == 5:
                 time.sleep(0.3)  # 15 frames' worth
 
-    overlay = SlowOnce()
-    frames, taken, _screen = run(at_least(8), overlay=overlay)
+    clock = Clock()
+    overlay = SlowOnce(clock)
+    frames, taken, _screen = run(at_least(8), clock=clock, overlay=overlay)
 
     numbers = [index for index, _image in taken]
     assert frames.late_skipped >= 10
     assert numbers == sorted(numbers) and len(set(numbers)) == len(numbers)
-    assert numbers[5] - numbers[4] > 3  # the jump after the stall
+    assert max(b - a for a, b in zip(numbers, numbers[1:])) > 3  # the jump after the stall
+    assert_numbered_by_the_recordings_time(taken)  # and no frame left more than LATE_FRAMES behind
 
 
 def test_a_full_queue_drops_new_frames_instead_of_waiting():
@@ -206,12 +208,12 @@ def test_a_full_queue_drops_new_frames_instead_of_waiting():
                           first_image=first_image, queue_size=3)
     frames.start()
     deadline = time.perf_counter() + LIMIT
-    while frames.queue_dropped + frames.late_skipped <= 10 and time.perf_counter() < deadline:
+    while frames.queue_dropped <= 10 and time.perf_counter() < deadline:
         time.sleep(0.01)  # nobody takes them
     frames.stop()
 
     assert len(frames.take()) == 3 and frames.made == 3
-    assert frames.queue_dropped + frames.late_skipped > 10  # it kept going rather than waiting
+    assert frames.queue_dropped > 10  # it kept going rather than waiting
 
 
 def test_a_screen_that_cant_be_opened_is_reported_at_once():

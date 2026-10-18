@@ -184,9 +184,8 @@ def test_it_gives_up_after_a_few_tries_and_says_so(player, media):
     failed = caught(player.failed)
     player.play(0.0)
     assert pump_until(lambda: failed)
-    pump(0.1)  # and nothing more after that
 
-    assert len(failed) == 1
+    assert len(failed) == 1 and not player._watchdog.isActive()  # and nothing more after that
     assert "play" in failed[0][0].lower()
     assert not player.is_playing
     assert media.calls.count(("play",)) == 3  # the first try and two more

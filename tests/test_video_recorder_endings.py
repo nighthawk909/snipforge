@@ -85,6 +85,7 @@ def test_losing_the_screen_mid_recording_keeps_what_was_recorded(tmp_path, qapp)
 
     assert warnings == ["The screen stopped being recorded: The display went away"]
     assert 0.55 < outcome["result"].duration < 2.0  # kept up to when the screen went (noticed within a beat)
+    assert ffmpeg.probe(outcome["result"].path).duration > 0.4  # and it's in the file
     assert ffmpeg.probe(outcome["result"].path).first("video").codec == "h264"
 
 

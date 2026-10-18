@@ -14,7 +14,7 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from snipforge.video import clip, ffmpeg, frames
 from snipforge.video import recorder as recorder_module
 from snipforge.video.encoder import Encoder
-from snipforge.video.recorder import Recorder, RecordingError, Settings
+from snipforge.video.recorder import START_DELAY, Recorder, RecordingError, Settings
 from snipforge.video.screen_frames import LATE_FRAMES, ScreenFrames
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
@@ -23,9 +23,6 @@ FPS = 30
 AREA = (0, 0, 320, 240)
 ROOMY = 10**12  # bytes free: the tests' drives never run low unless a test says so
 STAMP_SLACK = 0.05  # frame times are whole microseconds: a frame 4 late can measure 4.00001
-# Seconds between a test noting the recording's time and the recorder acting on it, the next line:
-# usually microseconds, but a busy machine (GitHub's macOS runners) can pause the thread in between.
-AT_ONCE = 0.06
 
 
 class StillScreen:
@@ -46,10 +43,11 @@ class Stamper:
     """Plays the pointer overlay's part: draws, as blocks, the frame number due when the frame is made."""
 
     def __init__(self, clock):
-        self.clock = clock
+        self.clock, self.due = clock, 0
 
     def draw(self, frame, now):
-        due = round((self.clock.media_time(now) or 0) * FPS)
+        media = self.clock.media_time(now)  # None if a pause landed since the frame thread looked
+        due = self.due = round(media * FPS) if media is not None else self.due
         painter = QPainter(frame)
         for bit in range(clip.NUMBER_BITS):
             painter.fillRect(clip._block(bit, frame.width(), frame.height()),
@@ -133,11 +131,14 @@ def sound_maker(**behaviour):
 
 
 def record(tmp_path, steps, *, sound=None, encoder=None, screen_frames=None, prepare=None, hold=False,
-           **settings):
+           from_recording=True, **settings):
     """Run a recording: `steps` is a list of (seconds to wait, action) ending the recording, an action
-    being a Recorder method's name or a function given the recorder. outcome["at"] has the
-    recording's own time when each named action actually ran (a busy machine runs timers late, so
-    tests compare with these rather than with the times asked for)."""
+    being a Recorder method's name or a function given the recorder. The waits count from when the
+    recording begins (its encoder warmed up: up to a second or more on a busy machine), or with
+    from_recording=False from start(). outcome["recording_at"] is when it began (perf_counter), and
+    outcome["at"][action] is (the recording's time just before, perf_counter before reading it,
+    perf_counter after the action returned): where the action really happened is between those, on
+    any machine, however late its timer came."""
     recorder = Recorder(Settings(AREA, tmp_path / "rec.mp4", fps=FPS, **settings),
                         screen_frames=screen_frames or fake_screen_frames, capture=sound or sound_maker(),
                         overlay=lambda s: None, encoder=encoder, free_space=lambda folder: ROOMY)
@@ -155,17 +156,38 @@ def record(tmp_path, steps, *, sound=None, encoder=None, screen_frames=None, pre
         if callable(action):
             action(recorder)
             return
-        outcome["at"][action] = (recorder.media_time(), time.perf_counter())
+        before = time.perf_counter()
+        media = recorder.media_time()
         getattr(recorder, action)()
+        outcome["at"][action] = (media, before, time.perf_counter())
 
+    def schedule():
+        at = 0.0
+        for seconds, action in steps:
+            at += seconds
+            QTimer.singleShot(int(at * 1000), lambda action=action: run(action))
+        QTimer.singleShot(int(at * 1000) + 30_000, loop.quit)
+
+    def began(state):
+        if state == "recording" and "recording_at" not in outcome:
+            outcome["recording_at"] = time.perf_counter()
+            if from_recording:
+                schedule()
+
+    recorder.state_changed.connect(began)
     recorder.start(hold=hold)
-    at = 0.0
-    for seconds, action in steps:
-        at += seconds
-        QTimer.singleShot(int(at * 1000), lambda action=action: run(action))
-    QTimer.singleShot(int(at * 1000) + 30_000, loop.quit)
+    if from_recording:
+        QTimer.singleShot(60_000, loop.quit)  # never began: give up
+    else:
+        schedule()
     loop.exec()
     return recorder, outcome, warnings
+
+
+def acted(outcome, action) -> tuple[float, float]:
+    """The earliest and latest the recording's time can have been when `action` ran."""
+    media, before, after = outcome["at"][action]
+    return media, media + (after - before)
 
 
 def frame_times(path):
@@ -175,7 +197,7 @@ def frame_times(path):
 
 def assert_in_time(shown, result):
     """Each frame shows the number due when it was made, so it should be at its own place in the
-    video. One can be up to LATE_FRAMES whole frames late before the frame thread skips ahead, and
+    video, never before it. One can be up to LATE_FRAMES whole frames late before the thread skips ahead, and
     the Stamper rounds to the nearest frame where the frame thread counts whole ones: so up to
     LATE_FRAMES + 1 (3.6 frames late is kept, and shows 4), on any machine. A jump (a pause making
     frames, a lost stretch) is many more. Not the first frame, made at the frame thread's first wake
@@ -183,23 +205,22 @@ def assert_in_time(shown, result):
     GitHub's macOS runners most are a frame or two late), so it isn't checked; frames' exact places
     are, in test_video_encoder.py. And most of them are there, apart from those the frame thread
     knowingly skipped (frames the encoder lost aren't excused)."""
-    offsets = sorted(abs(number - at) for number, at in shown)
-    after_first = max(abs(number - at) for number, at in shown[1:])
-    assert after_first <= LATE_FRAMES + 1 + STAMP_SLACK, offsets
+    late = [number - at for number, at in shown[1:]]
+    assert all(-STAMP_SLACK <= frames <= LATE_FRAMES + 1 + STAMP_SLACK for frames in late), sorted(late)
     skipped = result.stats["frames_skipped_late"]
     assert len(shown) >= 0.6 * result.duration * FPS - skipped, (len(shown), skipped)
 
 
 def test_a_recording_has_its_picture_and_both_sounds_at_the_right_times(tmp_path, qapp):
-    before = time.perf_counter()
     recorder, outcome, warnings = record(tmp_path, [(1.5, "stop")])
 
     result = outcome["result"]
     info = ffmpeg.probe(result.path)
     assert (info.first("video").codec, info.first("audio").codec) == ("h264", "aac")
-    assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=AT_ONCE)
-    # Up to stop, less the encoder's warm-up (which isn't recorded, and can take a second when busy)
-    assert 0 < result.duration <= outcome["at"]["stop"][1] - before
+    earliest, latest = acted(outcome, "stop")
+    assert earliest <= result.duration <= latest  # it ends where stop was asked for
+    _media, asked, _after = outcome["at"]["stop"]
+    assert result.duration >= asked - outcome["recording_at"] - START_DELAY  # from when it began, the warm-up left out
     assert info.duration == pytest.approx(result.duration, abs=0.1)
     assert_in_time(frame_times(result.path), result)
     assert warnings == [] and recorder.state == "finished"
@@ -208,43 +229,46 @@ def test_a_recording_has_its_picture_and_both_sounds_at_the_right_times(tmp_path
 
 def test_time_zero_waits_for_an_encoder_slow_to_start(tmp_path, qapp):
     before = time.perf_counter()
-    recorder, outcome, _ = record(tmp_path, [(1.5, "stop")], encoder=SlowToStart)
+    recorder, outcome, _ = record(tmp_path, [(1.5, "stop")], encoder=SlowToStart, from_recording=False)
 
     result = outcome["result"]
     assert outcome["states"][:2] == ["starting", "recording"]
-    assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=AT_ONCE)
-    assert result.duration <= outcome["at"]["stop"][1] - before - SlowToStart.WARM_UP_MS / 1000 + 0.05  # no warm-up
+    earliest, latest = acted(outcome, "stop")
+    assert earliest <= result.duration <= latest
+    assert result.duration <= outcome["at"]["stop"][2] - before - SlowToStart.WARM_UP_MS / 1000  # no warm-up
     assert_in_time(frame_times(result.path), result)  # none lost while the encoder warmed up
 
 
 def test_a_held_start_begins_only_when_told_to_go(tmp_path, qapp):
     # The recording UI opens everything while its countdown runs, and begins as it ends.
-    recorder, outcome, _ = record(tmp_path, [(0.8, "go"), (0.6, "stop")], hold=True)
+    recorder, outcome, _ = record(tmp_path, [(0.8, "go"), (0.6, "stop")], hold=True, from_recording=False)
 
     result = outcome["result"]
     assert outcome["at"]["go"][0] == 0.0  # nothing recorded while held
     assert outcome["states"][:2] == ["starting", "recording"]
-    assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=AT_ONCE)
-    went, stopped = outcome["at"]["go"][1], outcome["at"]["stop"][1]
-    assert result.duration <= stopped - went + 0.1  # from go (+ its 50 ms start), not the start: no hold in it
+    earliest, latest = acted(outcome, "stop")
+    assert earliest <= result.duration <= latest
+    went, stopped = outcome["at"]["go"][1], outcome["at"]["stop"][2]
+    assert result.duration <= stopped - went - START_DELAY  # counted from go, not from start: the hold isn't in it
     assert_in_time(frame_times(result.path), result)
 
 
 def test_go_before_the_encoder_is_ready_begins_once_it_is(tmp_path, qapp):
     before = time.perf_counter()  # the encoder starts warming up after this
-    recorder, outcome, _ = record(tmp_path, [(0.1, "go"), (1.5, "stop")], hold=True, encoder=SlowToStart)
+    recorder, outcome, _ = record(tmp_path, [(0.1, "go"), (1.5, "stop")], hold=True, encoder=SlowToStart,
+                                  from_recording=False)
 
     assert outcome["states"][:2] == ["starting", "recording"]
     # Begun once warm, not at go: at least WARM_UP_MS after the start (measured, as a busy machine's
     # timers come late). Begun at go, it'd be ~0.7 s longer.
-    stopped = outcome["at"]["stop"][1]
-    assert outcome["result"].duration <= stopped - before - SlowToStart.WARM_UP_MS / 1000 + 0.05
+    stopped = outcome["at"]["stop"][2]  # after stop returned
+    assert outcome["result"].duration <= stopped - before - SlowToStart.WARM_UP_MS / 1000
 
 
 def test_an_encoder_that_never_starts_fails_the_recording(tmp_path, qapp, monkeypatch):
     monkeypatch.setattr(recorder_module, "ENCODER_START_TIMEOUT", 0.5)
 
-    recorder, outcome, _ = record(tmp_path, [(3.0, "stop")], encoder=NeverStarts)
+    recorder, outcome, _ = record(tmp_path, [(3.0, "stop")], encoder=NeverStarts, from_recording=False)
 
     assert "didn't start" in outcome["failure"]
     assert recorder.state == "failed" and "recording" not in outcome["states"]
@@ -260,7 +284,7 @@ def gone(qapp, path, seconds=5.0) -> bool:
 
 
 def test_stopping_before_the_encoder_is_ready_cancels_and_leaves_no_file(tmp_path, qapp):
-    recorder, outcome, _ = record(tmp_path, [(0.3, "stop")], encoder=NeverStarts)
+    recorder, outcome, _ = record(tmp_path, [(0.3, "stop")], encoder=NeverStarts, from_recording=False)
 
     assert outcome.get("cancelled") and "failure" not in outcome
     assert recorder.state == "cancelled"
@@ -271,8 +295,10 @@ def test_a_pause_is_left_out_of_the_recording(tmp_path, qapp):
     recorder, outcome, _ = record(tmp_path, [(0.7, "pause"), (0.8, "resume"), (0.7, "stop")])
 
     result = outcome["result"]
-    (paused_at, _), (_, resumed), (_, stopped) = (outcome["at"][a] for a in ("pause", "resume", "stop"))
-    assert result.duration == pytest.approx(paused_at + stopped - resumed, abs=2 * AT_ONCE)
+    pause_low, pause_high = acted(outcome, "pause")
+    _m, resume_asked, resume_done = outcome["at"]["resume"]
+    _m, stop_asked, stop_done = outcome["at"]["stop"]
+    assert pause_low + stop_asked - resume_done <= result.duration <= pause_high + stop_done - resume_asked
     assert ffmpeg.probe(result.path).duration == pytest.approx(result.duration, abs=0.1)
     assert_in_time(frame_times(result.path), result)  # no jump where the pause was
 
@@ -280,7 +306,8 @@ def test_a_pause_is_left_out_of_the_recording(tmp_path, qapp):
 def test_stopping_while_paused_ends_at_the_pause(tmp_path, qapp):
     _recorder, outcome, _ = record(tmp_path, [(0.8, "pause"), (0.6, "stop")])
 
-    assert outcome["result"].duration == pytest.approx(outcome["at"]["pause"][0], abs=AT_ONCE)
+    earliest, latest = acted(outcome, "pause")
+    assert earliest <= outcome["result"].duration <= latest
 
 
 def test_a_microphone_that_cant_be_opened_warns_and_records_without_it(tmp_path, qapp):
@@ -304,7 +331,8 @@ def test_a_sound_source_lost_while_recording_warns_and_the_recording_goes_on(tmp
                                           sound=sound_maker(system={"lose_after": 0.4}))
 
     assert warnings == ["The system was unplugged"]
-    assert outcome["result"].duration == pytest.approx(outcome["at"]["stop"][0], abs=AT_ONCE)
+    earliest, latest = acted(outcome, "stop")
+    assert earliest <= outcome["result"].duration <= latest
 
 
 def test_a_screen_that_cant_be_recorded_stops_it_starting(tmp_path, qapp):
