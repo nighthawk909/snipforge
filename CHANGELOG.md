@@ -3,6 +3,18 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.16.0](https://github.com/nighthawk909/snipforge/compare/v0.15.0...v0.16.0) (2026-10-18)
+
+
+### Features
+
+* **accessibility:** use SnipForge from the keyboard, with screen-reader names and Windows contrast themes ([#114](https://github.com/nighthawk909/snipforge/issues/114)) ([135edea](https://github.com/nighthawk909/snipforge/commit/135edea198ff819feee11081d15c995f574d1d2f))
+
+
+### Documentation
+
+* accessibility, and 0.15.0, ticked off on the roadmap ([#116](https://github.com/nighthawk909/snipforge/issues/116)) ([c32aa89](https://github.com/nighthawk909/snipforge/commit/c32aa89d0a7936a29aceb2f70ac794b6c88af3be))
+
 ## [0.15.0](https://github.com/nighthawk909/snipforge/compare/v0.14.0...v0.15.0) (2026-10-18)
 
 
