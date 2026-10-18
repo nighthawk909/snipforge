@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextOption
 from PySide6.QtWidgets import QGraphicsTextItem, QStyle, QStyleOptionGraphicsItem
 
 from ..fonts import ui_font
-from .items import Annotation, BoxItem, make_pen, readable_on
+from .items import HIT_SLOP, Annotation, BoxItem, make_pen, readable_on, stroke_band
 from .style import Style
 
 
@@ -158,6 +158,7 @@ class CalloutItem(BoxItem):
 
     def __init__(self, style: Style, text: str = "") -> None:
         self._tail = QPointF(0, 0)
+        self._grab = QPointF(0, 0)  # from where a pointer drag was grabbed to the tip
         self._laying_out = False
         self.text: _CalloutText | None = None
         self.on_edit_finished = None
@@ -246,16 +247,33 @@ class CalloutItem(BoxItem):
             points["tail"] = self.mapToScene(self._tail)
         return points
 
+    def area_handle_at(self, scene_pos: QPointF) -> str | None:
+        """Once selected, the pointer can be grabbed anywhere along it, not just by the dot at its tip."""
+        pointer = self._pointer()
+        local = self.mapFromScene(scene_pos)
+        if pointer is None or self._box().contains(local):
+            return None
+        grab = pointer.united(stroke_band(pointer, HIT_SLOP))  # it narrows to a point: give it some width
+        return "tail" if grab.contains(local) else None
+
+    def begin_handle_drag(self) -> None:
+        super().begin_handle_drag()
+        self._grab = QPointF(0, 0)
+
+    def press_at(self, scene_pos: QPointF) -> None:
+        """Where a handle drag started: the tip moves by as much as the pointer, never jumps to it."""
+        self._grab = self.mapToScene(self._tail) - scene_pos
+
     def drag_handle(self, name: str, scene_pos: QPointF, shift: bool) -> None:
         if name == "tail":
             self.prepareGeometryChange()
-            self._tail = self.mapFromScene(scene_pos)
+            self._tail = self.mapFromScene(scene_pos + self._grab)
             self.update()
         else:
             super().drag_handle(name, scene_pos, shift)
 
     # -- painting ------------------------------------------------------------
-    def _body(self) -> QPainterPath:
+    def _box(self) -> QPainterPath:
         r, shape = self._rect, self.style.shape
         path = QPainterPath()
         if shape == "ellipse":
@@ -267,23 +285,32 @@ class CalloutItem(BoxItem):
             path.addRect(r)
         else:
             path.addRoundedRect(r, 10, 10)
-        if not self.style.tail or path.contains(self._tail):
-            return path
-        center, tip = r.center(), self._tail
+        return path
+
+    def _pointer(self) -> QPainterPath | None:
+        """The pointer's wedge, from the middle of the box to the tip; None when it's off or inside the box."""
+        r, tip = self._rect, self._tail
+        if not self.style.tail or self._box().contains(tip):
+            return None
+        center = r.center()
         dx, dy = tip.x() - center.x(), tip.y() - center.y()
         length = math.hypot(dx, dy)
         if length < 1:
-            return path
+            return None
         half = max(6.0, min(r.width(), r.height()) * 0.16)
         nx, ny = -dy / length * half, dx / length * half
         wedge = QPainterPath(QPointF(center.x() + nx, center.y() + ny))
         wedge.lineTo(tip)
         wedge.lineTo(QPointF(center.x() - nx, center.y() - ny))
         wedge.closeSubpath()
-        return path.united(wedge)
+        return wedge
+
+    def _body(self) -> QPainterPath:
+        box, pointer = self._box(), self._pointer()
+        return box if pointer is None else box.united(pointer)
 
     def boundingRect(self) -> QRectF:
-        m = self.style.width + 3
+        m = self.style.width + HIT_SLOP / 2 + 3  # room for the pointer's grab area too
         area = QRectF(self._rect)
         if self.style.tail:  # QRectF.united() ignores zero-size rects, so give the tip some area
             area = area.united(QRectF(self._tail.x() - 1, self._tail.y() - 1, 2, 2))

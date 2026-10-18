@@ -369,6 +369,10 @@ class SpotlightItem(BoxItem):
     """Dims everything outside the rectangle."""
 
     kind = "spotlight"
+
+    def selection_rects(self) -> list[QRectF]:
+        """The overlay outlines the lit area, not the whole dimmed snip."""
+        return [self.scene_rect()]
     supports_shadow = False
     keep_square_with_shift = False
 
