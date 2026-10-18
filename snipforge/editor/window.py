@@ -34,6 +34,7 @@ from . import beautify
 from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
+from .canvas_clipboard import MARKUP_MIME
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
 from .export import SAVE_FILTERS, ExportError, filter_for, save_image, with_suffix
 from .export import fits as export_fits
@@ -139,6 +140,7 @@ class EditorWindow(QMainWindow):
         self.panel.pick_color.connect(self._toggle_picking)
         self.panel.edges_changed.connect(self.canvas.set_edges)
         self.canvas.notice.connect(lambda text: self.statusBar().showMessage(text, 6000))
+        self.canvas.copy_requested.connect(self.copy_to_clipboard)
         self.panel.source_stamp.connect(self.add_source_stamp)
         self.panel.set_source_stamp_available(entry is not None)
         self.panel.cutout_changed.connect(lambda changes: self.canvas.set_cutout_options(**changes))
@@ -223,6 +225,8 @@ class EditorWindow(QMainWindow):
             self.addAction(act)
 
         add("Ctrl+C", self.copy_to_clipboard)
+        add("Ctrl+X", self.cut)
+        add("Ctrl+V", self.paste)
         add("Ctrl+S", self.save)
         add("Ctrl+Shift+S", self.save_as)
         add("Ctrl+Z", self.canvas.undo_stack.undo)
@@ -436,9 +440,22 @@ class EditorWindow(QMainWindow):
             if selected:
                 QGuiApplication.clipboard().setText(selected)
             return
-        QGuiApplication.clipboard().setImage(self.final_image())
-        self.statusBar().showMessage("Copied to clipboard with Beautify" if self._beautify else "Copied to clipboard",
-                                     2500)
+        mime = self.canvas.copy_mime(self.final_image())  # the snip, plus the selected markup for Paste
+        with_markup = mime.hasFormat(MARKUP_MIME)
+        QGuiApplication.clipboard().setMimeData(mime)
+        message = "Copied to clipboard with Beautify" if self._beautify else "Copied to clipboard"
+        if with_markup:
+            message += f". {keys('Ctrl+V')} in a snip pastes the selected markup"
+        self.statusBar().showMessage(message, 5000 if with_markup else 2500)
+
+    def cut(self) -> None:
+        """Ctrl+X: the selected markup. (While you type, the text takes Ctrl+X, Ctrl+C and Ctrl+V itself.)"""
+        if self.canvas.cut_selection():
+            self.statusBar().showMessage(f"Cut. {keys('Ctrl+V')} in a snip pastes it", 4000)
+
+    def paste(self) -> None:
+        """Ctrl+V: markup copied in any snip, or text as a text box."""
+        self.canvas.paste()
 
     @staticmethod
     def _new_export_path() -> Path:

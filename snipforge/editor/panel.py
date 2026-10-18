@@ -43,7 +43,8 @@ TITLES = {
 DRAW_HINT = "Drag to draw. Drag markup that's already there to move it, or hold {alt} to draw over it."
 HINTS = {
     "select": f"Click any markup to change it. Drag to move, {keys('Ctrl+click')} to add to the selection, "
-              f"Delete to remove, {keys('Ctrl+D')} to duplicate. Turn, flip or resize the snip under Image.",
+              f"Delete to remove, {keys('Ctrl+D')} to duplicate, {keys('Ctrl+C')} and {keys('Ctrl+V')} to copy "
+              "and paste. Right-click for more. Turn, flip or resize the snip under Image.",
     **dict.fromkeys(("arrow", "line", "rect", "ellipse", "pen"), DRAW_HINT),
     "crop": "Drag the edges in to cut and back out to restore. Drag inside to move. Enter applies, Esc cancels.",
     "spotlight": "Drag over the area to keep lit. Everything else dims.",

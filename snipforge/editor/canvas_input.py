@@ -141,7 +141,8 @@ class InputMixin:
 
     # ------------------------------------------------------------------ mouse
     def mousePressEvent(self, e) -> None:
-        if self.picking() and e.button() == Qt.RightButton:
+        self._skip_menu = self.picking() and e.button() == Qt.RightButton
+        if self._skip_menu:
             self.stop_picking()  # right-click cancels, as in most apps
             return
         if self._panning or e.button() != Qt.LeftButton:
