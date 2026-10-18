@@ -222,9 +222,12 @@ class SnipForgeApp:
             self._tray.showMessage("SnipForge", note, QSystemTrayIcon.Information, 6000)
         if image is None:
             return
-        if area is not None:  # for Repeat last snip
-            prefs.set_last_area(area)
-            self._repeat_action.setEnabled(True)
+        if area is not None:  # for Repeat last snip; never worth losing the snip over
+            try:
+                prefs.set_last_area(area)
+                self._repeat_action.setEnabled(True)
+            except ValueError as exc:
+                log.warning("Couldn't remember the snip's area for Repeat last snip: %s", exc)
         if prefs.copy_on_capture():  # like Win+Shift+S: the raw snip is on the clipboard too
             QGuiApplication.clipboard().setImage(image)
         try:

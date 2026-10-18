@@ -237,7 +237,7 @@ class GlobalShortcuts(QObject):
         for action in ACTIONS:
             text = prefs.shortcut(action)
             if text and (problem := self.set(action, text)):
-                self.problems[action] = f"{label(normalize(text)) or text}: {problem}"
+                self.problems[action] = problem
         return dict(self.problems)
 
     def suspend(self) -> None:

@@ -367,3 +367,31 @@ def test_a_real_shortcut_fires_when_pressed(qapp):
             user32.keybd_event(vk, 0, keyup, 0)
         keys.close()
     assert got == ["library"]
+
+
+def test_tab_and_shift_tab_move_on_instead_of_being_recorded(qapp, monkeypatch):
+    edit = editor("Ctrl+Shift+R")
+    moves = []
+    monkeypatch.setattr(edit.edit, "focusPreviousChild", lambda: moves.append("back") or True)
+    _focus(edit.edit, True)
+    _key(edit.edit, Qt.Key_Backtab, Qt.ShiftModifier)
+    _key(edit.edit, Qt.Key_Tab, Qt.ShiftModifier)
+    _key(edit.edit, Qt.Key_Tab)  # Qt's own focus chain moves on with Tab
+    assert moves == ["back", "back"] and edit.got == [] and edit.text() == "Ctrl+Shift+R"
+
+
+def test_a_saved_shortcut_that_fails_can_still_be_cleared(qapp, tmp_path):
+    from snipforge.settings_window import SettingsWindow
+    prefs.set_shortcut("library", "Ctrl+Alt+F10")
+    keys = shortcuts.GlobalShortcuts(api=FakeApi(taken={(MOD_CONTROL | MOD_ALT, 0x79)}))
+    keys.apply_saved()
+    w = SettingsWindow(library_root=tmp_path, shortcuts=keys)
+    try:
+        edit = w.shortcut_edits["library"]
+        assert edit.clear_button.isEnabled()  # empty, but there's something to remove
+        edit.clear_button.click()
+        assert prefs.shortcut("library") == "" and w.shortcut_problem.isHidden()
+        assert not edit.clear_button.isEnabled()
+    finally:
+        w.close()
+        keys.close()

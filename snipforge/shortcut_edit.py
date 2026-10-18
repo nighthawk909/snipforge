@@ -22,6 +22,9 @@ class _Recorder(QKeySequenceEdit):
     cleared = Signal()  # Backspace or Delete on their own
 
     def keyPressEvent(self, e) -> None:  # noqa: N802 - Qt API
+        if e.key() == Qt.Key_Backtab or (e.key() == Qt.Key_Tab and e.modifiers() == Qt.ShiftModifier):
+            self.focusPreviousChild()  # Qt would record Shift+Tab as a shortcut and keep the keyboard
+            return
         if e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier):
             if e.key() == Qt.Key_Escape:
                 self.cancelled.emit()
@@ -66,6 +69,7 @@ class ShortcutEdit(QWidget):
         self.clear_button.clicked.connect(self.clear)
         row.addWidget(self.clear_button)
         self._text = ""
+        self._stale = False  # a saved combination that isn't working: the field is empty, Clear removes it
         self.set_text(text)
         self.setFocusProxy(self.edit)
 
@@ -78,15 +82,21 @@ class ShortcutEdit(QWidget):
         self.edit.blockSignals(True)
         self.edit.setKeySequence(QKeySequence(text, QKeySequence.PortableText))
         self.edit.blockSignals(False)
-        self.clear_button.setEnabled(bool(text))
+        self.clear_button.setEnabled(bool(text) or self._stale)
         self._show_label()
 
+    def set_stale(self, stale: bool) -> None:
+        """A saved combination that couldn't be set: shown empty, but Clear (or Backspace) still
+        removes it, so it stops being tried at every start."""
+        self._stale = stale
+        self.clear_button.setEnabled(bool(self._text) or stale)
+
     def clear(self) -> None:
-        if self._text:
-            self.set_text("")
+        announce = bool(self._text) or self._stale
+        self._stale = False
+        self.set_text("")
+        if announce:
             self.changed.emit("")
-        else:
-            self.set_text("")
 
     def setAccessibleName(self, name: str) -> None:  # noqa: N802 - Qt API
         super().setAccessibleName(name)

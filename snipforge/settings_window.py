@@ -358,10 +358,18 @@ class SettingsWindow(QMainWindow):
     def _show_shortcuts(self) -> None:
         """What's really working: a saved combination another app took is shown empty, with why."""
         bound = self._shortcuts.bindings() if self._shortcuts is not None else {}
+        problems = self._open_shortcut_problems()
         for action, edit in self.shortcut_edits.items():
             edit.set_text(bound.get(action, ""))
-        problems = self._shortcuts.problems if self._shortcuts is not None else {}
-        self._show_shortcut_problems({a: p for a, p in problems.items() if a not in bound})
+            edit.set_stale(action in problems)
+        self._show_shortcut_problems(problems)
+
+    def _open_shortcut_problems(self) -> dict[str, str]:
+        """Saved shortcuts that aren't working (another app has the combination), and why."""
+        if self._shortcuts is None:
+            return {}
+        bound = self._shortcuts.bindings()
+        return {a: p for a, p in self._shortcuts.problems.items() if a not in bound}
 
     def _show_shortcut_problems(self, problems: dict[str, str]) -> None:
         text = " ".join(f"{SHORTCUT_TITLES[action]}: {problem}" for action, problem in problems.items())
@@ -380,7 +388,10 @@ class SettingsWindow(QMainWindow):
         if problems:
             for action in problems:
                 self.shortcut_edits[action].set_text("")
-            self._show_shortcut_problems(problems)
+                self.shortcut_edits[action].set_stale(True)
+            self._show_shortcut_problems(self._open_shortcut_problems())
+            if self._on_shortcuts_changed is not None:
+                self._on_shortcuts_changed()  # e.g. the tray tooltip named the one that's gone
 
     def _set_shortcut(self, action: str, text: str) -> None:
         if self._shortcuts is None:
@@ -391,7 +402,8 @@ class SettingsWindow(QMainWindow):
             self._show_shortcut_problems({action: problem})
             return
         prefs.set_shortcut(action, self._shortcuts.bindings().get(action, ""))
-        self._show_shortcut_problems({})
+        self.shortcut_edits[action].set_stale(False)
+        self._show_shortcut_problems(self._open_shortcut_problems())
         if self._on_shortcuts_changed is not None:
             self._on_shortcuts_changed()
 
