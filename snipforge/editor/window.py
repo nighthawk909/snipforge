@@ -482,7 +482,7 @@ class EditorWindow(QMainWindow):
     # ------------------------------------------------------------------ OCR
     def _ocr_source(self) -> tuple[QImage, float, float]:
         crop = self.canvas.crop_rect().toAlignedRect()
-        return self.canvas.base_image.copy(crop), crop.x(), crop.y()
+        return self.canvas.content_image().copy(crop), crop.x(), crop.y()
 
     def _run_ocr(self):
         image, _, _ = self._ocr_source()

@@ -39,14 +39,63 @@ def test_a_gradient_is_filled_smoothly(qapp):
     assert abs(row[40] - 100) < 25
 
 
-def test_nothing_erased_leaks_into_the_fill(qapp):
-    img = QImage(100, 100, QImage.Format_ARGB32)
-    img.fill(QColor("#ffffff"))
-    painter = QPainter(img)
-    painter.fillRect(40, 40, 20, 20, QColor("#ff0000"))
-    painter.end()
-    patch = fill(img, QRect(40, 40, 20, 20))
-    assert all(patch.pixelColor(x, y).red() == patch.pixelColor(x, y).green() for x in range(20) for y in range(20))
+@pytest.mark.parametrize("area", [QRect(40, 40, 20, 20), QRect(0, 0, 30, 30), QRect(90, 50, 30, 10), QRect(5, 5, 1, 1),
+                                  QRect(0, 30, 100, 20), QRect(60, 60, 400, 400), QRect(10, 0, 3, 100)])
+def test_nothing_erased_leaks_into_the_fill(qapp, area):
+    """Whatever is under the area, the fill is the same, bit for bit."""
+    import random
+    rng = random.Random(3)
+    noise = QImage(100, 100, QImage.Format_ARGB32)
+    for x in range(100):
+        for y in range(100):
+            noise.setPixelColor(x, y, QColor(rng.randrange(256), rng.randrange(256), rng.randrange(256)))
+    patches = []
+    for color in ("#ffffff", "#000000", "#ff0000"):
+        img = noise.copy()
+        painter = QPainter(img)
+        painter.fillRect(area, QColor(color))
+        painter.end()
+        patches.append(fill(img, area))
+    assert patches[0] == patches[1] == patches[2]
+
+
+def test_outside_whole_and_transparent_areas(qapp):
+    img = QImage(50, 50, QImage.Format_ARGB32)
+    img.fill(QColor("#123456"))
+    assert fill(img, QRect(100, 100, 10, 10)).isNull()  # nothing to erase
+    assert fill(img, QRect(0, 0, 50, 50)).pixelColor(25, 25).name() == "#c0c0c0"  # nothing to fill from
+    clear = QImage(50, 50, QImage.Format_ARGB32)
+    clear.fill(QColor(0, 0, 0, 0))
+    assert fill(clear, QRect(10, 10, 20, 20)).pixelColor(5, 5).name() == "#c0c0c0"  # not black
+
+
+def test_a_failed_fill_still_covers_the_area(note, monkeypatch):
+    from snipforge.editor import erase
+    c = make_canvas(note)
+    monkeypatch.setattr(erase, "fill", lambda *_a: QImage())
+    drag(c, "erase", (75, 45), (165, 75))
+    assert c.render_image().pixelColor(100, 60).name() == "#c0c0c0"
+
+
+def test_a_blur_over_an_erase_doesnt_bring_it_back(note):
+    c = make_canvas(note)
+    drag(c, "erase", (75, 45), (165, 75))
+    drag(c, "blur", (70, 40), (170, 80))
+    out = c.render_image()
+    assert min(out.pixelColor(x, 60).lightness() for x in range(80, 160)) > 200
+    c.undo_stack.undo()  # the blur's cache follows the erase
+    c.undo_stack.undo()
+    c.undo_stack.redo()
+    c.undo_stack.redo()
+    assert min(c.render_image().pixelColor(x, 60).lightness() for x in range(80, 160)) > 200
+
+
+def test_grab_text_and_redact_read_the_erased_snip(note):
+    c = make_canvas(note)
+    drag(c, "erase", (75, 45), (165, 75))
+    content = c.content_image()
+    assert {content.pixelColor(x, 60).name() for x in range(80, 160)} == {"#eeeeee"}
+    assert c.base_image.pixelColor(100, 60).name() == "#000000"  # the snip itself is untouched
 
 
 def test_quick_on_a_4k_snip(qapp):
@@ -100,3 +149,19 @@ def test_w_picks_smart_erase(note):
     c = make_canvas(note)
     QApplication.sendEvent(c, QKeyEvent(QEvent.KeyPress, Qt.Key_W, Qt.NoModifier))
     assert c.tool == "erase"
+
+
+def test_a_huge_area_is_filled_quickly_and_still_leaks_nothing(qapp):
+    from snipforge.editor import erase
+    img = QImage(3000, 2000, QImage.Format_ARGB32)
+    img.fill(QColor("#ffffff"))
+    painter = QPainter(img)
+    painter.fillRect(200, 200, 2600, 1600, QColor("#ff0000"))
+    painter.end()
+    started = time.perf_counter()
+    patch = fill(img, QRect(200, 200, 2600, 1600))
+    assert time.perf_counter() - started < 1.5
+    assert patch.size().toTuple() == (2600, 1600)
+    assert 2600 * 1600 > erase.MAX_WORK
+    reds = {patch.pixelColor(x, y).name() for x in range(0, 2600, 37) for y in range(0, 1600, 41)}
+    assert reds == {"#ffffff"}

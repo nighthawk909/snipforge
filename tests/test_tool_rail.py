@@ -83,7 +83,7 @@ def test_the_fewest_columns_that_fit(make_editor):
 
 
 def test_one_column_from_exactly_its_height(make_editor):
-    editor = make_editor(1440, 880)
+    editor = make_editor(1440, 1000)
     rail = editor.tool_rail
     one_column = rail.sizeHint().height()
     _resize(editor, 1440, editor.height() - (rail.height() - one_column))
