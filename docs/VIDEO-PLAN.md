@@ -317,6 +317,17 @@ recording UI appears in step 6; before that the pieces are tested on their own.
 6. **Recording UI**. Snip / Record switch on the capture toolbar, `selected_rect`, the ready panel
    (sources, levels, webcam on/off), the countdown (reusing the snip delay's), the control bar,
    the stop hotkey, "Record video" in the tray menu.
+   Built: Record on the capture toolbar (or R) hands the chosen area, in physical desktop pixels,
+   to `record_flow.py`; the ready panel (`ready_panel.py`: microphone with its device, computer
+   sound, live meters from `levels.py`, pointer effects, countdown; remembered in `video_prefs.py`)
+   and a dashed outline (`area_frame.py`); the recorder process starts held while the countdown
+   runs and begins as it ends (`Recorder.start(hold=True)`, `go()`), so the start isn't late by the
+   process's own start-up; the control bar (`control_bar.py`) lives in the recorder process, so a
+   recording carries on, and can be stopped, if SnipForge goes away; "Record video" / "Stop
+   recording" in the tray, and a "Record video, or stop recording" shortcut of your own (no
+   combination until one is chosen); a finished recording opens in the video editor. Recordings are
+   saved in the Library folder, one folder each (`recordings.py`); the Library lists them later.
+   The webcam's switch comes with step 7.
 7. **Webcam**. Device choice, the movable bubble (shape and size), hidden from the recording, drawn
    into each frame.
 8. **Video editor and Library**. Recordings in the Library with a thumbnail and length; a player
