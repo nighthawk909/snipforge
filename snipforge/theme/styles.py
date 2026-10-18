@@ -211,6 +211,7 @@ QPushButton#RecordStart {{ background: {p.danger}; color: #ffffff; border: none;
     padding: 6px 16px; font-weight: 600; }}
 QLabel#RecordProblem {{ color: {p.danger}; padding: 2px 6px; }}
 QLabel#RecordTime {{ font-weight: 600; padding: 0 4px; }}
+QLabel#RecordDot {{ color: {p.danger}; }}
 
 QWidget#SettingsNav {{ background: {p.bg}; border-right: 1px solid {p.border}; }}
 QWidget#SettingsBody, QScrollArea#SettingsScroll {{ background: {p.bg}; border: none; }}
