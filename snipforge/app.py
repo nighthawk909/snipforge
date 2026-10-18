@@ -100,14 +100,17 @@ class SnipForgeApp:
             return
         self._privacy_sweep = _Finished()
         self._privacy_sweep.done.connect(lambda: prefs.set_private_titles_checked(PRIVACY_CHECK), Qt.QueuedConnection)
+        stop = threading.Event()
+        self._app.aboutToQuit.connect(stop.set)
 
         def sweep() -> None:
             try:
-                cleared = self.library.forget_private_titles()
+                cleared, complete = self.library.forget_private_titles(stop.is_set)
                 if cleared:
                     log.info("Cleared %d private browsing titles from the Library", cleared)
-                self._privacy_sweep.done.emit()
-            except Exception:  # a sweep that fails is tried again next start
+                if complete:  # anything skipped (locked, or quitting) is tried again next start
+                    self._privacy_sweep.done.emit()
+            except Exception:
                 log.exception("Couldn't check the Library for private browsing titles")
 
         threading.Thread(target=sweep, name="snipforge-privacy", daemon=True).start()

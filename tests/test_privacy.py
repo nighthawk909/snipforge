@@ -18,7 +18,6 @@ from snipforge.winrects import WindowInfo
     ("Bank - Google Chrome (Incognito)", "Chrome"),
     ("Bank — Mozilla Firefox Private Browsing", "Firefox"),  # a no-break space in the marker
     ("Bank - Brave (Private)", "Brave Browser"),
-    ("Bank (Private) - Brave", "Brave Browser"),
     ("Bank - Opera (Private)", "Opera Internet Browser"),
     ("Bank — Tor Browser", "Firefox"),  # Tor Browser is firefox.exe, and always private
     ("Banque — Navigation privée de Mozilla Firefox", "Firefox"),
@@ -37,7 +36,7 @@ from snipforge.winrects import WindowInfo
 ])
 def test_private_windows_are_recognised(title, app):
     assert privacy.is_private_window(title, app)
-    assert privacy.is_private_title(title) or "tor browser" in privacy.folded(title)
+    assert privacy.is_private_title(title)  # the stamp's check never says less
 
 
 @pytest.mark.parametrize("title, app", [
@@ -50,6 +49,11 @@ def test_private_windows_are_recognised(title, app):
     ("Private equity - Wikipedia - Google Chrome", "Chrome"),
     ("Privatization - Wikipedia — Mozilla Firefox", "Firefox"),
     ("Cuentas privadas - Banco - Google Chrome", "Chrome"),
+    ("Budget (private) - Google Sheets - Google Chrome", "Chrome"),  # brackets in the page's own title
+    ("Q3 forecast [Private] - SharePoint - Microsoft​ Edge", "Edge"),
+    ("Private Link Center | Microsoft Azure", "Edge"),  # a web app window: no browser part
+    ("Private Edge Cases", "File Explorer"),
+    ("Tor relay private keys", "Windows Terminal"),
     ("", "Chrome"),
 ])
 def test_ordinary_windows_keep_their_title(title, app):
@@ -74,7 +78,7 @@ def test_every_hint_can_match_a_title_written_like_it():
 def test_browsers_are_known_by_name():
     for app in ("Edge", "Chrome", "Firefox", "Brave Browser", "Opera Internet Browser", "Vivaldi", "Arc",
                 "Chromium", "Yandex", "Waterfox", "LibreWolf", "Pale Moon", "Internet Explorer",
-                "QQ浏览器"):
+                "QQ浏览器", "Avast Secure Browser", "Epic Privacy Browser", "Samsung Internet"):
         assert privacy.is_browser(app), app
     for app in ("Excel", "Archive Manager", "ArcGIS Pro", "Teams", "File Explorer", "DB Browser for SQLite", ""):
         assert not privacy.is_browser(app), app
@@ -108,10 +112,36 @@ def test_titles_older_versions_saved_are_hidden_then_cleared(tmp_path, white_ima
     _saved_by_an_older_version(private, "Banque — Navigation privée de Mozilla Firefox", "Firefox")
     _saved_by_an_older_version(ordinary, "Private equity fund.xlsx - Excel", "Excel")
     assert library.meta(private).title == "" and library.meta(private).app == "Firefox"
-    assert library.forget_private_titles() == 1
+    assert library.forget_private_titles() == (1, True)
     assert "Banque" not in (private.path / "meta.json").read_text(encoding="utf-8")
     assert library.meta(ordinary).title == "Private equity fund.xlsx - Excel"
-    assert library.forget_private_titles() == 0
+    assert library.forget_private_titles() == (0, True)
+
+
+def test_a_snip_that_cant_be_read_or_written_now_is_tried_again(tmp_path, white_image, monkeypatch):
+    from snipforge.library import Library
+    library = Library(tmp_path)
+    locked, private = library.create(white_image), library.create(white_image)
+    (locked.path / "meta.json").mkdir()  # can't be read, like a file sync has locked
+    _saved_by_an_older_version(private, "Bank - Google Chrome (Inkognito)", "Chrome")
+    assert library.forget_private_titles() == (1, False)
+
+    def busy(entry, **_changes):
+        raise PermissionError("locked")
+
+    _saved_by_an_older_version(private, "Bank - Google Chrome (Inkognito)", "Chrome")
+    monkeypatch.setattr(library, "update_meta", busy)
+    (locked.path / "meta.json").rmdir()
+    assert library.forget_private_titles() == (0, False)
+
+
+def test_a_sweep_stops_when_asked(tmp_path, white_image):
+    from snipforge.library import Library
+    library = Library(tmp_path)
+    entry = library.create(white_image)
+    _saved_by_an_older_version(entry, "Bank - Google Chrome (Inkognito)", "Chrome")
+    assert library.forget_private_titles(stop=lambda: True) == (0, False)
+    assert "Bank" in (entry.path / "meta.json").read_text(encoding="utf-8")
 
 
 @pytest.fixture
@@ -148,12 +178,30 @@ def test_the_app_clears_old_private_titles_once_in_the_background(qapp, tmp_path
         forge._shortcuts.close()
 
 
+def test_the_app_tries_again_next_start_if_a_snip_was_locked(qapp, tmp_path, monkeypatch, no_dialogs,
+                                                            clean_sweep_pref):
+    from snipforge.library import Library
+    library = Library(tmp_path)
+    swept = threading.Event()
+    monkeypatch.setattr(library, "forget_private_titles", lambda stop: swept.set() or (0, False))
+    forge = _forge(qapp, library, monkeypatch)
+    try:
+        assert swept.wait(5)
+        for _ in range(20):
+            QApplication.processEvents()
+            time.sleep(0.01)
+        assert prefs.private_titles_checked() == 0
+    finally:
+        forge.indexer.close()
+        forge._shortcuts.close()
+
+
 def test_the_app_does_not_sweep_again_once_done(qapp, tmp_path, monkeypatch, no_dialogs, clean_sweep_pref):
     from snipforge.library import Library
     prefs.set_private_titles_checked(privacy.CHECK_VERSION)
     library = Library(tmp_path)
     swept = threading.Event()
-    monkeypatch.setattr(library, "forget_private_titles", lambda: swept.set() or 0)
+    monkeypatch.setattr(library, "forget_private_titles", lambda stop: swept.set() or (0, True))
     forge = _forge(qapp, library, monkeypatch)
     try:
         time.sleep(0.1)

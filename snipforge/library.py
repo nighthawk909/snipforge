@@ -303,16 +303,25 @@ class Library:
             _write_text_atomic(json.dumps(data, ensure_ascii=False), entry.path / META)
         return meta
 
-    def forget_private_titles(self) -> int:
+    def forget_private_titles(self, stop=lambda: False) -> tuple[int, bool]:
         """Clear the saved title of every snip from a private browsing window: ones saved by a
-        version whose check didn't know that browser or language. Returns how many changed. Safe on
-        a worker thread (writes go through update_meta's lock)."""
-        changed = 0
+        version whose check didn't know that browser or language. Returns (how many changed,
+        whether every snip was checked): a file that couldn't be read or written right now (locked
+        by sync or antivirus), or `stop()` turning true, leaves it False so it's tried again. Safe
+        on a worker thread (writes go through update_meta's lock)."""
+        changed, complete = 0, True
         for entry in self.entries():
+            if stop():
+                return changed, False
             try:
                 data = json.loads((entry.path / META).read_bytes().decode("utf-8"))
-            except (OSError, ValueError, RecursionError):
+            except FileNotFoundError:
+                continue  # no details saved: nothing to clear
+            except OSError:
+                complete = False
                 continue
+            except (ValueError, RecursionError):
+                continue  # damaged: reading it in the Library moves it aside
             if not isinstance(data, dict):
                 continue
             title, app = data.get("title"), data.get("app")
@@ -321,8 +330,9 @@ class Library:
                     self.update_meta(entry)
                     changed += 1
                 except OSError as exc:
+                    complete = False
                     log.info("Couldn't clear a private title from snip %s yet: %s", entry.id, exc)
-        return changed
+        return changed, complete
 
     def scan(self) -> list[Snapshot]:
         """Every snip, newest first, from one directory listing per snip (no file is opened)."""
