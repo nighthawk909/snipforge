@@ -14,6 +14,7 @@ a recording in progress is finished first, so the file is kept.
       start ─► launches it ──────────────► hello {pid, window, version}
       settings ─────────── start ────────►  Recorder.start(hold)
       (countdown) ───────── go ──────────►  Recorder.go()
+      bubble moved ──────── bubble ──────►  where the webcam is drawn (camera_share.BubbleState)
                 ◄───────── state, warning ─
       pause / resume / stop / cancel ────►
                 ◄───────── progress {time, levels} ─ (4 a second while recording)
@@ -86,7 +87,8 @@ class RecorderChild(QObject):
         self.channel, self.watch = channel, watch
         self.recorder = None
         self.ended_by: str | None = None  # "sleep", "session end", "SnipForge closed"
-        self._make_recorder = make_recorder or Recorder
+        self._make_recorder = make_recorder or self._recorder_with_camera
+        self.bubble = None  # where the webcam's bubble is, when it's on (moved by SnipForge's messages)
         self._progress = QTimer(self, interval=PROGRESS_MS)
         self._progress.timeout.connect(self._send_progress)
         self._quit = quit or QCoreApplication.exit
@@ -123,6 +125,8 @@ class RecorderChild(QObject):
                 log.warning("The recorder ignored %r before starting", kind)
         elif kind in COMMANDS:
             getattr(self.recorder, kind)()
+        elif kind == "bubble" and self.bubble is not None:
+            self.bubble.update(message.get("rect"), message.get("shape"))
         else:
             log.warning("The recorder ignored %r while recording", kind)
 
@@ -132,6 +136,10 @@ class RecorderChild(QObject):
         except ValueError as exc:
             self._report_failure(str(exc))
             return
+        if settings.camera_share:
+            from .camera_share import BubbleState
+
+            self.bubble = BubbleState(settings.camera_bubble, settings.camera_shape)
         self.recorder = recorder = self._make_recorder(settings)
         recorder.state_changed.connect(lambda state: self.channel.send("state", state=state))
         recorder.warning.connect(lambda text: self.channel.send("warning", message=text))
@@ -150,6 +158,11 @@ class RecorderChild(QObject):
         if self.recorder is not None and self.recorder.state in ("recording", "paused"):
             levels = {kind: round(level, 3) for kind, level in self.recorder.levels().items()}
             self.channel.send("progress", time=round(self.recorder.media_time(), 3), levels=levels)
+
+    def _recorder_with_camera(self, settings):
+        from .recorder import _real_overlay
+
+        return Recorder(settings, overlay=lambda s: _real_overlay(s, self.bubble))
 
     def _check_told(self) -> None:
         if self.recorder is None and not self._done:

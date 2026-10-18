@@ -1,10 +1,11 @@
 """Ready to record: after the area is chosen, a small panel beside it says what goes into the recording
 and starts it.
 
-    [Microphone ▾ ▮▮▯] [Computer sound ▮▯] [Pointer ▾] [3 s ▾]  [● Record] [✕]
+    [Microphone ▾ ▮▮▯] [Computer sound ▮▯] [Camera ▾] [Pointer ▾] [3 s ▾]  [● Record] [✕]
 
 Live meters show each sound source is heard (or why it can't be: a blocked microphone says so), the
-microphone's menu picks the device, Pointer picks its highlight and click rings, and the countdown
+microphone's menu picks the device, Camera shows you in a bubble you can move (its menu picks the
+camera), Pointer picks its highlight and click rings, and the countdown
 runs before recording begins. Enter records, Esc cancels. The choices are remembered (video_prefs).
 """
 from __future__ import annotations
@@ -32,10 +33,12 @@ def countdown_label(seconds: int) -> str:
 class ReadyPanel(QFrame):
     record = Signal(object)  # RecordingChoices: start now
     cancelled = Signal()
+    changed = Signal(object)  # RecordingChoices, after any change (the flow switches the camera on and off)
 
     def __init__(self, area: QRect, screen, choices: RecordingChoices, levels: LevelPreview,
-                 devices: Callable[[], list] | None = None) -> None:
-        """`area` in Qt's coordinates; `devices()` lists microphones (wasapi.devices)."""
+                 devices: Callable[[], list] | None = None, cameras: Callable[[], list] | None = None) -> None:
+        """`area` in Qt's coordinates; `devices()` lists microphones (wasapi.devices), `cameras()`
+        cameras as (id, name)."""
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setObjectName("RecordPanel")
         self.setAccessibleName("Ready to record")
@@ -43,6 +46,7 @@ class ReadyPanel(QFrame):
         self.choices, self.levels = choices, levels
         self._done = False
         self._devices = devices or _microphones
+        self._cameras = cameras or (lambda: [])
         self._area, self._screen = QRect(area), screen
         column = QVBoxLayout(self)
         column.setContentsMargins(6, 6, 6, 6)
@@ -76,7 +80,15 @@ class ReadyPanel(QFrame):
                                           self.choices.system_audio)
         self.system_button.toggled.connect(lambda on: self._change(system_audio=on))
         self.system_meter = LevelMeter("Computer sound")
-        for widget in (self.mic_button, self.mic_meter, self.system_button, self.system_meter):
+        self.camera_button = self._toggle("camera", " Camera", "Show yourself in a bubble in the recording",
+                                          self.choices.webcam)
+        self.camera_button.setPopupMode(QToolButton.MenuButtonPopup)
+        self.camera_menu = QMenu(self.camera_button)
+        self.camera_menu.setAccessibleName("Camera")
+        self.camera_menu.aboutToShow.connect(self._fill_camera_menu)
+        self.camera_button.setMenu(self.camera_menu)
+        self.camera_button.toggled.connect(lambda on: self._change(webcam=on))
+        for widget in (self.mic_button, self.mic_meter, self.system_button, self.system_meter, self.camera_button):
             row.addWidget(widget)
 
     def _options(self, row: QHBoxLayout) -> None:
@@ -156,6 +168,24 @@ class ReadyPanel(QFrame):
             group.addAction(action)
             action.triggered.connect(lambda _=False, d=device_id: self._change(microphone=True, microphone_id=d))
 
+    def _fill_camera_menu(self) -> None:
+        self.camera_menu.clear()
+        group = QActionGroup(self.camera_menu)
+        try:
+            options = [(None, "Windows' default camera"), *self._cameras()]
+        except OSError:
+            options = [(None, "Windows' default camera")]
+        for camera_id, name in options:
+            action = self.camera_menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(camera_id == self.choices.webcam_id)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, c=camera_id: self._change(webcam=True, webcam_id=c))
+
+    def set_camera(self, on: bool) -> None:
+        """Switch the camera on or off from outside (it failed to start, say)."""
+        self.camera_button.setChecked(on)
+
     def _set_countdown(self, seconds: int) -> None:
         self.countdown_actions[seconds].setChecked(True)
         self.countdown_button.setText(f" {countdown_label(seconds)}")
@@ -166,9 +196,13 @@ class ReadyPanel(QFrame):
         self.choices = replace(before, **changes)
         if self.mic_button.isChecked() != self.choices.microphone:
             self.mic_button.setChecked(self.choices.microphone)  # picking a device switches it on
+        if self.camera_button.isChecked() != self.choices.webcam:
+            self.camera_button.setChecked(self.choices.webcam)
         sound = ("microphone", "microphone_id", "system_audio")
         if any(getattr(before, name) != getattr(self.choices, name) for name in sound):
             self._listen()
+        if self.choices != before:
+            self.changed.emit(self.choices)
 
     def _listen(self) -> None:
         self.levels.set_source("microphone", self.choices.microphone, self.choices.microphone_id)

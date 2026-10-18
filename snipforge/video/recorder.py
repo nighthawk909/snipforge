@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal
@@ -52,6 +52,10 @@ ACTIVE = ("starting", "recording", "paused")
 OVER = ("finished", "failed", "cancelled")
 
 
+class CameraUnavailable(OSError):
+    """The webcam's shared picture can't be opened: record without the camera."""
+
+
 class RecordingError(RuntimeError):
     """The recording couldn't start, or failed; the message is for the person recording."""
 
@@ -67,6 +71,9 @@ class Settings:
     system_audio: bool = True
     speakers_id: str | None = None
     effects: PointerEffects = field(default_factory=PointerEffects)
+    camera_share: str | None = None  # the webcam's picture from SnipForge (camera_share.py), when it's on
+    camera_bubble: tuple[int, int, int, int] | None = None  # where its bubble is, in physical pixels
+    camera_shape: str = "circle"
 
     def __post_init__(self) -> None:
         _check_settings(self)
@@ -92,6 +99,18 @@ def _check_settings(s: Settings) -> None:
         raise ValueError(f"The largest size must be two whole numbers of at least {MIN_SIDE}")
     if min(s.area[2], s.area[3]) < MIN_SIDE or min(s.output_size) < MIN_SIDE:
         raise ValueError(f"The area is too small or thin to record: at least {MIN_SIDE} pixels each way")
+    if s.camera_share is not None:
+        _check_camera(s)
+
+
+def _check_camera(s: Settings) -> None:
+    from .camera_share import is_name
+    from .webcam_layer import SHAPES
+
+    bubble = s.camera_bubble
+    if not is_name(s.camera_share) or s.camera_shape not in SHAPES or not (
+            bubble is None or (len(bubble) == 4 and all(_is_int(v) for v in bubble) and min(bubble[2:]) > 0)):
+        raise ValueError("The recording's camera settings make no sense")
 
 
 @dataclass
@@ -135,6 +154,7 @@ class Recorder(QObject):
         self._output_existed = False  # a file already there is never deleted
         self._held = False  # started with hold=True, and go() not called yet
         self._overlay_warned = False
+        self._overlay_failures = 0  # how many of a composite overlay's dropped parts were warned about
         self._stop_media = 0.0
         self._paused_media = 0.0  # recording time when the current pause began
         self._pump = QTimer(self)
@@ -259,7 +279,7 @@ class Recorder(QObject):
         self._encoder = self._make_encoder(s.output, (s.area[2], s.area[3]), s.output_size, s.fps,
                                            audio=bool(self._captures))
         self._encoder.ready.connect(self._begin)
-        self._frames = self._make_screen_frames(s.area, s.fps, self.clock, self._make_overlay(s))
+        self._frames = self._make_screen_frames(s.area, s.fps, self.clock, self._overlay(s))
         self._frames.start()
         self._encoder.start()
         # Connected only now: a refusal inside start() is raised above, not also reported by `failed`.
@@ -314,6 +334,7 @@ class Recorder(QObject):
             return
         if self.state in ("recording", "paused") and self._out_of_space():
             return
+        self._warn_overlay_failures(frames)
         if frames.overlay_error is not None and not self._overlay_warned:
             self._overlay_warned = True
             self.warning.emit(f"The pointer can't be drawn, so it's left out: {frames.overlay_error}")
@@ -341,6 +362,26 @@ class Recorder(QObject):
             self.warning.emit(f"The drive is running out of space: {free // MB} MB left. The recording stops "
                               f"by itself, and is saved, if it gets below {MIN_FREE_TO_GO_ON // MB} MB.")
         return False
+
+    def _overlay(self, s: Settings):
+        """The pointer, and the webcam under it when it's on. A camera picture that can't be reached
+        is a warning, and the recording goes on without the camera."""
+        try:
+            return self._make_overlay(s)
+        except CameraUnavailable as exc:
+            self.warning.emit(f"The camera can't be recorded, so it's left out: {exc}")
+            return self._make_overlay(replace(s, camera_share=None))
+
+    def _warn_overlay_failures(self, frames) -> None:
+        failures = getattr(getattr(frames, "overlay", None), "failures", ())
+        if len(failures) <= self._overlay_failures:
+            return
+        from .webcam_layer import WebcamLayer
+
+        for overlay, exc in failures[self._overlay_failures:]:
+            what = "camera" if isinstance(overlay, WebcamLayer) else "pointer"
+            self.warning.emit(f"The {what} can't be drawn, so it's left out: {exc}")
+        self._overlay_failures = len(failures)
 
     def _screen_lost(self, error) -> None:
         message = f"The screen stopped being recorded: {error}"
@@ -461,9 +502,21 @@ def _real_capture(kind, device_id, on_packet, on_error):
                                 device_id=device_id, on_error=on_error)
 
 
-def _real_overlay(settings: Settings):
+def _real_overlay(settings: Settings, bubble=None):
+    """The pointer; with the camera on, the webcam's picture drawn under it where its bubble is
+    (`bubble`: a camera_share.BubbleState kept up to date from SnipForge)."""
     from .cursor import PointerOverlay
 
-    overlay = PointerOverlay(settings.area, settings.effects)
-    overlay.prewarm()
-    return overlay
+    pointer = PointerOverlay(settings.area, settings.effects)
+    pointer.prewarm()
+    if not settings.camera_share:
+        return pointer
+    from .camera_share import BubbleState, CameraReader
+    from .webcam_layer import CompositeOverlay, WebcamLayer
+
+    try:
+        camera = CameraReader(settings.camera_share)
+    except (OSError, ValueError) as exc:
+        raise CameraUnavailable(str(exc)) from exc
+    bubble = bubble or BubbleState(settings.camera_bubble, settings.camera_shape)
+    return CompositeOverlay(WebcamLayer(settings.area, camera, bubble), pointer)

@@ -138,7 +138,10 @@ def settings_to_message(settings) -> dict:
             "max_size": list(settings.max_size) if settings.max_size else None,
             "microphone": settings.microphone, "microphone_id": settings.microphone_id,
             "system_audio": settings.system_audio, "speakers_id": settings.speakers_id,
-            "effects": {"pointer": e.pointer, "highlight": e.highlight, "clicks": e.clicks}}
+            "effects": {"pointer": e.pointer, "highlight": e.highlight, "clicks": e.clicks},
+            "camera": {"share": settings.camera_share, "shape": settings.camera_shape,
+                       "bubble": list(settings.camera_bubble) if settings.camera_bubble else None}
+            if settings.camera_share else None}
 
 
 def settings_from_message(data) -> object:
@@ -167,7 +170,21 @@ def settings_from_message(data) -> object:
                     max_size=tuple(max_size) if max_size is not None else None,
                     microphone=data["microphone"], microphone_id=data.get("microphone_id"),
                     system_audio=data["system_audio"], speakers_id=data.get("speakers_id"),
-                    effects=PointerEffects(**flags))
+                    effects=PointerEffects(**flags), **_camera(data.get("camera")))
+
+
+def _camera(camera) -> dict:
+    """The webcam's settings from a message (checked by Settings itself); none when it's off."""
+    if camera is None:
+        return {}
+    if not isinstance(camera, dict) or not isinstance(camera.get("share"), str) \
+            or not isinstance(camera.get("shape", "circle"), str):
+        raise ValueError("The recording's camera settings make no sense")
+    bubble = camera.get("bubble")
+    if bubble is not None and not isinstance(bubble, list):
+        raise ValueError("The recording's camera settings make no sense")
+    return {"camera_share": camera["share"], "camera_shape": camera.get("shape", "circle"),
+            "camera_bubble": tuple(bubble) if bubble is not None else None}
 
 
 def _output_path(output) -> Path:

@@ -90,6 +90,7 @@ class RemoteRecorder(QObject):
         self._launched_pid = 0
         self.channel: Channel | None = None
         self._hold = False
+        self._bubble: dict | None = None  # the bubble's latest place, for a recorder that calls back late
         self._time = (0.0, 0.0)  # (recording time, when it was heard) from the latest progress
         self._levels: dict[str, float] = {}
         self._alive_check = QTimer(self, interval=ALIVE_CHECK_MS)
@@ -163,10 +164,17 @@ class RemoteRecorder(QObject):
         else:
             self._send("cancel")
 
-    def _send(self, kind: str) -> None:
+    def move_bubble(self, rect, shape: str) -> None:
+        """The webcam's bubble moved, changed shape or size (rect in physical pixels; None: hidden):
+        the recording draws the camera there from now on. Kept for a recorder not called back yet."""
+        self._bubble = {"rect": list(rect) if rect is not None else None, "shape": shape}
+        self._send("bubble", flush=False, **self._bubble)
+
+    def _send(self, kind: str, flush: bool = True, **fields) -> None:
         if self.channel is not None and self.state not in OVER:
-            self.channel.send(kind)
-            self.channel.flush()  # a stop sent as SnipForge quits must leave before it does
+            self.channel.send(kind, **fields)
+            if flush:  # a stop sent as SnipForge quits must leave before it does
+                self.channel.flush()
 
     # --- the channel -----------------------------------------------------------------------------
 
@@ -179,6 +187,8 @@ class RemoteRecorder(QObject):
         self.channel.message.connect(self._on_message)
         self.channel.closed.connect(self._gone)
         self.channel.send("start", settings=settings_to_message(self.settings), hold=self._hold)
+        if self._bubble is not None:  # moved while it was starting up
+            self.channel.send("bubble", **self._bubble)
 
     def _check_connected(self) -> None:
         if self.state == "launching":

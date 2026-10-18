@@ -471,3 +471,53 @@ def test_progress_that_makes_no_sense_is_ignored(tmp_path, qapp):
     wait_for(lambda: False, 0.2)
 
     assert remote.media_time() >= before and remote.levels() == {}
+
+
+def test_moving_the_bubble_moves_it_in_the_recording(tmp_path, qapp):
+    from snipforge.video.recorder import Settings as RecordingSettings
+
+    process = InProcess()
+    share = "sfcam-" + "d" * 16
+    remote = RemoteRecorder(RecordingSettings(area=(0, 0, 320, 240), output=Path(tmp_path).resolve() / "rec.mp4",
+                                              camera_share=share, camera_bubble=(10, 10, 100, 100)), launch=process)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+    child = process.children[0]
+    assert child.bubble.snapshot().rect == (10, 10, 100, 100)
+
+    remote.move_bubble((200, 120, 160, 90), "rounded")
+
+    assert wait_for(lambda: child.bubble.snapshot().rect == (200, 120, 160, 90))
+    assert child.bubble.snapshot().shape == "rounded"
+    remote.move_bubble((1, 2, 3), "star")  # makes no sense: ignored there
+    wait_for(lambda: False, 0.2)
+    assert child.bubble.snapshot().rect == (200, 120, 160, 90)
+
+
+def test_a_bubble_moved_before_the_recorder_calls_back_still_arrives(tmp_path, qapp):
+    from snipforge.video.recorder import Settings as RecordingSettings
+
+    process = InProcess()
+    remote = RemoteRecorder(RecordingSettings(area=(0, 0, 320, 240), output=Path(tmp_path).resolve() / "rec.mp4",
+                                              camera_share="sfcam-" + "f" * 16, camera_bubble=(10, 10, 100, 100)),
+                            launch=process)
+    remote.start(hold=True)
+    remote.move_bubble((150, 90, 100, 100), "circle")  # dragged during the countdown, before it connected
+
+    assert wait_for(lambda: process.children and process.children[0].bubble is not None
+                    and process.children[0].bubble.snapshot().rect == (150, 90, 100, 100))
+
+
+def test_hiding_the_bubble_hides_the_camera_in_the_recording(tmp_path, qapp):
+    from snipforge.video.recorder import Settings as RecordingSettings
+
+    process = InProcess()
+    remote = RemoteRecorder(RecordingSettings(area=(0, 0, 320, 240), output=Path(tmp_path).resolve() / "rec.mp4",
+                                              camera_share="sfcam-" + "f" * 16, camera_bubble=(10, 10, 100, 100)),
+                            launch=process)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+
+    remote.move_bubble(None, "circle")
+
+    assert wait_for(lambda: process.children[0].bubble.snapshot() is None)
