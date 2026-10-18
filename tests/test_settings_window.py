@@ -269,7 +269,8 @@ def test_every_page_opens_at_the_top_and_short_pages_dont_scroll(make, height):
             assert bar.value() == 0, (previous, key)
             if key == "updates":
                 assert bar.maximum() > 0  # the long page really scrolls, so the reset is tested
-            elif height == 760:  # short pages fit the default window
+            elif height == 760 and key != "capture":  # short pages fit the default window (Capture,
+                # with its shortcuts and capture presets, is a long page now)
                 assert bar.maximum() == 0, (key, bar.maximum())
     w.show_section("updates")
     QApplication.processEvents()

@@ -1,8 +1,8 @@
 """The toolbar at the top of the capture overlay: Record (choose an area to record a video of,
 instead of snipping it), how to choose what to snip (and, in Fixed size mode, the size), a delay,
-whether the mouse pointer is included, and Cancel. While recording is switched on, the delay and the
-pointer switch step aside: a recording has its own countdown and pointer settings, chosen after the
-area, and Scrolling mode doesn't apply.
+whether the mouse pointer is included, capture presets (when there are any), and Cancel. While
+recording is switched on, the delay, the pointer switch and the presets step aside: a recording has
+its own countdown and pointer settings, chosen after the area, and Scrolling mode doesn't apply.
 
 Its buttons never take keyboard focus from the overlay when clicked (Tab still reaches them, and
 Enter or Space presses the focused one), so Esc, Enter and the mode letters keep working however
@@ -77,6 +77,11 @@ class _ToolbarButton(QToolButton):
 
 def delay_label(seconds: int) -> str:
     return "No delay" if seconds == 0 else f"{seconds} s delay"
+
+
+def _short(name: str, most: int = 18) -> str:
+    """A preset's name for its toolbar button (the menu shows it whole)."""
+    return name if len(name) <= most else name[:most - 1].rstrip() + "…"
 
 
 def size_label(width: int, height: int) -> str:
@@ -201,12 +206,15 @@ class CaptureToolbar(QFrame):
     size_picked = Signal(int, int)  # Fixed size mode's frame, in screen pixels
     delay_picked = Signal(int)  # seconds; picking one (other than none) starts the countdown
     pointer_toggled = Signal(bool)
+    preset_picked = Signal(str)  # a capture preset's id, or "" for your usual choices
+    manage_presets = Signal()
     cancel_clicked = Signal()
 
     def __init__(self, mode: str, parent=None, *, delay: int = 0, pointer: bool = False,
                  pointer_available: bool = True, pointer_why: str = "", scrolling: bool = True,
                  fixed_size: tuple[int, int] = DEFAULT_FIXED_SIZE, recordable: bool = False,
-                 record: bool = False) -> None:
+                 record: bool = False, presets: list[tuple[str, str]] = (), preset: str = "") -> None:
+        """`presets`: (id, name) of each capture preset, for its menu; `preset`: the one in use."""
         super().__init__(parent)
         self.setObjectName("CaptureToolbar")
         self.setAccessibleName("Capture")
@@ -243,6 +251,9 @@ class CaptureToolbar(QFrame):
         self.pointer_button.setCheckable(True)
         self.pointer_button.clicked.connect(self.pointer_toggled)
         row.addWidget(self.pointer_button)
+        self._presets_separator = self._separator()
+        row.addWidget(self._presets_separator)
+        row.addWidget(self._presets_control(presets))
         row.addWidget(self._separator())
         self.cancel_button = self._button("close", "", "Cancel (Esc)")
         self.cancel_button.setAccessibleName("Cancel")
@@ -253,6 +264,7 @@ class CaptureToolbar(QFrame):
         self.set_delay(delay)
         self.set_pointer(pointer)
         self.set_pointer_available(pointer_available, pointer_why)
+        self.set_preset(preset)
         self.set_record(record and recordable)
 
     def _record_control(self, row: QHBoxLayout, recordable: bool) -> None:
@@ -278,6 +290,80 @@ class CaptureToolbar(QFrame):
         for widget in (self.delay_button, self.pointer_button, self.buttons.get("scroll")):
             if widget is not None:
                 widget.setVisible(not on)
+        shown = bool(self._preset_actions) and not on  # presets are for snips
+        self.presets_button.setVisible(shown)
+        self._presets_separator.setVisible(shown)
+        self.adjustSize()
+
+    def _presets_control(self, presets) -> QToolButton:
+        """Capture presets: pick one to snip with its choices, or go back to your usual ones.
+        Shown only when there are presets (Settings > Capture makes them)."""
+        self.presets_button = self._button("sliders", " Presets", "Snip with a saved preset (1 to 9)")
+        self.presets_button.setObjectName("PresetsButton")
+        self.presets_button.setAccessibleName("Presets")
+        self.presets_button.setAccessibleDescription("Snip with a saved preset. Shortcuts: 1 to 9, 0 for none")
+        self.presets_button.setCheckable(True)
+        self.presets_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.presets_button.setPopupMode(QToolButton.InstantPopup)
+        self.presets_menu = QMenu(self.presets_button)
+        self.presets_menu.setAccessibleName("Presets")
+        group = QActionGroup(self.presets_menu)
+        group.setExclusive(True)
+        usual = self.presets_menu.addAction("Your usual choices\t0")
+        usual.setCheckable(True)
+        group.addAction(usual)
+        usual.triggered.connect(lambda: self.preset_picked.emit(""))
+        self._preset_actions: dict[str, object] = {"": usual}
+        self._preset_names: dict[str, str] = {}
+        if presets:
+            self.presets_menu.addSeparator()
+        for n, (pid, name) in enumerate(presets, 1):
+            text = name.replace("&", "&&") + (f"\t{n}" if n <= 9 else "")
+            action = self.presets_menu.addAction(text)
+            action.setCheckable(True)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, p=pid: self.preset_picked.emit(p))
+            self._preset_actions[pid] = action
+            self._preset_names[pid] = name
+        if not presets:
+            self._preset_actions = {}
+        self.presets_menu.addSeparator()
+        self.presets_menu.addAction("Manage presets…", self.manage_presets.emit)
+        self.presets_button.setMenu(self.presets_menu)
+        self._preset_ids = [pid for pid, _name in presets]
+        # As wide as its longest label, so picking a preset never moves the other buttons
+        widths = []
+        for label in ("Presets", *(_short(name) for _pid, name in presets)):
+            self.presets_button.setText(f" {label}")
+            widths.append(self.presets_button.sizeHint().width())
+        self._presets_width = max(widths)
+        self.presets_button.setFixedWidth(self._presets_width)
+        return self.presets_button
+
+    def preset_for_key(self, digit: int) -> str | None:
+        """The preset the digit key picks (1 is the first; 0 is your usual choices), if any."""
+        if not self._preset_actions:
+            return None
+        if digit == 0:
+            return ""
+        return self._preset_ids[digit - 1] if 0 < digit <= len(self._preset_ids) else None
+
+    @property
+    def has_presets(self) -> bool:
+        return bool(self._preset_actions)
+
+    def set_preset(self, preset_id: str) -> None:
+        """Show which preset is in use ("" for none), without announcing it."""
+        if not self._preset_actions:
+            return
+        action = self._preset_actions.get(preset_id) or self._preset_actions[""]
+        action.setChecked(True)
+        name = self._preset_names.get(preset_id)
+        self.presets_button.setChecked(name is not None)
+        self.presets_button.setText(f" {_short(name)}" if name else " Presets")
+        self.presets_button.setToolTip(f"Snipping with the preset {name} (1 to 9 pick another, 0 none)" if name
+                                       else "Snip with a saved preset (1 to 9)")
+        self.presets_button.setAccessibleName(f"Presets: {name}" if name else "Presets")
         self.adjustSize()
 
     def _size_control(self) -> QToolButton:
@@ -407,8 +493,13 @@ class CaptureToolbar(QFrame):
         """Icons only (names stay in tooltips and for screen readers), for monitors too narrow for
         the labels."""
         style = Qt.ToolButtonIconOnly if compact else Qt.ToolButtonTextBesideIcon
-        for button in (*self.buttons.values(), self.delay_button, self.record_button):
+        for button in (*self.buttons.values(), self.delay_button, self.record_button, self.presets_button):
             button.setToolButtonStyle(style)
+        if compact:
+            self.presets_button.setMinimumWidth(0)
+            self.presets_button.setMaximumWidth(16777215)
+        else:
+            self.presets_button.setFixedWidth(self._presets_width)
         self.adjustSize()
 
     def set_mode(self, mode: str) -> None:

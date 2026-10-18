@@ -21,7 +21,7 @@ be checked in the source code; file references are given where useful.
 | What | Where | Removed on uninstall? |
 |---|---|---|
 | The user's snips (original capture, editable markup, rendered image) | `%USERPROFILE%\Pictures\SnipForge` | No (it's the user's work) |
-| Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses, update choices (mode, channel, pinned or skipped version, the waiting download), capture choices (mode, delay, pointer, Fixed size), shortcuts of your own, which version of the private-window check last swept the Library, and the last snip's area for Repeat last snip (the monitor's name, position, size and scale, and a rectangle on it; no image) | `HKCU\Software\SnipForge\SnipForge` | Yes |
+| Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses, update choices (mode, channel, pinned or skipped version, the waiting download), capture choices (mode, delay, pointer, Fixed size), capture presets (a name, those choices, effects, where the snip goes and, for Save to a folder, the folder's path, and each one's shortcut), shortcuts of your own, which version of the private-window check last swept the Library, and the last snip's area for Repeat last snip (the monitor's name, position, size and scale, and a rectangle on it; no image) | `HKCU\Software\SnipForge\SnipForge` | Yes |
 | Small theme images (check mark, arrows) regenerated at start | `%LOCALAPPDATA%\SnipForge\cache` | Yes |
 | Logs for Report a problem: what SnipForge logs as it works (`snipforge.log`, and `recorder.log` from the recording process; 1 MB each, with two older copies), the last unexpected error, the last crash (Python's faulthandler output: which code was running), and a marker with the process ID that's there while SnipForge runs, so the next start can tell it didn't quit normally. Faulthandler output written while SnipForge carries on (an error Windows handled) is moved into the log every half a minute. Messages can name files and folders the user works with; no snips, keystrokes or window titles | `%LOCALAPPDATA%\SnipForge\logs` | Yes |
 | A problem report the user saves (a zip; see Report a problem) | Wherever the user saves it (the Desktop is suggested) | No (it's the user's file) |
@@ -33,6 +33,7 @@ be checked in the source code; file references are given where useful.
 | Startup entry (if enabled) | `HKCU` or, for all-users installs, `HKLM\...\CurrentVersion\Run` | Yes |
 | OneDrive shares | `<OneDrive>\SnipForge` (synced by the user's OneDrive client) | No |
 | Trimmed copies and GIFs made in the video editor, under a new name (`<video> (trimmed).mp4`, `<video>.gif`); the original recording is never changed. While one is being written it's a `.<name>.<random>.partial.mp4` (or `.gif`) file in the same folder, renamed when done and deleted if cancelled, failed or SnipForge quits first (only a crash or power cut can leave one behind) | Next to the original video | No (it's the user's work) |
+| Snips saved by a capture preset set to Save to a folder (`snip-<date>-<time>.<format>`, written without asking, in the format chosen in Settings) | The folder the user chose for that preset, or the Save folder | No (it's the user's work) |
 
 Note that a snip's original, uncropped capture is kept so crops can be undone; deleting a snip from
 the Library sends its whole folder to the Recycle Bin.
@@ -47,12 +48,13 @@ through. Nothing is logged, stored or sent anywhere. Endpoint tools sometimes fl
 as keylogger-like; this is a false positive, and the ~150-line source shows the full logic.
 
 **Shortcuts of your own** (optional, `snipforge/shortcuts.py`). In Settings > Capture a user can
-add key combinations for New snip, Repeat last snip and Open the Library. These are registered with
+add key combinations for New snip, Repeat last snip, Open the Library, Record video and each capture
+preset. These are registered with
 `RegisterHotKey`, not the hook: Windows tells SnipForge only when one of its own combinations is
 pressed and never shows it any other keystroke. Each needs Ctrl, Alt or the Windows key; a
 combination another app already registered is refused. None are set by default.
 
-**Screen capture.** The screen is read only when the user asks for a snip: the hotkey, New snip, Repeat last snip, or one of their own shortcuts. Repeat last snip reads the same area again straight away, without the chooser. A second `SnipForge.exe --snip` or `--repeat` started by the same user is passed to the running copy over a local per-user pipe, which is how the Start menu and taskbar entries reach it.
+**Screen capture.** The screen is read only when the user asks for a snip: the hotkey, New snip, Repeat last snip, a capture preset, or one of their own shortcuts. A Full screen preset takes the monitor under the pointer without the chooser; a Save to a folder preset writes the image to the folder the user chose for it (or the Save folder); a Copy preset puts the finished snip on the clipboard, as Copy every snip to the clipboard does with the snip itself. Repeat last snip reads the same area again straight away, without the chooser. A second `SnipForge.exe --snip` or `--repeat` started by the same user is passed to the running copy over a local per-user pipe, which is how the Start menu and taskbar entries reach it.
 
 **Screen recording.** The screen is recorded only after the user chooses Record video (the tray,
 the Record switch on the capture toolbar, or a shortcut they set) and then an area, and only that

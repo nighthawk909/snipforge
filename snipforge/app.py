@@ -8,11 +8,11 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import __version__, logs, prefs, project, screen_access, theme, wording
+from . import __version__, logs, prefs, preset_output, presets, project, screen_access, theme, wording
 from .capture import CaptureSession, on_screen
 from .editor.window import EditorWindow
 from .home import HomeWindow
@@ -24,7 +24,6 @@ from .pin import PinWindow
 from .privacy import CHECK_VERSION as PRIVACY_CHECK
 from .reopen import ReopenWatcher
 from .settings_window import SECTIONS, SettingsWindow
-from .shortcuts import ACTIONS as SHORTCUT_TITLES
 from .shortcuts import GlobalShortcuts
 from .shortcuts import label as shortcut_label
 from .single_instance import InstanceServer, send_to_running
@@ -58,6 +57,18 @@ def build_icon(size: int = 256) -> QIcon:
     return QIcon(pix)
 
 
+class _Follower(QObject):
+    """Calls `react` for a signal of something that lives longer; ends with its parent."""
+
+    def __init__(self, parent: QObject, react) -> None:
+        super().__init__(parent)
+        self._react = react
+
+    @Slot()
+    def react(self) -> None:
+        self._react()
+
+
 class SnipForgeApp:
     def __init__(self, app: QApplication, library: Library | None = None) -> None:
         self._app = app
@@ -83,11 +94,13 @@ class SnipForgeApp:
         self._shortcuts = GlobalShortcuts()  # shortcuts of your own (RegisterHotKey, not the hook)
         self._shortcuts.triggered.connect(self._on_shortcut, Qt.QueuedConnection)
         shortcut_problems = self._shortcuts.apply_saved()
+        shortcut_problems |= self._shortcuts.apply_presets(presets.load())
         self._build_tray()
         if shortcut_problems:
             self._tray.showMessage(
                 "SnipForge", "Some of your shortcuts couldn't be set. " + " ".join(
-                    f"{SHORTCUT_TITLES[action]}: {problem}" for action, problem in shortcut_problems.items())
+                    f"{self._shortcuts.title(action, capital=True)}: {problem}"
+                    for action, problem in shortcut_problems.items())
                 + " Change them in Settings > Capture.", QSystemTrayIcon.Warning)
         app.aboutToQuit.connect(self._hotkey.stop)
         app.aboutToQuit.connect(self._shortcuts.close)
@@ -142,6 +155,11 @@ class SnipForgeApp:
         menu.addAction("New snip", self.capture)
         self._repeat_action = menu.addAction("Repeat last snip", self.repeat_last)
         self._repeat_action.setEnabled(prefs.last_area() is not None)  # after the first snip
+        self._presets_menu = menu.addMenu("Snip with a preset")
+        self._show_presets()
+        # Through an object that goes with the menu, so a menu that's gone stops listening
+        self._presets_follower = _Follower(menu, self._presets_changed)
+        presets.changes().changed.connect(self._presets_follower.react)
         self._cancel_snip_action = menu.addAction("Cancel snip", self.cancel_snip)
         self._cancel_snip_action.setVisible(False)  # only while a snip is under way
         self._record_action = menu.addAction("Record video", self.record)
@@ -164,6 +182,30 @@ class SnipForgeApp:
             self._tray.showMessage("SnipForge", "Couldn't install the keyboard hook, so Win+Shift+S "
                                    "won't work. Use the tray icon to snip.", QSystemTrayIcon.Warning)
         self._updates.start()
+
+    def _presets_changed(self) -> None:
+        """Presets added, changed or deleted (Settings checked each new shortcut before saving it)."""
+        self._shortcuts.apply_presets(presets.load())
+        self._show_presets()
+
+    def _show_presets(self) -> None:
+        """The tray's capture presets (a submenu shown only when there are any)."""
+        self._presets_menu.clear()
+        saved = presets.load()
+        for preset in saved:
+            text = preset.name.replace("&", "&&")
+            if bound := self._shortcuts.bindings().get(preset.action):
+                text += f"\t{shortcut_label(bound)}"
+            action = self._presets_menu.addAction(text, lambda p=preset.id: self.capture_preset(p))
+            action.setToolTip(preset.summary())
+        self._presets_menu.addSeparator()
+        self._presets_menu.addAction("Manage presets…", self.manage_presets)
+        self._presets_menu.menuAction().setVisible(bool(saved))
+
+    def manage_presets(self) -> None:
+        self.show_settings("capture")
+        if self._settings is not None:
+            self._settings.show_presets()
 
     def _update_tray_tip(self) -> None:
         keys = [name for name, on in zip(("Win+Shift+S", "Print Screen"), prefs.hotkeys(), strict=True)
@@ -263,7 +305,22 @@ class SnipForgeApp:
             return
         # R switches a snip to recording, unless one is under way already
         on_area = self._record_area if self._recording is None else None
-        self._start(CaptureSession(self._on_captured, on_area=on_area))
+        self._start(CaptureSession(self._on_captured, on_area=on_area, on_manage_presets=self.manage_presets))
+
+    def capture_preset(self, preset_id: str) -> None:
+        """Snip with a capture preset (the tray, or its shortcut)."""
+        if self._session is not None:
+            self._session.snip_now()  # as the snip key does during a countdown
+            return
+        preset = presets.get(preset_id)
+        if preset is None:
+            self._note("That preset isn't there any more. Choose one in Settings > Capture.")
+            return
+        if not screen_access.ready_to_snip():  # a Mac without Screen Recording: explained instead
+            return
+        on_area = self._record_area if self._recording is None else None
+        self._start(CaptureSession(self._on_captured, on_area=on_area, preset=preset,
+                                   on_manage_presets=self.manage_presets))
 
     def record(self) -> None:
         """Record video (the tray, or its shortcut): choose an area to record. Pressed again while
@@ -351,6 +408,9 @@ class SnipForgeApp:
         QTimer.singleShot(CAPTURE_DELAY_MS, session.start)
 
     def _on_shortcut(self, action: str) -> None:
+        if (preset_id := presets.from_action(action)) is not None:
+            self.capture_preset(preset_id)
+            return
         {"snip": self.capture, "repeat": self.repeat_last, "library": self.show_home, "record": self.record}[action]()
 
     def cancel_snip(self) -> None:
@@ -360,6 +420,7 @@ class SnipForgeApp:
 
     def _on_captured(self, image: QImage | None) -> None:
         source = self._session.source if self._session is not None else None
+        preset = getattr(self._session, "preset", None)
         note = getattr(self._session, "note", None)
         area = getattr(self._session, "area", None)
         self._session = None
@@ -374,18 +435,60 @@ class SnipForgeApp:
                 self._repeat_action.setEnabled(True)
             except ValueError as exc:
                 log.warning("Couldn't remember the snip's area for Repeat last snip: %s", exc)
-        if prefs.copy_on_capture():  # like Win+Shift+S: the raw snip is on the clipboard too
+        if prefs.copy_on_capture() and preset is None:  # like Win+Shift+S: the raw snip is on the clipboard too
             QGuiApplication.clipboard().setImage(image)
         try:
             entry = self.library.create(image, source=source)
         except OSError as exc:
             log.warning("Couldn't add snip to library: %s", exc)
             entry = None
-        if entry is not None:
-            self.indexer.index(entry)
-        self._open_editor(image, entry, None)
+        if preset is not None:
+            self._finish_preset(image, entry, preset)
+        else:
+            if entry is not None:
+                self.indexer.index(entry)
+            self._open_editor(image, entry, None)
         if self._home is not None and self._home.isVisible() and entry is not None:
             self._home.update_entry(entry.id)
+
+    def _finish_preset(self, image: QImage, entry, preset: presets.Preset) -> None:
+        """A capture preset's snip: its edges and Beautify, then the editor, the clipboard or a folder.
+        It's in the Library whatever happens, so a snip that couldn't be saved isn't lost."""
+        document, rendered = preset_output.with_edges(image, preset)
+        kept = "" if entry is None else " It's in your Library too."
+        if prefs.copy_on_capture() and preset.destination != "copy":  # as Win+Shift+S, with its effects
+            copy = rendered if preset.destination == "editor" else preset_output.final_image(rendered, preset)
+            QGuiApplication.clipboard().setImage(copy)
+        if document is not None and entry is not None:
+            try:
+                self.library.save(entry, document, rendered)
+            except OSError as exc:
+                log.warning("Couldn't keep the preset's edges with the snip: %s", exc)
+        if entry is not None:
+            self.indexer.index(entry)
+        if preset.destination == "editor":
+            choice = None if preset.beautify == "settings" else preset_output.beautify_on(preset)
+            self._open_editor(image, entry, document, beautify_on=choice)
+            return
+        final = preset_output.final_image(rendered, preset)
+        if preset.destination == "copy":
+            QGuiApplication.clipboard().setImage(final)
+            self._note(f"Copied ({preset.name}).{kept}")
+            return
+        from .editor.export import ExportError, save_image
+        try:
+            path = preset_output.new_path(preset)
+            saved = save_image(final, path)
+            problem = "" if saved else "it couldn't be written"
+        except (OSError, ExportError) as exc:
+            path, problem = None, str(exc)
+        if problem:
+            log.warning("A preset couldn't save its snip: %s", problem)
+            self._note(f"Couldn't save the snip ({preset.name}): {problem.rstrip('.')}. "
+                       + ("It's in your Library, opened here." if entry is not None else "It's opened here."))
+            self._open_editor(image, entry, document)
+            return
+        self._note(f"Saved to {path} ({preset.name}).")
 
     def open_entry(self, entry_id: str) -> None:
         for window in self._windows:
@@ -414,10 +517,11 @@ class SnipForgeApp:
             document, autosave = None, False
         self._open_editor(image, entry, document, autosave)
 
-    def _open_editor(self, image: QImage, entry, document, autosave: bool = True) -> None:
+    def _open_editor(self, image: QImage, entry, document, autosave: bool = True,
+                     beautify_on: bool | None = None) -> None:
         editor = EditorWindow(image, self.library, entry, document, on_new_snip=self.capture,
                               on_open_entry=self.open_entry, on_pin=self.pin, autosave=autosave,
-                              on_open_library=self.show_home)
+                              on_open_library=self.show_home, beautify_on=beautify_on)
         self._track(editor)
         editor.show()
         self._bring_to_front(editor)
