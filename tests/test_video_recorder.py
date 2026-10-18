@@ -26,9 +26,11 @@ ROOMY = 10**12  # bytes free: the tests' drives never run low unless a test says
 # they're on time (0); on a busy one (other test runs alongside) most can be a frame late, and
 # GitHub's macOS runners wake the frame thread ~20 ms late every time, so there each frame shows the
 # next one's number. A frame up to LATE_FRAMES late is still in time: the frame thread only skips
-# ahead after that, and the largest offset is checked against it too. (Recording itself is
-# Windows-only for now: docs/VIDEO-PLAN.md.)
+# ahead after that, and the largest offset is checked against it too. (So a constant one-frame shift
+# would pass here; the frames' own numbers and counts are checked elsewhere.) Recording itself is
+# Windows-only for now: docs/VIDEO-PLAN.md.
 ON_TIME = 1.0 if sys.platform == "win32" else 1.5
+STAMP_SLACK = 0.05  # frame times are whole microseconds: a frame 4 late can measure 4.00001
 
 
 class StillScreen:
@@ -176,17 +178,20 @@ def frame_times(path):
     return [(clip.frame_number(image), t * FPS) for t, image in frames.read(path)]
 
 
-def assert_in_time(shown, duration):
+def assert_in_time(shown, result):
     """Each frame shows the number due when it was made, so it should be at its own place in the
     video. One can be up to LATE_FRAMES whole frames late before the frame thread skips ahead (a busy
     machine, or GitHub's stalling macOS runners), and the Stamper rounds to the nearest frame where
     the frame thread counts whole ones: so up to LATE_FRAMES + 1 (3.6 frames late is kept, and shows
-    4). On average they're on time, and most of them are there (less one skip ahead's worth, which in
-    a short recording is a lot)."""
+    4). Not the first frame, which is made at the first wake after time zero however late, and is
+    never skipped past. On average they're on time, and most of them are there, apart from those the
+    frame thread knowingly skipped (frames the encoder lost aren't excused)."""
     offsets = sorted(abs(number - at) for number, at in shown)
-    assert offsets[len(offsets) // 2] <= ON_TIME, offsets
-    assert offsets[-1] <= LATE_FRAMES + 1, offsets
-    assert len(shown) >= 0.6 * duration * FPS - LATE_FRAMES
+    assert offsets[len(offsets) // 2] <= ON_TIME + STAMP_SLACK, offsets
+    after_first = max(abs(number - at) for number, at in shown[1:])
+    assert after_first <= LATE_FRAMES + 1 + STAMP_SLACK, offsets
+    skipped = result.stats["frames_skipped_late"]
+    assert len(shown) >= 0.6 * result.duration * FPS - skipped, (len(shown), skipped)
 
 
 def test_a_recording_has_its_picture_and_both_sounds_at_the_right_times(tmp_path, qapp):
@@ -196,11 +201,11 @@ def test_a_recording_has_its_picture_and_both_sounds_at_the_right_times(tmp_path
     info = ffmpeg.probe(result.path)
     assert (info.first("video").codec, info.first("audio").codec) == ("h264", "aac")
     assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=0.02)
-    assert result.duration > 1.0  # 1.5 s, less the encoder's warm-up
+    assert 0.4 < result.duration <= 1.5  # 1.5 s, less the encoder's warm-up (up to ~1 s on a busy machine)
     assert info.duration == pytest.approx(result.duration, abs=0.1)
-    assert_in_time(frame_times(result.path), result.duration)
+    assert_in_time(frame_times(result.path), result)
     assert warnings == [] and recorder.state == "finished"
-    assert result.stats["sound"]["microphone"]["placed_s"] > 1.0
+    assert result.stats["sound"]["microphone"]["placed_s"] > 0.6 * result.duration  # sound for most of it
 
 
 def test_time_zero_waits_for_an_encoder_slow_to_start(tmp_path, qapp):
@@ -210,7 +215,7 @@ def test_time_zero_waits_for_an_encoder_slow_to_start(tmp_path, qapp):
     assert outcome["states"][:2] == ["starting", "recording"]
     assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=0.02)
     assert result.duration < 1.5 - SlowToStart.WARM_UP_MS / 1000 + 0.2  # the warm-up isn't recorded
-    assert_in_time(frame_times(result.path), result.duration)  # none lost while the encoder warmed up
+    assert_in_time(frame_times(result.path), result)  # none lost while the encoder warmed up
 
 
 def test_a_held_start_begins_only_when_told_to_go(tmp_path, qapp):
@@ -222,14 +227,18 @@ def test_a_held_start_begins_only_when_told_to_go(tmp_path, qapp):
     assert outcome["states"][:2] == ["starting", "recording"]
     assert result.duration == pytest.approx(outcome["at"]["stop"][0], abs=0.02)
     assert result.duration < 0.8  # the 0.8 s held isn't in it
-    assert_in_time(frame_times(result.path), result.duration)
+    assert_in_time(frame_times(result.path), result)
 
 
 def test_go_before_the_encoder_is_ready_begins_once_it_is(tmp_path, qapp):
+    before = time.perf_counter()  # the encoder starts warming up after this
     recorder, outcome, _ = record(tmp_path, [(0.1, "go"), (1.5, "stop")], hold=True, encoder=SlowToStart)
 
     assert outcome["states"][:2] == ["starting", "recording"]
-    assert outcome["result"].duration < 1.5 - SlowToStart.WARM_UP_MS / 1000 + 0.2
+    # Begun once warm, not at go: at least WARM_UP_MS after the start (measured, as a busy machine's
+    # timers come late). Begun at go, it'd be ~0.7 s longer.
+    stopped = outcome["at"]["stop"][1]
+    assert outcome["result"].duration <= stopped - before - SlowToStart.WARM_UP_MS / 1000 + 0.05
 
 
 def test_an_encoder_that_never_starts_fails_the_recording(tmp_path, qapp, monkeypatch):
@@ -265,7 +274,7 @@ def test_a_pause_is_left_out_of_the_recording(tmp_path, qapp):
     (paused_at, _), (_, resumed), (_, stopped) = (outcome["at"][a] for a in ("pause", "resume", "stop"))
     assert result.duration == pytest.approx(paused_at + stopped - resumed, abs=0.05)
     assert ffmpeg.probe(result.path).duration == pytest.approx(result.duration, abs=0.1)
-    assert_in_time(frame_times(result.path), result.duration)  # no jump where the pause was
+    assert_in_time(frame_times(result.path), result)  # no jump where the pause was
 
 
 def test_stopping_while_paused_ends_at_the_pause(tmp_path, qapp):

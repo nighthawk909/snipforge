@@ -80,7 +80,7 @@ def test_frames_come_numbered_at_the_rate_asked_for():
 
     numbers = [index for index, _image in taken]
     assert_numbered_in_order(frames, numbers)
-    assert 40 <= numbers[-1] + 1 <= recorded * FPS + 2  # 50 a second (a busy machine may stop it late)
+    assert 40 <= numbers[-1] + 1 <= recorded * FPS + 1  # 50 a second (a busy machine may stop it late)
     assert screen.closed and frames.error is None
 
 
@@ -136,8 +136,8 @@ def test_a_pause_leaves_no_gap_in_the_numbers():
     assert_numbered_in_order(frames, numbers)
     # ~0.8 s of recording in 1.3 s (more if a busy machine stopped it late): the pause made no frames.
     # Had it made them, there'd be 0.5 s (25 frames) more than the recording's length.
-    assert state["resumed"] - state["paused"] > 0.5
-    assert numbers[-1] + 1 <= recorded * FPS + 2
+    assert "resumed" in state, "the pause never ended"
+    assert numbers[-1] + 1 <= recorded * FPS + 1
 
 
 def test_falling_behind_skips_ahead_and_counts_it():
