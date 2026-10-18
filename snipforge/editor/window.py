@@ -211,7 +211,8 @@ class EditorWindow(QMainWindow):
         bar.redact.connect(self.auto_redact)
         bar.pin.connect(self.pin)
         bar.combine.connect(self.combine)
-        bar.combine_button.setVisible(self._on_combine is not None and self._entry is not None)
+        # Only a snip that saves to the Library: what's combined is the Library's copy of it
+        bar.combine_button.setVisible(self._on_combine is not None and self._autosave_enabled)
         bar.save.connect(self.save)
         bar.copy.connect(self.copy_to_clipboard)
         bar.toggle_theme.connect(self._toggle_theme)
@@ -437,11 +438,14 @@ class EditorWindow(QMainWindow):
 
     def combine(self) -> None:
         """Combine this snip with others: it's saved first, so the combined image shows it as it is now."""
-        if self._on_combine is None or self._entry is None:
+        if self._on_combine is None or not self._autosave_enabled:
             return
         self.canvas.commit_text()
         self._autosave.stop()
-        self._save_to_library()
+        if not self._save_to_library():
+            self.statusBar().showMessage("Couldn't save this snip, so it can't be combined yet. Try again in a "
+                                         "moment.", 6000)
+            return
         self._on_combine(self._entry.id, self)
 
     def final_image(self) -> QImage:
@@ -566,12 +570,13 @@ class EditorWindow(QMainWindow):
                                      6000)
 
     # ------------------------------------------------------------------ persistence
-    def _save_to_library(self) -> None:
+    def _save_to_library(self) -> bool:
+        """Autosave. False if it couldn't be saved now (autosave is off, typing, or a write failed)."""
         if not self._autosave_enabled:
-            return
+            return False
         if self.canvas.editing_text_item() is not None and not self.canvas.closing:
             self._autosave.start()  # don't interrupt typing; try again shortly
-            return
+            return False
         try:
             self._library.save(self._entry, self.canvas.to_document(),
                                self.canvas.render_image(commit=False, use_draft=False))
@@ -579,8 +584,9 @@ class EditorWindow(QMainWindow):
             log.warning("Autosave failed: %s", exc)
             self.tray.set_saved("Not saved", f"Couldn't autosave: {exc}")
             self.statusBar().showMessage(f"Couldn't autosave: {exc}", 5000)
-            return
+            return False
         self.tray.set_saved("Saved", dt.datetime.now().strftime("Saved to your library at %I:%M %p"))
+        return True
 
     def closeEvent(self, e) -> None:
         self.canvas.stop_picking()

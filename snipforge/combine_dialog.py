@@ -2,10 +2,11 @@
 how (side by side, stacked, a grid, numbered steps with captions), and a preview of the result."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -22,9 +23,23 @@ from . import combine
 from .library import Library
 from .widgets import Segmented, SettingRow, ToggleSwitch, stack
 
-PREVIEW_SIDE = 520  # the preview is made from pictures this size at most (the real thing uses them whole)
+PREVIEW_SIDE = 520  # the preview is drawn from copies of the pictures this size at most
+PREVIEW_LONGEST = 900  # and is at most this many pixels on a side
 THUMB = QSize(96, 64)
-PICK_LIMIT = 200  # snips offered by Add snips (the newest)
+PICK_LIMIT = 500  # snips offered by Add snips (the newest)
+
+
+class _CaptionEdit(QLineEdit):
+    """Enter goes on to the next step's caption, instead of combining (the window's default button)."""
+
+    next_step = Signal()
+
+    def keyPressEvent(self, e) -> None:  # noqa: N802 - Qt API
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.next_step.emit()
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
 
 def _thumb(image: QImage) -> QIcon:
@@ -78,15 +93,16 @@ class SnipPicker(QDialog):
 
 
 class CombineDialog(QDialog):
-    """`library` and the ids of the snips to start with (in order). After Combine, `result` is the
-    combined image and its markup (snipforge.combine.Combined)."""
+    """`library` and the ids of the snips to start with (in order; MAX_IMAGES at most). After
+    Combine, `combined` is the combined image and its markup (snipforge.combine.Combined)."""
 
     def __init__(self, library: Library, entry_ids: list[str], parent=None) -> None:
         super().__init__(parent)
         self._library = library
         self._images: dict[str, QImage] = {}
         self._previews: dict[str, QImage] = {}
-        self.result: combine.Combined | None = None
+        self._sizes: dict[str, QSize] = {}
+        self.combined: combine.Combined | None = None
         self.setWindowTitle("Combine snips")
         self.setObjectName("CombineDialog")
         self.resize(1080, 680)
@@ -97,8 +113,12 @@ class CombineDialog(QDialog):
         row.addLayout(self._build_options(), 1)
         self._redraw = QTimer(self, singleShot=True, interval=120)
         self._redraw.timeout.connect(self._show_preview)
+        skipped = 0
         for entry_id in entry_ids:
-            self._add(entry_id)
+            if len(self.ids()) >= combine.MAX_IMAGES or not self._add(entry_id):
+                skipped += 1
+        if skipped:
+            self._note_skipped(skipped)
         if self.pictures.count():
             self.pictures.setCurrentRow(0)
         self._changed()
@@ -117,6 +137,12 @@ class CombineDialog(QDialog):
         self.pictures.model().rowsMoved.connect(lambda *_: self._changed())
         self.pictures.currentRowChanged.connect(self._show_caption)
         col.addWidget(self.pictures, 1)
+        self.note = QLabel()
+        self.note.setProperty("sfRole", "muted")
+        self.note.setWordWrap(True)
+        self.note.setMaximumWidth(280)
+        self.note.hide()
+        col.addWidget(self.note)
         buttons = QHBoxLayout()
         self.add_button = QPushButton("Add snips…")
         self.add_button.clicked.connect(self.add_snips)
@@ -143,6 +169,7 @@ class CombineDialog(QDialog):
         if image.isNull():
             return False
         self._images[entry_id], self._previews[entry_id] = image, _small(image)
+        self._sizes[entry_id] = image.size()
         item = QListWidgetItem(_thumb(image), "")
         item.setData(Qt.UserRole, entry_id)
         item.setData(Qt.UserRole + 1, "")  # its caption, for numbered steps
@@ -162,20 +189,28 @@ class CombineDialog(QDialog):
         try:
             if picker.exec() != QDialog.Accepted:
                 return
-            added = [entry_id for entry_id in picker.chosen()
+            chosen = picker.chosen()
+            added = [entry_id for entry_id in chosen
                      if len(self.ids()) < combine.MAX_IMAGES and self._add(entry_id)]
         finally:
             picker.deleteLater()
+        if len(added) < len(chosen):
+            self._note_skipped(len(chosen) - len(added))
         if added:
             self.pictures.setCurrentRow(self.pictures.count() - 1)
             self._changed()
+
+    def _note_skipped(self, count: int) -> None:
+        self.note.setText(f"{count} snip{'s' if count != 1 else ''} left out: up to {combine.MAX_IMAGES} "
+                          "can be combined, and recordings and snips that can't be read are left out.")
+        self.note.show()
 
     def remove_current(self) -> None:
         row = self.pictures.currentRow()
         if row >= 0:
             item = self.pictures.takeItem(row)
-            self._images.pop(item.data(Qt.UserRole), None)
-            self._previews.pop(item.data(Qt.UserRole), None)
+            for kept in (self._images, self._previews, self._sizes):
+                kept.pop(item.data(Qt.UserRole), None)
             self._changed()
 
     def move_current(self, step: int) -> None:
@@ -210,8 +245,9 @@ class CombineDialog(QDialog):
         self.same_size = ToggleSwitch("The same size")
         self.same_size.setChecked(True)
         self.same_size.toggled.connect(lambda _on: self._changed())
-        self.caption = QLineEdit()
-        self.caption.setPlaceholderText("What this step shows (optional)")
+        self.caption = _CaptionEdit()
+        self.caption.next_step.connect(self._next_caption)
+        self.caption.setPlaceholderText("What this step shows (optional). Enter: the next step")
         self.caption.setAccessibleName("Caption for the selected step")
         self.caption.setMinimumWidth(340)
         self.caption.textEdited.connect(self._set_caption)
@@ -255,6 +291,12 @@ class CombineDialog(QDialog):
         self.caption.setText(item.data(Qt.UserRole + 1) if item is not None else "")
         self.caption.setEnabled(item is not None)
 
+    def _next_caption(self) -> None:
+        row = self.pictures.currentRow()
+        if row + 1 < self.pictures.count():
+            self.pictures.setCurrentRow(row + 1)
+            self.caption.setFocus()
+
     def _set_caption(self, text: str) -> None:
         item = self.pictures.currentItem()
         if item is not None:
@@ -278,7 +320,7 @@ class CombineDialog(QDialog):
         for button in (self.remove_button, self.up_button, self.down_button):
             button.setEnabled(count > 0)
         self.add_button.setEnabled(count < combine.MAX_IMAGES)
-        self.combine_button.setEnabled(count >= 2)
+        self.combine_button.setEnabled(2 <= count <= combine.MAX_IMAGES)
         self._redraw.start()
 
     def _show_preview(self) -> None:
@@ -288,11 +330,17 @@ class CombineDialog(QDialog):
             self.preview.setText("Add at least two snips to combine them.")
             self.size_label.clear()
             return
-        small = combine.combine([self._previews[i] for i in ids], self.options())
-        pixmap = QPixmap.fromImage(small.finished()[1] if small.items else small.image)  # with steps drawn
+        sizes = [self._sizes[i] for i in ids]
+        try:  # the real layout, from the pictures' sizes, drawn small
+            drawn = combine.preview([self._previews[i] for i in ids], sizes, self.options(), PREVIEW_LONGEST)
+            width, height = combine.measure(sizes, self.options())
+        except ValueError as exc:
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText(f"Can't combine these: {exc}")
+            return
+        pixmap = QPixmap.fromImage(drawn)
         self.preview.setText("")
         self.preview.setPixmap(pixmap.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        width, height = combine.measure([self._images[i] for i in ids], self.options())
         self.size_label.setText(f"{width} × {height} pixels")
 
     def resizeEvent(self, e) -> None:  # noqa: N802 - Qt API
@@ -301,9 +349,17 @@ class CombineDialog(QDialog):
 
     def combine_now(self) -> None:
         ids = self.ids()
-        if len(ids) < 2:
+        if not 2 <= len(ids) <= combine.MAX_IMAGES:
             return
-        self.result = combine.combine([self._images[i] for i in ids], self.options())
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self.combined = combine.combine([self._images[i] for i in ids], self.options())
+        except ValueError as exc:
+            self.note.setText(f"Can't combine these: {exc}")
+            self.note.show()
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
         self.accept()
 
 
@@ -313,6 +369,6 @@ def open_combine(library: Library, entry_ids: list[str], parent: QWidget | None 
     if parent is not None:
         dialog.setWindowModality(Qt.WindowModal)  # its window waits; a snip started meanwhile doesn't
     try:
-        return dialog.result if dialog.exec() == QDialog.Accepted else None
+        return dialog.combined if dialog.exec() == QDialog.Accepted else None
     finally:
         dialog.deleteLater()

@@ -498,14 +498,20 @@ class SnipForgeApp:
         combined = combine_dialog.open_combine(self.library, entry_ids, parent)
         if combined is None:
             return
+        entry = None
+        QApplication.setOverrideCursor(Qt.WaitCursor)  # a big combined image takes a moment to save
         try:
             entry = self.library.create(combined.image)
             if combined.items:  # step numbers and captions: editable markup, drawn into its preview
                 self.library.save(entry, *combined.finished())
-        except OSError as exc:
-            log.warning("Couldn't add the combined snip to the Library: %s", exc)
+        except Exception as exc:  # never a half-made snip: one without its steps goes again
+            log.exception("Couldn't add the combined snip to the Library")
+            if entry is not None:
+                self.library.move_to_trash(entry)
+            QApplication.restoreOverrideCursor()
             QMessageBox.warning(None, "SnipForge", f"Couldn't save the combined snip: {exc}")
             return
+        QApplication.restoreOverrideCursor()
         self.indexer.index(entry)
         if self._home is not None and self._home.isVisible():
             self._home.update_entry(entry.id)

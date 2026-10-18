@@ -43,7 +43,7 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | Grab text, redaction suggestions | ✅ | ❌ | Phase 4: Vision |
 | | Save PNG, JPG, WebP, PDF | ✅ | 🟡 | |
 | | Copy, Drag out, Pin | ✅ | 🟡 | |
-| | Combine snips (side by side, stacked, grid, numbered steps) | ✅ | 🟡 same code | |
+| | Combine snips (side by side, stacked, grid, numbered steps) | ✅ | 🟡 same code; its shortcut is ⌘G there, which Mac apps use for Find Next | Mac port: pick a Mac shortcut |
 | | Copy, cut and paste markup between snips; right-click menu | ✅ | 🟡 Qt's clipboard and menus; the private markup format needs a check on a real Mac | A tester confirms |
 | **Share** | Send in Teams | ✅ the share window with the snip attached; a chat by email for work accounts | 🟡 a chat by email (`msteams:`), the snip copied to paste | Phase 5: Teams through `NSSharingServicePicker` |
 | | Email | ✅ Outlook draft with the snip | 🟡 copies, opens the mail app | Phase 5: compose-email service |

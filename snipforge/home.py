@@ -476,9 +476,10 @@ class HomeWindow(QMainWindow):
         menu.exec(at)
 
     def _combinable(self, ids: list[str]) -> list[str]:
-        """The selected snips that can go into a combined image (not recordings), in Library order."""
+        """The selected snips that can go into a combined image (not recordings), oldest first, so
+        step 1 is what was snipped first."""
         recordings = {i.entry.id for i in self._items if i.entry.is_recording}
-        return [entry_id for entry_id in ids if entry_id and entry_id not in recordings]
+        return sorted(entry_id for entry_id in ids if entry_id and entry_id not in recordings)
 
     def combine(self, ids: list[str] | None = None) -> None:
         """Combine the selected snips (Ctrl+G, or the menu)."""
