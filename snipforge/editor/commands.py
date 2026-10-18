@@ -22,8 +22,8 @@ class AddItemsCommand(QUndoCommand):
 
 
 class RemoveItemsCommand(QUndoCommand):
-    def __init__(self, scene, items) -> None:
-        super().__init__("Delete")
+    def __init__(self, scene, items, text: str = "Delete") -> None:
+        super().__init__(text)
         self._scene, self._items = scene, list(items)
 
     def redo(self) -> None:
