@@ -110,7 +110,7 @@ def test_a_refusal_at_start_is_raised_once_and_closes_the_sound(tmp_path, qapp):
     recorder = Recorder(Settings(AREA, tmp_path / "no such folder" / "rec.mp4", fps=FPS), capture=capture,
                         screen_frames=lambda area, fps, clock, o: ScreenFrames(
                             area, fps, clock, Stamper(clock), open_screen=lambda a: StillScreen(), first_image=grey),
-                        overlay=lambda s: None)
+                        overlay=lambda s: None, free_space=lambda folder: 10**10)  # Qt refuses, not the space check
     failures = []
     recorder.failed.connect(failures.append)
 
