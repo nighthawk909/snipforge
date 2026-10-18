@@ -102,6 +102,11 @@ video file first (that takes well under a second); if Windows ever has to wait o
 can show is "Saving your screen recording". It also asks to be told when the screen turns off or on
 (`RegisterPowerSettingNotification`, `GUID_CONSOLE_DISPLAY_STATE`) and when Windows is locked or
 unlocked (`WTSRegisterSessionNotification`, this session only), to pause or warn as above. The packaged self-test starts one and has it answer.
+While it records, the recorder process uses about 0.7 GB of memory for a 1080p recording (about
+0.15 GB for 360p), most of it taken by Qt's video encoder once frames reach it. Over an hour it
+grows slowly (702 to 727 MB in a one-hour test; likely partly the MP4's index, kept until the file is
+finished), and it's all let go when the recording ends. Measured as committed private bytes,
+recording a made-up screen (`scripts/soak_recording.py`).
 
 **Explorer right-click commands** (`snipforge/share.py`). The Share menu invokes the same
 right-click commands a user would click by hand (OneDrive "Copy link"/"Share", Windows "Share") on
