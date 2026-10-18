@@ -7,7 +7,7 @@ import sys
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -32,12 +32,8 @@ from .update_flow import UpdateFlow
 log = logging.getLogger(__name__)
 CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing the screen
 REHOOK_MS = 5 * 60 * 1000  # reinstall the keyboard hook in case Windows dropped it
+PRIVACY_POLL_MS = 500  # how often the GUI thread looks for the private-title sweep's result
 APP_ID = "SnipForge.SnipForge"
-
-
-class _Finished(QObject):
-    """Reports a worker thread's end back on the GUI thread."""
-    done = Signal()
 
 
 def build_icon(size: int = 256) -> QIcon:
@@ -98,22 +94,32 @@ class SnipForgeApp:
         browsing windows' titles that older versions saved with snips."""
         if prefs.private_titles_checked() >= PRIVACY_CHECK:
             return
-        self._privacy_sweep = _Finished()
-        self._privacy_sweep.done.connect(lambda: prefs.set_private_titles_checked(PRIVACY_CHECK), Qt.QueuedConnection)
-        stop = threading.Event()
+        # The worker never touches a Qt object (one destroyed meanwhile, at quit say, would crash
+        # the process): it leaves its result here, and a timer on the GUI thread picks it up.
+        stop, result = threading.Event(), {}
         self._app.aboutToQuit.connect(stop.set)
 
         def sweep() -> None:
             try:
-                cleared, complete = self.library.forget_private_titles(stop.is_set)
-                if cleared:
-                    log.info("Cleared %d private browsing titles from the Library", cleared)
-                if complete:  # anything skipped (locked, or quitting) is tried again next start
-                    self._privacy_sweep.done.emit()
+                result["swept"] = self.library.forget_private_titles(stop.is_set)
             except Exception:
                 log.exception("Couldn't check the Library for private browsing titles")
 
-        threading.Thread(target=sweep, name="snipforge-privacy", daemon=True).start()
+        worker = threading.Thread(target=sweep, name="snipforge-privacy", daemon=True)
+        self._privacy_check = QTimer(interval=PRIVACY_POLL_MS)
+        self._privacy_check.timeout.connect(lambda: self._privacy_swept(worker, result))
+        worker.start()
+        self._privacy_check.start()
+
+    def _privacy_swept(self, worker: threading.Thread, result: dict) -> None:
+        if worker.is_alive():
+            return
+        self._privacy_check.stop()
+        cleared, complete = result.get("swept", (0, False))
+        if cleared:
+            log.info("Cleared %d private browsing titles from the Library", cleared)
+        if complete:  # anything skipped (locked, quitting, or an error) is tried again next start
+            prefs.set_private_titles_checked(PRIVACY_CHECK)
 
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
