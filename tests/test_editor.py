@@ -749,3 +749,39 @@ def test_hidden_annotations_are_not_selectable(canvas):
     canvas._scene.clearSelection()
     canvas.select_all()
     assert outside not in canvas.selected_annotations()
+
+
+# --- event dispatch through the canvas's mixins ---------------------------------------
+def test_ctrl_wheel_zooms_within_limits(canvas):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+
+    from snipforge.editor.canvas import MAX_ZOOM, MIN_ZOOM
+    seen = []
+    canvas.zoom_changed.connect(seen.append)
+    pos = QPointF(canvas.viewport().rect().center())
+    for _ in range(40):
+        QApplication.sendEvent(canvas.viewport(), QWheelEvent(
+            pos, canvas.viewport().mapToGlobal(pos), QPoint(0, 0), QPoint(0, 120), Qt.NoButton,
+            Qt.ControlModifier, Qt.NoScrollPhase, False))
+    assert seen and seen[0] > 1.0
+    assert MIN_ZOOM <= canvas.zoom() <= MAX_ZOOM
+
+
+def test_leaving_the_canvas_clears_the_hover(canvas):
+    arrow = drag(canvas, "arrow", (10, 50), (100, 50))
+    canvas._scene.clearSelection()
+    hover = QMouseEvent(QEvent.MouseMove, QPointF(canvas.mapFromScene(QPointF(55, 50))), QPointF(0, 0),
+                        Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+    QApplication.sendEvent(canvas.viewport(), hover)
+    assert canvas._overlay._hover is arrow
+    QApplication.sendEvent(canvas, QEvent(QEvent.Leave))
+    assert canvas._overlay._hover is None
+
+
+def test_space_release_ends_panning(canvas):
+    from PySide6.QtGui import QKeyEvent
+    QApplication.sendEvent(canvas, QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier))
+    assert canvas._panning
+    QApplication.sendEvent(canvas, QKeyEvent(QEvent.KeyRelease, Qt.Key_Space, Qt.NoModifier))
+    assert not canvas._panning and canvas.dragMode() != canvas.DragMode.ScrollHandDrag
