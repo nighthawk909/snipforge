@@ -62,7 +62,7 @@ Software Center) and the SnagIt features people miss most. Built in this order:
 - [x] Speed and footprint: startup, snip-to-editor, idle memory, a big Library and installer size
   measured, the worst fixed, and budgets checked in CI so they can't creep back (#106)
 - [x] Combine images: side by side, a grid, or numbered steps with captions (#109)
-- [ ] Edit text in a screenshot, and Smart Move (drag part of a snip somewhere else)
+- [x] Edit text in a screenshot, and Smart Move (drag part of a snip somewhere else) (#111)
 - [ ] Accessibility: full keyboard use, screen-reader names, Windows high-contrast mode
 - [ ] Video editor, part two: cut out the middle, add a title or caption
 - [ ] Enterprise packaging: an MSI or MSIX for Intune and Software Center, and an ADMX policy
@@ -81,6 +81,8 @@ Software Center) and the SnagIt features people miss most. Built in this order:
 - [x] 0.12.0: the first release with the Mac version (a .dmg), editor and privacy fixes (#72)
 - [x] 0.13.0: Report a problem, capture presets, copy and paste markup, fills and dotted lines,
   Send in Teams through the share window, Mac phase 1 (#97)
+- [x] 0.14.0: start-up in about half the time, a faster Library, a smaller download, Combine
+  images (#105)
 - [ ] 1.0: when Phase 4's hand checks and the fix-it backlog are done
 
 ## Fix-it: feedback from testing
