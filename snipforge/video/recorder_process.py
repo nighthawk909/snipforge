@@ -31,7 +31,7 @@ from PySide6.QtCore import QCoreApplication, QObject, QTimer
 
 from .. import __version__
 from .channel import Channel, connect, is_name, settings_from_message
-from .power import SessionWatch
+from .power import SessionWatch, stay_awake
 from .recorder import ACTIVE, Recorder, RecordingError
 
 log = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ SLEEP_FINISH_SECONDS = 1.5  # Windows allows about 2 s before it sleeps
 END_FINISH_SECONDS = 4.0  # and about 5 s before it offers to end an app that holds up shutdown
 EXIT_FINISH_SECONDS = 10.0  # quitting for any other reason: finish the file first
 COMMANDS = ("go", "pause", "resume", "stop", "cancel")
+AWAKE_STATES = ("starting", "recording", "finishing")  # Windows kept awake: not while paused
 PROGRESS_MS = 250
 
 
@@ -82,9 +83,12 @@ def main(argv: list[str] | None = None) -> int:
 class RecorderChild(QObject):
     """The recorder process's side of the channel: runs one Recorder as SnipForge says."""
 
-    def __init__(self, channel: Channel, watch, *, make_recorder=None, quit=None) -> None:
+    def __init__(self, channel: Channel, watch, *, make_recorder=None, quit=None, keep_awake=None) -> None:
         super().__init__()
         self.channel, self.watch = channel, watch
+        self._keep_awake = keep_awake or stay_awake
+        self._awake = False  # Windows asked to stay awake (while there's something to record or finish)
+        self._session_locked = False
         self.recorder = None
         self.ended_by: str | None = None  # "sleep", "session end", "SnipForge closed"
         self._make_recorder = make_recorder or self._recorder_with_camera
@@ -99,6 +103,9 @@ class RecorderChild(QObject):
         watch.ending_soon.connect(self._ending_soon)
         watch.ending.connect(self._ending)
         watch.not_ending.connect(watch.allow_shutdown)
+        watch.display_off.connect(self._display_off)
+        watch.locked.connect(self._locked)
+        watch.unlocked.connect(self._unlocked)
         channel.send("hello", pid=os.getpid(), window=watch.window_id, version=__version__)
         QTimer.singleShot(START_TIMEOUT_MS, self, self._check_told)
 
@@ -142,6 +149,7 @@ class RecorderChild(QObject):
             self.bubble = BubbleState(settings.camera_bubble, settings.camera_shape)
         self.recorder = recorder = self._make_recorder(settings)
         recorder.state_changed.connect(lambda state: self.channel.send("state", state=state))
+        recorder.state_changed.connect(self._follow_state)
         recorder.warning.connect(lambda text: self.channel.send("warning", message=text))
         recorder.finished.connect(self._finished)
         recorder.failed.connect(self._report_failure)
@@ -185,7 +193,7 @@ class RecorderChild(QObject):
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
             self.ended_by = self.ended_by or "sleep"
             if not self.recorder.finish_now(SLEEP_FINISH_SECONDS):
-                self._late("Windows went to sleep before the recording was finished; it finishes on waking")
+                self._warn("Windows went to sleep before the recording was finished; it finishes on waking")
 
     def _ending_soon(self) -> None:
         if self.recorder is not None and self.recorder.state in ACTIVE:
@@ -195,10 +203,50 @@ class RecorderChild(QObject):
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
             self.ended_by = self.ended_by or "session end"
             if not self.recorder.finish_now(END_FINISH_SECONDS):
-                self._late("Windows ended the session before the recording was finished")
+                self._warn("Windows ended the session before the recording was finished")
         self.watch.allow_shutdown()
 
-    def _late(self, message: str) -> None:
+    def _follow_state(self, state: str) -> None:
+        """Windows kept awake while there's something to record or finish, not while paused or once
+        it's over; and a lock that came before the recording began (in the countdown, say) applied
+        as it begins."""
+        if state == "recording" and self._session_locked:
+            self._pause_for_lock()  # "paused" comes back through here
+            return
+        self._set_awake(state in AWAKE_STATES)
+
+    def _set_awake(self, on: bool) -> None:
+        if on == self._awake:
+            return
+        try:
+            taken = self._keep_awake(on)
+        except Exception:  # the recording goes on either way
+            log.exception("Couldn't change the request for Windows to stay awake")
+            return
+        if on and not taken:
+            log.warning("Windows didn't take the request to stay awake while recording")
+        self._awake = on and taken
+
+    def _display_off(self) -> None:
+        if self.recorder is not None and self.recorder.state == "recording":
+            self._warn("The screen turned off: until it's back on, the recording shows the last picture")
+
+    def _locked(self) -> None:
+        """Locked, the screen can't be recorded, and whoever locked it has probably walked away from a
+        microphone still recording: paused, to be resumed from the control bar. Before the recording
+        has begun, it's paused as it begins."""
+        self._session_locked = True
+        if self.recorder is not None and self.recorder.state == "recording":
+            self._pause_for_lock()
+
+    def _unlocked(self) -> None:
+        self._session_locked = False  # still paused: resumed when the person is ready
+
+    def _pause_for_lock(self) -> None:
+        self.recorder.pause()
+        self._warn("Windows was locked, so the recording is paused: resume it from the control bar")
+
+    def _warn(self, message: str) -> None:
         log.warning(message)
         self.channel.send("warning", message=message)
 
@@ -239,6 +287,7 @@ class RecorderChild(QObject):
         self._progress.stop()
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
             self.recorder.finish_now(EXIT_FINISH_SECONDS)  # reports "finished" on the way
+        self._set_awake(False)  # after finishing, so Windows can't sleep in the middle of it
         self.channel.close()
         self.watch.allow_shutdown()
         self._quit(code)

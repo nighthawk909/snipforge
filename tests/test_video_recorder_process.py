@@ -106,6 +106,10 @@ class FakeWatch(QObject):
     ending_soon = Signal()
     ending = Signal()
     not_ending = Signal()
+    display_off = Signal()
+    display_on = Signal()
+    locked = Signal()
+    unlocked = Signal()
     window_id = 4242
 
     def __init__(self):
@@ -126,14 +130,15 @@ class InProcess:
     """Plays the recorder process: launch() starts a RecorderChild on the channel, in this process."""
 
     def __init__(self):
-        self.children, self.exits, self.watch = [], [], FakeWatch()
+        self.children, self.exits, self.watch, self.awake = [], [], FakeWatch(), []
 
     def __call__(self, args):
         name = args[args.index("--record") + 1]
 
         def begin():
             channel = Channel(connect(name, 2000))
-            self.children.append(RecorderChild(channel, self.watch, make_recorder=FakeRecorder, quit=self.exits.append))
+            self.children.append(RecorderChild(channel, self.watch, make_recorder=FakeRecorder, quit=self.exits.append,
+                                               keep_awake=lambda on: self.awake.append(on) or True))
 
         QTimer.singleShot(0, begin)
         return True
@@ -284,6 +289,128 @@ def test_the_session_ending_finishes_the_recording_while_windows_waits(tmp_path,
     assert process.recorder.state == "finished" and process.watch.blocked is None
     assert process.recorder.calls[-1] == ("finish_now", recorder_process.END_FINISH_SECONDS)
     assert wait_for(lambda: seen["results"]) and remote.ended_by == "session end"
+
+
+def test_windows_stays_awake_while_recording_and_may_rest_after(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+    assert process.awake == [True]
+
+    remote.stop()
+
+    assert wait_for(lambda: process.exits == [0]) and process.awake == [True, False]
+
+
+def test_windows_may_rest_while_a_recording_is_paused(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+
+    remote.pause()
+    assert wait_for(lambda: remote.state == "paused") and process.awake == [True, False]
+    remote.resume()
+
+    assert wait_for(lambda: remote.state == "recording") and process.awake == [True, False, True]
+
+
+@pytest.mark.parametrize("ending", ["cancel", "failure", "SnipForge gone", "unexpected"])
+def test_windows_may_rest_however_the_recording_ends(tmp_path, qapp, ending):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+    child = process.children[0]
+
+    if ending == "cancel":
+        remote.cancel()
+    elif ending == "failure":
+        child.recorder._set("failed")
+        child.recorder.failed.emit("The encoder stopped")
+    elif ending == "SnipForge gone":
+        remote.channel.close()
+    else:
+        child.unexpected(RuntimeError, RuntimeError("boom"), None)
+
+    assert wait_for(lambda: process.exits) and process.awake[-1] is False
+
+
+def test_a_refused_request_to_stay_awake_isnt_taken_as_granted(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    child_awake = []
+
+    def refusing(on):
+        child_awake.append(on)
+        return False
+
+    remote.start()
+    assert wait_for(lambda: process.children)
+    child = process.children[0]
+    child._keep_awake, child._awake = refusing, False
+    child._follow_state("recording")
+
+    assert child_awake == [True] and child._awake is False  # it may ask again at the next change
+
+
+def test_locked_in_the_countdown_the_recording_is_paused_as_it_begins(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start(hold=True)
+    assert wait_for(lambda: process.children and process.recorder and process.recorder.state == "starting")
+
+    process.watch.locked.emit()  # before the countdown ends
+    assert process.recorder.state == "starting"
+    remote.go()
+
+    assert wait_for(lambda: remote.state == "paused")
+    assert wait_for(lambda: any("locked" in w for w in seen["warnings"]))
+    assert process.awake[-1] is False  # paused: Windows may rest
+
+
+def test_unlocked_before_the_countdown_ends_records_as_usual(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start(hold=True)
+    assert wait_for(lambda: process.children and process.recorder and process.recorder.state == "starting")
+
+    process.watch.locked.emit()
+    process.watch.unlocked.emit()
+    remote.go()
+
+    assert wait_for(lambda: remote.state == "recording")
+    assert not any("locked" in w for w in seen["warnings"])
+
+
+def test_a_recorder_that_cant_start_doesnt_keep_windows_awake(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path, name="refuse")
+    remote.start()
+
+    assert wait_for(lambda: process.exits == [1]) and process.awake == []
+
+
+def test_locking_windows_pauses_the_recording_and_says_so(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording" and seen["warnings"])
+
+    process.watch.locked.emit()
+
+    assert wait_for(lambda: remote.state == "paused")
+    assert wait_for(lambda: any("locked" in w for w in seen["warnings"]))
+    process.watch.unlocked.emit()  # stays paused until resumed: the person may not be back yet
+    process.watch.locked.emit()  # already paused: nothing more said
+    process.watch.unlocked.emit()
+    remote.resume()
+    assert wait_for(lambda: remote.state == "recording")
+    assert sum("locked" in w for w in seen["warnings"]) == 1
+
+
+def test_the_screen_turning_off_while_recording_is_mentioned(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording" and seen["warnings"])
+
+    process.watch.display_off.emit()
+
+    assert wait_for(lambda: any("screen turned off" in w for w in seen["warnings"]))
+    assert remote.state == "recording"  # still recording: sound may matter, and it comes back
 
 
 def test_a_report_of_some_other_file_is_refused(tmp_path, qapp):
