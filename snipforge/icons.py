@@ -210,6 +210,8 @@ _PATHS = {
     "tail": '<path d="M4 4h16v10H11l-6 6 2-6H4z"/>',
 }
 
+_PATHS["magnify"] = _PATHS["zoom_in"]  # the Magnify tool
+
 
 def _svg(name: str, color: str) -> bytes:
     body = _PATHS[name]

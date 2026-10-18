@@ -15,6 +15,7 @@ from .items import (
     StepItem,
     StrokeItem,
 )
+from .magnify import MagnifyItem
 from .stamps import StampItem
 from .style import Style
 from .text_items import CalloutItem, TextItem
@@ -37,6 +38,7 @@ def create_item(state: dict, base_image: QImage, image_rect: QRectF) -> Annotati
         "text": lambda: TextItem(style),
         "callout": lambda: CalloutItem(style),
         "stamp": lambda: StampItem(style),
+        "magnify": lambda: MagnifyItem(style, base_image),
     }
     if kind not in builders:
         raise ValueError(f"Unknown annotation kind: {kind!r}")

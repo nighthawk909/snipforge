@@ -271,6 +271,7 @@ class EffectItem(BoxItem):
 
     supports_shadow = False
     keep_square_with_shift = False
+    hides_content = True  # a magnifier draws it over what it enlarges
 
     def __init__(self, style: Style, base: QImage, mode: str) -> None:
         self._base = base

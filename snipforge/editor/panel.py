@@ -34,12 +34,14 @@ TITLES = {
     "select": "Select", "arrow": "Arrow", "line": "Line", "rect": "Rectangle", "ellipse": "Ellipse",
     "pen": "Pen", "highlight": "Highlighter", "text": "Text", "callout": "Callout", "stamp": "Stamp",
     "step": "Step number", "pixelate": "Pixelate", "blur": "Blur", "spotlight": "Spotlight", "crop": "Crop",
+    "magnify": "Magnify",
 }
 HINTS = {
     "select": "Click any markup to change it. Drag to move, Ctrl+click to add to the selection, "
               "Delete to remove, Ctrl+D to duplicate. Turn, flip or resize the snip under Image.",
     "crop": "Drag the edges in to cut and back out to restore. Drag inside to move. Enter applies, Esc cancels.",
     "spotlight": "Drag over the area to keep lit. Everything else dims.",
+    "magnify": "Drag over what to enlarge. Drag the lens to move it, or inside the frame to show another area.",
     "text": "Click to type. Esc finishes.",
     "callout": "Drag a box, then type. Drag the orange dot to aim the pointer.",
     "stamp": "Click to drop a stamp, or drag to size it.",
@@ -440,7 +442,8 @@ class PropertiesPanel(QScrollArea):
         return self._sections[name]
 
     def size_label(self) -> str:
-        return {"callout": "Border"}.get(self._kind, "Strength" if self._kind in STRENGTH_KINDS else "Size")
+        return {"callout": "Border", "magnify": "Border"}.get(
+            self._kind, "Strength" if self._kind in STRENGTH_KINDS else "Size")
 
     def switch(self, key: str) -> ToggleSwitch:
         return self._switches[key]

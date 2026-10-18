@@ -23,7 +23,7 @@ TOOL_KEYS = {
     Qt.Key_V: "select", Qt.Key_A: "arrow", Qt.Key_L: "line", Qt.Key_R: "rect",
     Qt.Key_E: "ellipse", Qt.Key_P: "pen", Qt.Key_H: "highlight", Qt.Key_T: "text",
     Qt.Key_K: "callout", Qt.Key_I: "stamp", Qt.Key_N: "step", Qt.Key_X: "pixelate",
-    Qt.Key_B: "blur", Qt.Key_S: "spotlight", Qt.Key_C: "crop",
+    Qt.Key_B: "blur", Qt.Key_S: "spotlight", Qt.Key_M: "magnify", Qt.Key_C: "crop",
 }
 NUDGE_KEYS = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
 TEXT_TOOLS = {"text", "callout"}
@@ -150,10 +150,12 @@ class InputMixin:
         if self.tool == "crop":
             self._drag = self._begin_crop_drag(pos)
             return
-        handle = self._overlay.handle_at(pos, self.zoom())
+        handle = self._overlay.handle_at(pos, self.zoom()) or self._area_handle_at(view_pos, pos)
         if handle:
             target = self._overlay.target
             target.begin_handle_drag()
+            if hasattr(target, "press_at"):
+                target.press_at(pos)
             self._drag = {"type": "handle", "item": target, "name": handle, "before": target.get_state()}
             return
         if self.tool == "select":
@@ -273,6 +275,16 @@ class InputMixin:
         self._overlay.update()
 
     # ------------------------------------------------------------------ hit testing and hover
+    def _area_handle_at(self, view_pos, scene_pos: QPointF) -> str | None:
+        """Some selected items can be dragged by an area, not just a handle: inside a magnifier's
+        source frame moves what it shows. Other markup on top there still gets the click."""
+        target = self._overlay.target
+        area = getattr(target, "area_handle_at", None) if target is not None and target.scene() else None
+        handle = area(scene_pos) if area is not None else None
+        if handle and self._annotation_at(view_pos) not in (None, target):
+            return None
+        return handle
+
     def _annotation_at(self, view_pos) -> Annotation | None:
         for item in self.items(view_pos):
             while item is not None and not isinstance(item, Annotation):
@@ -293,7 +305,7 @@ class InputMixin:
             else:
                 self.viewport().setCursor(Qt.CrossCursor)
             return
-        handle = self._overlay.handle_at(scene_pos, self.zoom())
+        handle = self._overlay.handle_at(scene_pos, self.zoom()) or self._area_handle_at(view_pos, scene_pos)
         hit = None if handle else self._annotation_at(view_pos)
         self._overlay.set_hover(hit)
         if handle:

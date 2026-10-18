@@ -16,6 +16,9 @@ CURSORS = {
     "t": Qt.SizeVerCursor, "b": Qt.SizeVerCursor,
     "l": Qt.SizeHorCursor, "r": Qt.SizeHorCursor,
     "p1": Qt.SizeAllCursor, "p2": Qt.SizeAllCursor, "tail": Qt.SizeAllCursor,
+    # a magnifier's source area
+    "s_tl": Qt.SizeFDiagCursor, "s_br": Qt.SizeFDiagCursor, "s_tr": Qt.SizeBDiagCursor, "s_bl": Qt.SizeBDiagCursor,
+    "source": Qt.SizeAllCursor,
 }
 
 
@@ -67,7 +70,8 @@ class HandleOverlay(QGraphicsItem):
         if hover is not None and hover.scene() is not None and hover not in self._selected:
             p.setPen(QPen(hover_color, 2.0 / scale))
             p.setBrush(Qt.NoBrush)
-            p.drawRect(hover.sceneBoundingRect())
+            for rect in hover.selection_rects() if hasattr(hover, "selection_rects") else [hover.sceneBoundingRect()]:
+                p.drawRect(rect)
         outline = QPen(accent, 1.0 / scale, Qt.DashLine)
         for item in self._selected:
             if item.scene() is None:
@@ -75,7 +79,9 @@ class HandleOverlay(QGraphicsItem):
             if len(item.handle_points()) != 2:  # lines show just their end handles
                 p.setPen(outline)
                 p.setBrush(Qt.NoBrush)
-                p.drawRect(item.sceneBoundingRect())
+                rects = item.selection_rects() if hasattr(item, "selection_rects") else [item.sceneBoundingRect()]
+                for rect in rects:
+                    p.drawRect(rect)
         target = self.target
         if target is None or target.scene() is None:
             return

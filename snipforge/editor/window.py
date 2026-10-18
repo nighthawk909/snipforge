@@ -46,11 +46,14 @@ TOOLS = [
     ("select", "Select and move (V)"),
     None,
     ("arrow", "Arrow (A)"), ("line", "Line (L)"), ("rect", "Rectangle (R)"), ("ellipse", "Ellipse (E)"),
+    ("spotlight", "Spotlight (S)"), ("magnify", "Magnify: enlarge part of the snip (M)"),
     None,
     ("text", "Text (T)"), ("callout", "Callout: text in a bubble or box (K)"), ("stamp", "Stamp / icon (I)"),
     ("step", "Step number (N)"), ("pen", "Pen (P)"), ("highlight", "Highlighter (H)"),
     None,
-    ("blur", "Blur (B)"), ("pixelate", "Pixelate (X)"), ("spotlight", "Spotlight (S)"),
+    # Groups that fill whole rows of 3 keep the rail's 3-column layout short enough for a 1080p screen
+    # at 200% scaling (tests/test_tool_rail.py).
+    ("blur", "Blur (B)"), ("pixelate", "Pixelate (X)"),
     None,
     ("crop", "Crop (C)"),
 ]

@@ -18,6 +18,7 @@ from .items import (
     StepItem,
     StrokeItem,
 )
+from .magnify import MIN_SOURCE, MagnifyItem, default_source, place_lens
 from .stamps import DEFAULT_SIZE as STAMP_SIZE
 from .stamps import StampItem
 from .text_items import CalloutItem, TextItem
@@ -76,6 +77,9 @@ class DrawMixin:
             item = self._adopt(CalloutItem(style))
         elif tool == "stamp":
             item = StampItem(style)
+        elif tool == "magnify":
+            item = MagnifyItem(style, self.base_image)
+            item.set_source(QRectF(pos, pos))  # you drag out what to magnify; the lens comes on release
         else:
             return
         if isinstance(item, BoxItem):
@@ -92,6 +96,12 @@ class DrawMixin:
             item.set_end_scene(pos, shift)
         elif isinstance(item, StrokeItem):
             item.extend(item.mapFromScene(pos))
+        elif isinstance(item, MagnifyItem):
+            dx, dy = pos.x() - origin.x(), pos.y() - origin.y()
+            if shift:
+                side = max(abs(dx), abs(dy))
+                dx, dy = (side if dx >= 0 else -side), (side if dy >= 0 else -side)
+            item.set_source(QRectF(origin, QPointF(origin.x() + dx, origin.y() + dy)))
         elif isinstance(item, BoxItem):
             dx, dy = pos.x() - origin.x(), pos.y() - origin.y()
             if item.always_square or (shift and item.keep_square_with_shift):
@@ -107,6 +117,16 @@ class DrawMixin:
         if isinstance(item, StampItem) and item.is_degenerate():  # a click drops a default-size stamp
             half = STAMP_SIZE / 2
             item.set_scene_rect(QRectF(origin.x() - half, origin.y() - half, STAMP_SIZE, STAMP_SIZE))
+        if isinstance(item, MagnifyItem):
+            visible = self._crop_rect  # place the lens where you can see it
+            source = item.source()
+            if source.width() < MIN_SOURCE and source.height() < MIN_SOURCE:  # a click magnifies around it
+                source = default_source(origin, visible)
+            elif source.width() < MIN_SOURCE or source.height() < MIN_SOURCE:  # a thin drag: as thin as allowed
+                grow_w, grow_h = max(0.0, MIN_SOURCE - source.width()), max(0.0, MIN_SOURCE - source.height())
+                source = source.adjusted(-grow_w / 2, -grow_h / 2, grow_w / 2, grow_h / 2)
+            item.set_source(source)
+            item.set_scene_rect(place_lens(source, visible))
         if isinstance(item, CalloutItem) and item.is_degenerate():  # a click drops a default callout
             w, h = DEFAULT_CALLOUT
             item.set_scene_rect(QRectF(origin.x(), origin.y() - h, w, h))
