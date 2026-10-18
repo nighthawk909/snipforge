@@ -38,12 +38,13 @@ def installer_suffix_ok(name: str, platform: str = PLATFORM) -> bool:
 
 
 def install_mode(executable: str | None = None, frozen: bool | None = None) -> str:
-    """'per-user' (can update itself silently), 'all-users' (IT-managed) or 'source'."""
+    """'per-user' (can update itself silently), 'all-users' (IT-managed), 'by-hand' (a Mac, until it
+    can install a .dmg itself: docs/PARITY.md) or 'source'."""
     frozen = getattr(sys, "frozen", False) if frozen is None else frozen
     if not frozen:
         return "source"
     if PLATFORM != "windows":
-        return "all-users"  # the macOS port decides how an app bundle updates itself
+        return "by-hand"
     exe = Path(executable or sys.executable).resolve()
     local_programs = Path.home() / "AppData" / "Local" / "Programs"
     return "per-user" if local_programs in exe.parents else "all-users"

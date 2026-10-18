@@ -11,11 +11,21 @@ name: macOS build
 on:
   workflow_call:
     inputs:
+      ref:
+        description: "Optional: the tag or commit to build (the Release and Preview workflows pass it)"
+        type: string
+        required: false
+        default: ""
       version:
         description: "Optional: build as this version"
         type: string
         required: false
         default: ""
+      run_tests:
+        description: "Run the test suite first. CI does; releases don't, since CI tested the commit"
+        type: boolean
+        required: false
+        default: true
   workflow_dispatch:
     inputs:
       version:
@@ -27,8 +37,10 @@ on:
 permissions:
   contents: read
 
+# Per calling workflow: CI's Mac run on a push to main must never cancel the Release workflow's
+# Mac build of the same commit (github.workflow is the caller's name when it's called).
 concurrency:
-  group: mac-${{ github.ref }}
+  group: mac-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -39,6 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -56,6 +69,7 @@ jobs:
         run: python -m ruff check .
       # Tests marked `windows` (registry, Explorer, Win32) are skipped here; see tests/conftest.py.
       - name: Test
+        if: ${{ inputs.run_tests != false }}
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q -rfs

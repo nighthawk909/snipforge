@@ -886,6 +886,13 @@ def test_install_mode():
     assert update_platform.install_mode(r"C:\Program Files\SnipForge\SnipForge.exe", frozen=True) == "all-users"
 
 
+def test_a_mac_app_updates_by_hand_until_it_can_install_a_dmg(monkeypatch):
+    monkeypatch.setattr(update_platform, "PLATFORM", "macos")
+    app = "/Applications/SnipForge.app/Contents/MacOS/SnipForge"
+    assert update_platform.install_mode(app, frozen=True) == "by-hand"
+    assert update_platform.install_mode(frozen=False) == "source"
+
+
 @pytest.mark.windows
 def test_installer_names_by_platform():
     assert update_platform.installer_version("SnipForge-0.6.0-beta.1-setup.exe") == "0.6.0-beta.1"
