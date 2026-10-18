@@ -70,6 +70,29 @@ class StateCommand(QUndoCommand):
             item.set_state(before)
 
 
+class ImageCommand(QUndoCommand):
+    """Rotate, flip or resize: the image's geometry, the crop and every annotation, as one step."""
+
+    def __init__(self, canvas, text: str, geometries: tuple, crops: tuple[QRectF, QRectF],
+                 changes: list[tuple[object, dict, dict]]) -> None:
+        super().__init__(text)
+        self._canvas, self._geometries, self._changes = canvas, geometries, changes
+        self._crops = (QRectF(crops[0]), QRectF(crops[1]))
+
+    def _apply(self, side: int) -> None:
+        self._canvas.set_image_geometry(self._geometries[side])
+        self._canvas.set_crop_rect(self._crops[side])
+        for item, *states in self._changes:
+            item.set_state(states[side])
+        self._canvas.fit_image()
+
+    def redo(self) -> None:
+        self._apply(1)
+
+    def undo(self) -> None:
+        self._apply(0)
+
+
 class CropCommand(QUndoCommand):
     def __init__(self, canvas, old: QRectF, new: QRectF) -> None:
         super().__init__("Crop")

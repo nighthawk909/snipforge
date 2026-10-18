@@ -33,6 +33,7 @@ from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
 from .panel import PropertiesPanel
+from .resize_dialog import ResizeDialog
 from .share_menu import ShareController
 from .style import Style
 from .textdialog import GrabbedTextDialog
@@ -118,6 +119,7 @@ class EditorWindow(QMainWindow):
         self.canvas.undo_stack.canRedoChanged.connect(self.commands.redo_button.setEnabled)
         self.panel.changed.connect(lambda changes: self.canvas.apply_style(**changes))
         self.panel.crop_action.connect(self._crop_action)
+        self.panel.image_action.connect(self.image_action)
         self.panel.editing_done.connect(self.canvas.setFocus)
         self.tray.beautify_changed.connect(beautify.set_enabled)
         beautify.switch().changed.connect(self._show_beautify)  # from any editor or Settings
@@ -205,6 +207,8 @@ class EditorWindow(QMainWindow):
         add("Ctrl+-", self._zoom_out)
         add("Ctrl+P", self.pin)
         add("Ctrl+Shift+T", self.grab_text)
+        add("Ctrl+R", lambda: self.image_action("rotate_right"))
+        add("Ctrl+Shift+R", lambda: self.image_action("rotate_left"))
         add("Ctrl+W", self.close)
         if self._on_new_snip:
             add("Ctrl+N", self._on_new_snip)
@@ -281,6 +285,29 @@ class EditorWindow(QMainWindow):
                 self.canvas.cancel_crop()
             self.canvas.set_tool("select")  # leaving Crop applies whatever is left pending
         self.canvas.setFocus()
+
+    def image_action(self, action: str) -> None:
+        """Turn, flip or resize the snip (the panel's Image buttons and Ctrl+R)."""
+        canvas = self.canvas
+        if action == "resize":
+            self._resize()
+        elif action in ("rotate_left", "rotate_right"):
+            canvas.rotate_image(clockwise=action == "rotate_right")
+        elif action in ("flip_horizontal", "flip_vertical"):
+            canvas.flip_image(horizontal=action == "flip_horizontal")
+        canvas.setFocus()
+
+    def _resize(self) -> None:
+        self.canvas.commit_text()
+        if self.canvas.tool == "crop":
+            self.canvas.set_tool("select")  # resize what you'll export, with the crop applied
+        size = self.canvas.crop_rect().toAlignedRect().size()
+        dialog = ResizeDialog(size.width(), size.height(), self.canvas.can_resize, self)
+        if dialog.exec():
+            try:
+                self.canvas.resize_image(*dialog.result_size())
+            except ValueError as exc:
+                QMessageBox.warning(self, "SnipForge", f"Couldn't resize the snip: {exc}")
 
     def _refresh_props(self) -> None:
         kind, style = self.canvas.style_target()

@@ -74,6 +74,7 @@ QPushButton:focus {{ border-color: {a.fill}; }}
 QPushButton:disabled {{ color: {p.text3}; }}
 QPushButton[variant="primary"] {{ background: {a.fill}; color: {a.on}; border-color: {a.fill}; font-weight: 600; }}
 QPushButton[variant="primary"]:hover {{ background: {a.fill_hover}; border-color: {a.fill_hover}; }}
+QPushButton[variant="primary"]:disabled {{ background: {p.surface2}; color: {p.text3}; border-color: {p.border}; }}
 QPushButton[variant="ghost"] {{ background: transparent; border-color: transparent; }}
 QPushButton[variant="ghost"]:hover {{ background: {p.hover}; }}
 
@@ -173,6 +174,7 @@ QLabel#Chip {{ background: {a.soft}; color: {a.text}; border-radius: 9px; paddin
 QToolButton#StampChoice {{ border-radius: 6px; padding: 3px; }}
 QToolButton#StampChoice:checked {{ background: {a.soft}; border: 1px solid {a.fill}; }}
 QToolButton#CustomColor {{ border: 1px dashed {p.text3}; border-radius: 12px; padding: 3px; }}
+QToolButton#ImageAction {{ border: 1px solid {p.border}; border-radius: 8px; padding: 6px; }}
 
 QWidget#Segmented {{ background: {p.surface2}; border: 1px solid {p.border}; border-radius: 8px; }}
 #Segmented QToolButton {{ border-radius: 6px; padding: 4px 12px; color: {p.text2}; }}

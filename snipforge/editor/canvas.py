@@ -12,23 +12,24 @@ from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 from .. import theme
 from .beautify import BeautifyStyle
 from .canvas_draw import DrawMixin
+from .canvas_image import ImageMixin
 from .canvas_input import InputMixin
 from .canvas_view import MAX_ZOOM as MAX_ZOOM  # re-exported: the window's zoom buttons use these
 from .canvas_view import MIN_ZOOM as MIN_ZOOM
-from .canvas_view import ViewMixin
+from .canvas_view import SCENE_MARGIN, ViewMixin
 from .commands import AddItemsCommand, CropCommand, RemoveItemsCommand, StateCommand
 from .crop import MIN_CROP, CropMask
 from .factory import create_item
 from .handles import HandleOverlay
+from .image_ops import ImageGeometry
 from .items import Annotation, EffectItem
 from .style import DEFAULT_TOOL_STYLES, Style
 from .text_items import EditableText
 
 DUPLICATE_OFFSET = 16.0
-SCENE_MARGIN = 60.0
 
 
-class Canvas(InputMixin, DrawMixin, ViewMixin, QGraphicsView):
+class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
     tool_changed = Signal(str)
     selection_changed = Signal()
     zoom_changed = Signal(float)
@@ -36,7 +37,9 @@ class Canvas(InputMixin, DrawMixin, ViewMixin, QGraphicsView):
 
     def __init__(self, image: QImage, tool_styles: dict[str, Style] | None = None, parent=None) -> None:
         super().__init__(parent)
-        self.base_image = image
+        self.original_image = image  # as captured; never changed
+        self.base_image = image  # what you mark up: the original turned, flipped or resized
+        self._geometry = ImageGeometry.of(image)
         self.undo_stack = QUndoStack(self)
         self.tool = "select"
         self.tool_styles: dict[str, Style] = {**DEFAULT_TOOL_STYLES, **(tool_styles or {})}
@@ -291,10 +294,15 @@ class Canvas(InputMixin, DrawMixin, ViewMixin, QGraphicsView):
         items = sorted(self.annotations(), key=lambda i: i.zValue())
         r = self._crop_rect
         states = [i.get_state() for i in items if not i.is_degenerate()]
-        return {"version": 1, "crop": [r.x(), r.y(), r.width(), r.height()],
-                "items": states + self._unparsed}
+        doc = {"version": 1, "crop": [r.x(), r.y(), r.width(), r.height()], "items": states + self._unparsed}
+        if not self._geometry.is_original(self.original_image):
+            doc["image"] = self._geometry.to_dict()  # items and crop are on the turned/resized image
+        return doc
 
     def load_document(self, doc: dict) -> None:
+        geometry = ImageGeometry.from_dict(doc.get("image")) if "image" in doc else None
+        if geometry is not None:
+            self.set_image_geometry(geometry)
         for state in doc.get("items", []):
             try:
                 self._scene.addItem(self._adopt(create_item(state, self.base_image, self._image_rect)))

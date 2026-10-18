@@ -179,6 +179,10 @@ _PATHS = {
         '<path d="M8 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h3"/>'
         '<path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3"/><path d="M12 20v2"/><path d="M12 14v2"/>'
         '<path d="M12 8v2"/><path d="M12 2v2"/>'),
+    "flip_vertical": (
+        '<path d="M21 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v3"/>'
+        '<path d="M21 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3"/><path d="M4 12H2"/><path d="M10 12H8"/>'
+        '<path d="M16 12h-2"/><path d="M22 12h-2"/>'),
     "help": '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
     "bell": (
         '<path d="M10.268 21a2 2 0 0 0 3.464 0"/>'

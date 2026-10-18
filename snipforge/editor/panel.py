@@ -38,7 +38,7 @@ TITLES = {
 }
 HINTS = {
     "select": "Click any markup to change it. Drag to move, Ctrl+click to add to the selection, "
-              "Delete to remove, Ctrl+D to duplicate.",
+              "Delete to remove, Ctrl+D to duplicate. Turn, flip or resize the snip under Image.",
     "crop": "Drag the edges in to cut and back out to restore. Drag inside to move. Enter applies, Esc cancels.",
     "spotlight": "Drag over the area to keep lit. Everything else dims.",
     "text": "Click to type. Esc finishes.",
@@ -52,6 +52,13 @@ SHAPE_LABELS = {"rounded": "Rounded box", "rect": "Box", "ellipse": "Ellipse", "
 SWITCHES = ("tail", "fill", "dash", "shadow")
 STAMP_COLUMNS = 6
 EDGE_SWATCHES = {"#ffffff", "#1c1c1e"}  # need an outline to show against the panel
+# action, icon, tooltip: the snip's own buttons in the Image section
+IMAGE_ACTIONS = (
+    ("rotate_left", "rotate_left", "Rotate left (Ctrl+Shift+R)"),
+    ("rotate_right", "rotate_right", "Rotate right (Ctrl+R)"),
+    ("flip_horizontal", "flip", "Flip horizontal"),
+    ("flip_vertical", "flip_vertical", "Flip vertical"),
+)
 COLOR_NAMES = {"#ff3b30": "Red", "#ff9500": "Orange", "#ffd60a": "Yellow", "#34c759": "Green",
                "#0a84ff": "Blue", "#bf5af2": "Purple", "#ffffff": "White", "#1c1c1e": "Black"}
 
@@ -136,6 +143,7 @@ class QuickStyleTile(QAbstractButton):
 class PropertiesPanel(QScrollArea):
     changed = Signal(dict)          # style field -> new value
     crop_action = Signal(str)       # apply | cancel | reset
+    image_action = Signal(str)      # rotate_left | rotate_right | flip_horizontal | flip_vertical | resize
     editing_done = Signal()         # finished typing in a field: give the keyboard back to the canvas
 
     def __init__(self, parent=None) -> None:
@@ -350,6 +358,27 @@ class PropertiesPanel(QScrollArea):
         self._image_size = QLabel()
         self._image_size.setProperty("sfRole", "secondary")
         col.addWidget(self._image_size)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self._image_buttons: dict[str, QAbstractButton] = {}
+        for action, _icon, tip in IMAGE_ACTIONS:
+            b = QToolButton()
+            b.setObjectName("ImageAction")
+            b.setToolTip(tip)
+            b.setAccessibleName(tip.split(" (")[0])
+            b.setIconSize(QSize(18, 18))
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, a=action: self.image_action.emit(a))
+            self._image_buttons[action] = b
+            row.addWidget(b)
+        row.addStretch(1)
+        resize = QPushButton("Resize…")
+        resize.setToolTip("Change the snip's size in pixels or percent")
+        resize.setAccessibleName("Resize")
+        resize.clicked.connect(lambda: self.image_action.emit("resize"))
+        self._image_buttons["resize"] = resize
+        row.addWidget(resize)
+        col.addLayout(row)
 
     # ------------------------------------------------------------------ state
     def load(self, kind: str, style: Style | None, has_selection: bool) -> None:
@@ -398,6 +427,8 @@ class PropertiesPanel(QScrollArea):
         for shape in CALLOUT_SHAPES:
             self._shapes.button(shape).setIcon(icon(f"shape_{shape}"))
         self._custom.setIcon(icon("plus"))
+        for action, icon_name, _tip in IMAGE_ACTIONS:
+            self._image_buttons[action].setIcon(icon(icon_name))
         self.viewport().update()
         for w in (*self._swatches.values(), *self._tiles, *self._switches.values()):
             w.update()
@@ -448,6 +479,9 @@ class PropertiesPanel(QScrollArea):
 
     def stamp_button(self, name: str) -> QToolButton:
         return self._stamp_buttons[name]
+
+    def image_button(self, action: str) -> QAbstractButton:
+        return self._image_buttons[action]
 
     def image_size_text(self) -> str:
         return self._image_size.text()
