@@ -46,7 +46,12 @@ class FakeApi:
 # --- what a shortcut can be --------------------------------------------------------------------
 
 def test_prefs_and_settings_know_the_same_actions():
-    assert tuple(shortcuts.ACTIONS) == prefs.SHORTCUT_ACTIONS == ("snip", "repeat", "library")
+    assert tuple(shortcuts.ACTIONS) == prefs.SHORTCUT_ACTIONS == ("snip", "repeat", "library", "record")
+
+
+def test_recording_has_a_shortcut_with_no_combination_until_one_is_chosen():
+    assert shortcuts.ACTIONS["record"] == "Record video, or stop recording"
+    assert prefs.shortcut("record") == ""  # never Win+Shift+R, Snipping Tool's: the person picks one
 
 
 def test_shortcuts_are_remembered_and_validated():

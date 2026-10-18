@@ -1,5 +1,8 @@
-"""The toolbar at the top of the capture overlay: how to choose what to snip (and, in Fixed size
-mode, the size), a delay, whether the mouse pointer is included, and Cancel.
+"""The toolbar at the top of the capture overlay: Record (choose an area to record a video of,
+instead of snipping it), how to choose what to snip (and, in Fixed size mode, the size), a delay,
+whether the mouse pointer is included, and Cancel. While recording is switched on, the delay and the
+pointer switch step aside: a recording has its own countdown and pointer settings, chosen after the
+area, and Scrolling mode doesn't apply.
 
 Its buttons never take keyboard focus from the overlay when clicked (Tab still reaches them, and
 Enter or Space presses the focused one), so Esc, Enter and the mode letters keep working however
@@ -193,6 +196,7 @@ class _DelayButton(_ToolbarButton):
 
 
 class CaptureToolbar(QFrame):
+    record_toggled = Signal(bool)  # the Record switch: choose an area to record instead of snipping
     mode_picked = Signal(str)
     size_picked = Signal(int, int)  # Fixed size mode's frame, in screen pixels
     delay_picked = Signal(int)  # seconds; picking one (other than none) starts the countdown
@@ -201,7 +205,8 @@ class CaptureToolbar(QFrame):
 
     def __init__(self, mode: str, parent=None, *, delay: int = 0, pointer: bool = False,
                  pointer_available: bool = True, pointer_why: str = "", scrolling: bool = True,
-                 fixed_size: tuple[int, int] = DEFAULT_FIXED_SIZE) -> None:
+                 fixed_size: tuple[int, int] = DEFAULT_FIXED_SIZE, recordable: bool = False,
+                 record: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("CaptureToolbar")
         self.setAccessibleName("Capture")
@@ -210,6 +215,7 @@ class CaptureToolbar(QFrame):
         row = QHBoxLayout(self)
         row.setContentsMargins(6, 6, 6, 6)
         row.setSpacing(4)
+        self._record_control(row, recordable)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self.buttons: dict[str, QToolButton] = {}
@@ -247,6 +253,32 @@ class CaptureToolbar(QFrame):
         self.set_delay(delay)
         self.set_pointer(pointer)
         self.set_pointer_available(pointer_available, pointer_why)
+        self.set_record(record and recordable)
+
+    def _record_control(self, row: QHBoxLayout, recordable: bool) -> None:
+        """The Record switch, first on the toolbar; hidden where recording isn't offered."""
+        self.record_button = self._button("record", " Record", "Record a video of what you choose, instead of "
+                                          "snipping it (R)")
+        self.record_button.setObjectName("RecordButton")
+        self.record_button.setAccessibleName("Record video")
+        self.record_button.setAccessibleDescription("Choose an area to record a video of. Shortcut: R")
+        self.record_button.setCheckable(True)
+        self.record_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.record_button.clicked.connect(self.record_toggled)
+        separator = self._separator()
+        row.addWidget(self.record_button)
+        row.addWidget(separator)
+        self.record_button.setVisible(recordable)
+        separator.setVisible(recordable)
+
+    def set_record(self, on: bool) -> None:
+        """Show whether recording is switched on, without announcing it: a snip's delay and pointer
+        switch, and Scrolling mode, step aside while it is."""
+        self.record_button.setChecked(on)
+        for widget in (self.delay_button, self.pointer_button, self.buttons.get("scroll")):
+            if widget is not None:
+                widget.setVisible(not on)
+        self.adjustSize()
 
     def _size_control(self) -> QToolButton:
         """Fixed size mode's size: presets, and a row to type any size. Shown only in that mode."""
@@ -375,7 +407,7 @@ class CaptureToolbar(QFrame):
         """Icons only (names stay in tooltips and for screen readers), for monitors too narrow for
         the labels."""
         style = Qt.ToolButtonIconOnly if compact else Qt.ToolButtonTextBesideIcon
-        for button in (*self.buttons.values(), self.delay_button):
+        for button in (*self.buttons.values(), self.delay_button, self.record_button):
             button.setToolButtonStyle(style)
         self.adjustSize()
 

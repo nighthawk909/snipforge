@@ -1,5 +1,5 @@
 """Shortcuts of your own: key combinations, set in Settings > Capture, that start a snip, repeat the
-last one or open the Library from anywhere.
+last one, open the Library, or start (and stop) recording a video, from anywhere.
 
 They're registered with Windows' RegisterHotKey, not the keyboard hook (snipforge/hotkey.py, which
 only ever acts on Win+Shift+S and Print Screen). RegisterHotKey never sees any other keystroke:
@@ -26,6 +26,7 @@ ACTIONS = {  # what a shortcut can do, in the order Settings lists them
     "snip": "New snip",
     "repeat": "Repeat last snip",
     "library": "Open the Library",
+    "record": "Record video, or stop recording",  # no combination until one is chosen
 }
 WM_HOTKEY = 0x0312
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x0001, 0x0002, 0x0004, 0x0008, 0x4000

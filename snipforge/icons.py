@@ -190,7 +190,18 @@ _PATHS = {
     "bell": (
         '<path d="M10.268 21a2 2 0 0 0 3.464 0"/>'
         '<path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>'),
+    "mic": (
+        '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/>'
+        '<line x1="12" x2="12" y1="19" y2="22"/>'),
+    "speaker": (
+        '<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 '
+        '1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/>'
+        '<path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>'),
+    "pause": '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+    "play": '<polygon points="6 3 20 12 6 21 6 3"/>',
+    "stop": '<rect width="14" height="14" x="5" y="5" rx="2"/>',
     # SnipForge's own
+    "record": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5" fill="currentColor"/>',
     "step": '<circle cx="12" cy="12" r="8"/><path d="M11 9l2-1v8"/>',
     "shape_rounded": '<rect x="3" y="6" width="18" height="12" rx="4"/>',
     "shape_rect": '<rect x="3" y="6" width="18" height="12"/>',

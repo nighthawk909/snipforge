@@ -8,18 +8,21 @@ the frame in Fixed size. A magnifier shows exact pixels.
 
 A delay counts down before the screen freezes (so menus and tooltips can be opened first), and
 the mouse pointer, grabbed the moment the screen froze, can be drawn into the snip.
+
+With Record switched on (the toolbar's first button, or R), the same choice picks an area to record
+a video of: the session hands it, in physical desktop pixels, to `on_area` (snipforge/video).
 """
 from __future__ import annotations
 
 import logging
-import math
-from dataclasses import replace
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import pointer, prefs, scroll_input, theme
+from .capture_area import area_on, on_screen, screen_for, source_for, span  # noqa: F401
+from .capture_paint import paint_hint, paint_magnifier, paint_size_label
 from .capture_toolbar import MODES, CaptureToolbar
 from .countdown import Countdown
 from .scrolling import ScrollCapture
@@ -30,55 +33,12 @@ DRAG_MODES = ("area", "scroll")  # modes where a drag chooses an area
 FIXED_NUDGE, FIXED_NUDGE_SHIFT = 1, 10  # screen pixels an arrow key moves the Fixed size frame (Shift: more)
 ARROWS = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
 TOOLBAR_TOP = 18
-HINT_BOTTOM = 40  # gap between the hint and the bottom of the monitor
-SOURCE_OVERLAP = 0.9  # share of a snip that must lie inside one window to credit that window
-PRIVATE_MARKERS = ("inprivate", "incognito", "private browsing")
-
-
-def _private(title: str) -> bool:
-    lowered = title.lower()
-    return any(marker in lowered for marker in PRIVATE_MARKERS)
-MAG_SAMPLE = 15  # physical pixels sampled around the cursor
-MAG_SIZE = 120
-
-
-def _span(a: QPoint, b: QPoint) -> QRect:
-    """Rectangle between two drag points. QRect(a, b) includes both end pixels, which made a
-    100-pixel drag capture 101 pixels."""
-    return QRect(min(a.x(), b.x()), min(a.y(), b.y()), abs(b.x() - a.x()), abs(b.y() - a.y()))
+MIN_RECORD_SIDE = 48  # snipforge.video.recorder.MIN_SIDE (not imported: that loads the recorder)
+NOTE_MS = 3000
 
 
 def _grab_screen(screen) -> QPixmap:
     return screen.grabWindow(0)
-
-
-def area_on(screen, rect: QRect) -> prefs.LastArea:
-    """A snip's area, with enough about its monitor to find that monitor again (Repeat last snip)."""
-    return prefs.LastArea(screen.name(), _geometry(screen), round(screen.devicePixelRatio(), 3),
-                          (rect.x(), rect.y(), rect.width(), rect.height()))
-
-
-def screen_for(area: prefs.LastArea):
-    """The monitor `area` was snipped on, if it's still there exactly as it was: same name, place,
-    size and scale. None otherwise, so a repeat never lands on a look-alike monitor or on a monitor
-    whose resolution or scaling changed."""
-    matches = [s for s in QGuiApplication.screens()
-               if (s.name(), _geometry(s), round(s.devicePixelRatio(), 3)) == (area.screen, area.geometry, area.scale)]
-    return matches[0] if len(matches) == 1 else None
-
-
-def _geometry(screen) -> tuple[int, int, int, int]:
-    g = screen.geometry()
-    return g.x(), g.y(), g.width(), g.height()
-
-
-def on_screen(area: prefs.LastArea) -> bool:
-    """Whether Repeat last snip can take `area` again."""
-    screen = screen_for(area)
-    if screen is None:
-        return False
-    w, h = area.geometry[2] * area.scale, area.geometry[3] * area.scale
-    return QRect(0, 0, math.ceil(w), math.ceil(h)).contains(QRect(*area.rect))
 
 
 def _pointer_unavailable_reason() -> str:
@@ -96,15 +56,19 @@ class _ScreenOverlay(QWidget):
     pointer_changed = Signal(bool)  # the user switched the pointer on or off here
     size_changed = Signal(int, int)  # the user picked Fixed size mode's size here (screen pixels)
     keyboard_taken = Signal()  # the pointer came to this monitor, and the keyboard came with it
+    area_chosen = Signal(QRect)  # Record: this area, in physical desktop pixels, is to be recorded
+    record_changed = Signal(bool)  # the user switched Record on or off here
 
     def __init__(self, screen, pixmap: QPixmap, window_rects: list[QRect], sources: list | None = None,
                  *, mode: str = "area", toolbar: bool = False, delay: int = 0,
                  pointer_shot: pointer.PointerShot | None = None, include_pointer: bool = False,
-                 scrolling: bool | None = None, fixed_size: tuple[int, int] = prefs.DEFAULT_FIXED_SIZE) -> None:
+                 scrolling: bool | None = None, fixed_size: tuple[int, int] = prefs.DEFAULT_FIXED_SIZE,
+                 record: bool = False, recordable: bool = False) -> None:
         """`sources` (optional) describes each of `window_rects`: a winrects.WindowInfo, same order.
         `toolbar`: show the capture toolbar on this monitor. `pointer_shot`: the pointer as it was
         when the screen froze, drawn into the snip while `include_pointer` is on. `fixed_size`:
-        Fixed size mode's frame, in screen pixels."""
+        Fixed size mode's frame, in screen pixels. `recordable`: offer the Record switch; `record`:
+        start with it on."""
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self._frozen_pixmap = pixmap
         self._frozen_image = pixmap.toImage()
@@ -130,13 +94,19 @@ class _ScreenOverlay(QWidget):
         self._hover: QRect | None = None
         self._fixed_size = tuple(fixed_size)
         self._fixed: QRect | None = None  # Fixed size mode's frame, in screen pixels, once placed
-        self._mode = mode if mode in MODES and (mode != "scroll" or self._scrolling) else "area"
+        self.recordable = recordable
+        self.record = record and recordable
+        self._note: str | None = None  # said in place of the hint for a moment (an area too small)
+        self._mode = mode if mode in MODES and (mode != "scroll" or (self._scrolling and not self.record)) \
+            else "area"
         self.toolbar: CaptureToolbar | None = None
         if toolbar:
             self.toolbar = CaptureToolbar(self._mode, self, delay=delay, pointer=self._pointer_shown(),
                                           pointer_available=pointer_shot is not None,
                                           pointer_why=_pointer_unavailable_reason(),
-                                          scrolling=self._scrolling, fixed_size=self._fixed_size)
+                                          scrolling=self._scrolling, fixed_size=self._fixed_size,
+                                          recordable=recordable, record=self.record)
+            self.toolbar.record_toggled.connect(self._pick_record)
             self.toolbar.mode_picked.connect(self._pick_mode)
             self.toolbar.size_picked.connect(self._pick_size)
             self.toolbar.delay_picked.connect(self.delay_changed)
@@ -219,8 +189,25 @@ class _ScreenOverlay(QWidget):
         self._refresh_hover()
         self.update()
 
+    def set_record(self, on: bool) -> None:
+        """Switch Record on or off without announcing it (the session keeps monitors in step)."""
+        self.record = on and self.recordable
+        if self.record and self._mode == "scroll":
+            self.set_mode("area")
+        if self.toolbar is not None:
+            self.toolbar.set_record(self.record)
+            self._place_toolbar()
+        self.update()
+
+    def _pick_record(self, on: bool) -> None:
+        if self.recordable and on != self.record:
+            self.set_record(on)
+            self.record_changed.emit(on)
+        elif self.toolbar is not None:
+            self.toolbar.set_record(self.record)  # a click that changed nothing leaves the button as it was
+
     def _pick_mode(self, mode: str) -> None:
-        if mode == "scroll" and not self._scrolling:
+        if mode == "scroll" and (not self._scrolling or self.record):
             return
         if mode != self._mode:
             self.set_mode(mode)
@@ -229,8 +216,14 @@ class _ScreenOverlay(QWidget):
             self.mode_changed.emit(mode)
 
     def hint(self) -> str:
-        letters = " ".join(spec.key for key, spec in MODES.items() if key != "scroll" or self._scrolling)
-        return f"{MODES[self._mode].hint}  •  {letters} modes  •  D delay  •  P pointer"
+        if self._note:
+            return self._note
+        scroll = self._scrolling and not self.record
+        letters = " ".join(spec.key for key, spec in MODES.items() if key != "scroll" or scroll)
+        if self.record:
+            return f"Choose what to record: {MODES[self._mode].hint}  •  {letters} modes  •  R to snip instead"
+        record = "  •  R record" if self.recordable else ""
+        return f"{MODES[self._mode].hint}  •  {letters} modes  •  D delay  •  P pointer{record}"
 
     def _refresh_hover(self) -> None:
         """Re-aim the highlight after the mode or the frame's size changed."""
@@ -374,24 +367,13 @@ class _ScreenOverlay(QWidget):
         return local
 
     def _source_for(self, sel: QRect):
-        """The window a snip came from: the topmost window that holds nearly all of the selection
-        (so a whole-monitor snip isn't credited to whatever sits in the middle). Private browsing
-        windows keep their app name but never their title."""
-        area = sel.width() * sel.height()
-        if area <= 0:
-            return None
-        for local, info in self._sources:
-            overlap = local.intersected(sel)
-            if overlap.width() * overlap.height() >= SOURCE_OVERLAP * area:
-                return info if not _private(info.title) else replace(info, title="")
-            if local.contains(sel.center()):
-                return None  # the window on top doesn't hold the snip: don't guess
-        return None
+        """The window a snip came from (capture_area.source_for)."""
+        return source_for(self._sources, sel)
 
     # ------------------------------------------------------------------ geometry
     def _selection(self) -> QRect | None:
         if self._dragging and self._press is not None and self._current is not None:
-            return _span(self._press, self._current).intersected(self.rect())
+            return span(self._press, self._current).intersected(self.rect())
         return self._hover
 
     def _target_at(self, pos: QPoint) -> QRect | None:
@@ -427,11 +409,11 @@ class _ScreenOverlay(QWidget):
             p.setBrush(Qt.NoBrush)
             p.setPen(QPen(QColor(theme.current().accent.fill), 2 if not self._dragging else 1))
             p.drawRect(sel.adjusted(0, 0, -1, -1))
-            self._paint_size_label(p, sel)
+            paint_size_label(p, sel, self._size_text(sel))
         if not self._dragging and self._press is None:
-            self._paint_hint(p, self.hint())
+            paint_hint(p, self.size(), self.hint())
         if self._cursor is not None and self._shows_magnifier():
-            self._paint_magnifier(p, self._cursor)
+            paint_magnifier(p, self._image, self._dpr, self._cursor, self.size())
 
     def _shows_magnifier(self) -> bool:
         return self._magnifier and self._mode != "fixed"  # the frame's middle isn't what you're lining up
@@ -445,61 +427,12 @@ class _ScreenOverlay(QWidget):
             QRect(sel.right() + 1, sel.top(), r.right() - sel.right(), sel.height()),
         ]
 
-    def _paint_hint(self, p: QPainter, text: str) -> None:
-        p.setFont(QFont("Segoe UI", 10))
-        w = p.fontMetrics().horizontalAdvance(text) + 28
-        box = QRectF((self.width() - w) / 2, self.height() - HINT_BOTTOM - 32, w, 32)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(20, 20, 20, 225))
-        p.drawRoundedRect(box, 8, 8)
-        p.setPen(QColor("#f0f0f0"))
-        p.drawText(box, Qt.AlignCenter, text)
-
     def _size_text(self, sel: QRect) -> str:
         """The snip's size in screen pixels (Fixed size: exactly the frame's)."""
         if self._mode == "fixed":
             size = self._fixed_physical_size()
             return f"{size.width()} × {size.height()}"
         return f"{round(sel.width() * self._dpr)} × {round(sel.height() * self._dpr)}"
-
-    def _paint_size_label(self, p: QPainter, sel: QRect) -> None:
-        text = self._size_text(sel)
-        p.setFont(QFont("Segoe UI", 9))
-        w = p.fontMetrics().horizontalAdvance(text) + 14
-        h = p.fontMetrics().height() + 8
-        y = sel.top() - h - 6 if sel.top() > h + 10 else sel.top() + 6
-        box = QRectF(sel.left(), y, w, h)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(20, 20, 20, 230))
-        p.drawRoundedRect(box, 5, 5)
-        p.setPen(Qt.white)
-        p.drawText(box, Qt.AlignCenter, text)
-
-    def _paint_magnifier(self, p: QPainter, pos: QPoint) -> None:
-        px, py = round(pos.x() * self._dpr), round(pos.y() * self._dpr)
-        half = MAG_SAMPLE // 2
-        sample = self._image.copy(px - half, py - half, MAG_SAMPLE, MAG_SAMPLE)
-        x = pos.x() + 24 if pos.x() + 24 + MAG_SIZE < self.width() else pos.x() - 24 - MAG_SIZE
-        y = pos.y() + 24 if pos.y() + 24 + MAG_SIZE + 22 < self.height() else pos.y() - 24 - MAG_SIZE - 22
-        target = QRect(x, y, MAG_SIZE, MAG_SIZE)
-        p.setRenderHint(QPainter.SmoothPixmapTransform, False)
-        p.drawImage(target, sample)
-        cell = MAG_SIZE / MAG_SAMPLE
-        p.setPen(QPen(QColor(theme.current().accent.fill), 1))
-        p.setBrush(Qt.NoBrush)
-        p.drawRect(QRectF(x + half * cell, y + half * cell, cell, cell))
-        p.setPen(QPen(QColor("#ffffff"), 1))
-        p.drawRect(target.adjusted(0, 0, -1, -1))
-        p.setPen(QPen(QColor(0, 0, 0, 160), 1))
-        p.drawRect(target.adjusted(-1, -1, 0, 0))
-        color = self._image.pixelColor(px, py) if self._image.rect().contains(px, py) else QColor()
-        label = QRectF(x, y + MAG_SIZE, MAG_SIZE, 22)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(20, 20, 20, 235))
-        p.drawRect(label)
-        p.setPen(QColor("#f0f0f0"))
-        p.setFont(QFont("Consolas", 8))
-        p.drawText(label, Qt.AlignCenter, f"{px},{py}  {color.name().upper() if color.isValid() else ''}")
 
     # ------------------------------------------------------------------ input
     def mousePressEvent(self, e) -> None:
@@ -541,7 +474,7 @@ class _ScreenOverlay(QWidget):
             self._set_fixed(self._fixed_at(e.position().toPoint()))
             self._snip_fixed()
             return
-        sel = _span(self._press, e.position().toPoint()).intersected(self.rect()) \
+        sel = span(self._press, e.position().toPoint()).intersected(self.rect()) \
             if self._dragging else self._target_at(self._press)
         self._press = self._current = None
         self._dragging = False
@@ -570,10 +503,12 @@ class _ScreenOverlay(QWidget):
                 self.toolbar.open_size_menu()  # X again: the size
             else:
                 self._pick_mode(mode)
-        elif e.key() == Qt.Key_D and self.toolbar is not None:
+        elif e.key() == Qt.Key_R and self.recordable and self._press is None:
+            self._pick_record(not self.record)
+        elif e.key() == Qt.Key_D and self.toolbar is not None and not self.record:
             if self._press is None:  # not in the middle of a drag (the toolbar is hidden then)
                 self.toolbar.open_delay_menu()
-        elif e.key() == Qt.Key_P:
+        elif e.key() == Qt.Key_P and not self.record:
             self._pick_pointer(not self._include_pointer)
         else:
             super().keyPressEvent(e)
@@ -585,12 +520,31 @@ class _ScreenOverlay(QWidget):
         self._emit_physical(self._to_physical(sel), sel)
 
     def _emit_physical(self, physical: QRect, sel: QRect) -> None:
-        """Snip `physical` (screen pixels); `sel` is the same area in overlay coordinates."""
+        """Snip `physical` (screen pixels); `sel` is the same area in overlay coordinates. With Record
+        on, it's the area to record instead, in physical desktop pixels (Qt keeps each monitor's
+        top-left where Windows has it)."""
+        if self.record:
+            self._choose_to_record(physical)
+            return
         image = self._image.copy(physical)
         image.setDevicePixelRatio(1.0)
         self.last_rect = QRect(physical)
         self.last_source = self._source_for(sel)
         self.selected.emit(image)
+
+
+    def _choose_to_record(self, physical: QRect) -> None:
+        if min(physical.width(), physical.height()) < MIN_RECORD_SIDE:
+            self._say(f"That's too small to record: choose at least {MIN_RECORD_SIDE} × {MIN_RECORD_SIDE} pixels")
+            return
+        self.last_rect = QRect(physical)
+        self.area_chosen.emit(physical.translated(self._origin))
+
+    def _say(self, note: str) -> None:
+        """Show `note` where the hint goes, for a few seconds."""
+        self._note = note
+        self.update()
+        QTimer.singleShot(NOTE_MS, self, lambda: (setattr(self, "_note", None), self.update()))
 
 
 def _nudge_step(modifiers) -> int:
@@ -604,10 +558,15 @@ def _nudge_step(modifiers) -> int:
 class CaptureSession:
     """Owns the overlays for one capture; calls back with the image or None."""
 
-    def __init__(self, on_done, repeat: prefs.LastArea | None = None, on_note=None) -> None:
+    def __init__(self, on_done, repeat: prefs.LastArea | None = None, on_note=None, on_area=None,
+                 record: bool = False) -> None:
         """`repeat`: Repeat last snip, this area taken again with no overlay. `on_note(text)` tells
-        the person something straight away (e.g. that the area to repeat has gone)."""
+        the person something straight away (e.g. that the area to repeat has gone). `on_area(rect,
+        screen)` offers the Record switch, and gets the area chosen to record (physical desktop
+        pixels); `record` starts with it on (and without a snip's delay)."""
         self._on_done = on_done
+        self._on_area = on_area
+        self.record = record and on_area is not None
         self._repeat = repeat
         self._on_note = on_note
         self.area: prefs.LastArea | None = None  # where the snip came from, for the next repeat
@@ -621,7 +580,7 @@ class CaptureSession:
         self.source = None  # the window the snip came from (winrects.WindowInfo), when known
 
     def start(self) -> None:
-        delay = prefs.capture_delay()
+        delay = 0 if self.record else prefs.capture_delay()  # a recording counts down after the area
         if delay:
             self._count_down(delay)
         else:
@@ -694,8 +653,11 @@ class CaptureSession:
             overlay = _ScreenOverlay(screen, _grab_screen(screen), windows, infos, mode=mode, toolbar=True,
                                      delay=prefs.capture_delay(), pointer_shot=shot,
                                      include_pointer=prefs.capture_pointer(),
-                                     scrolling=scroll_input.available(), fixed_size=prefs.capture_fixed_size())
+                                     scrolling=scroll_input.available(), fixed_size=prefs.capture_fixed_size(),
+                                     record=self.record, recordable=self._on_area is not None)
             overlay.selected.connect(lambda image, o=overlay: self._took(o, image))
+            overlay.area_chosen.connect(lambda rect, o=overlay: self._chose_to_record(o, rect))
+            overlay.record_changed.connect(self._set_record)
             overlay.cancelled.connect(lambda: self._finish(None))
             overlay.mode_changed.connect(self._set_mode)
             overlay.delay_changed.connect(self._set_delay)
@@ -712,6 +674,18 @@ class CaptureSession:
         if self.focus is not None:
             self.focus.activateWindow()
             self.focus.setFocus()
+
+    def _set_record(self, on: bool) -> None:
+        """Record switched on or off on one monitor applies to all of them."""
+        self.record = on
+        for overlay in self._overlays:
+            overlay.set_record(on)
+
+    def _chose_to_record(self, overlay: _ScreenOverlay, rect: QRect) -> None:
+        """The area to record: this session is over, and the recording (snipforge/video) takes it."""
+        screen = overlay.capture_screen
+        self._finish(None)
+        self._on_area(QRect(rect), screen)
 
     def _set_mode(self, mode: str) -> None:
         """A mode picked on one monitor applies to all of them, and to the next snip, except

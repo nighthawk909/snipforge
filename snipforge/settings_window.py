@@ -334,7 +334,8 @@ class SettingsWindow(QMainWindow):
         SnipForge have it. Hidden where they can't work (not Windows)."""
         descriptions = {"snip": "Your own combination, besides Win+Shift+S and Print Screen",
                         "repeat": "The same area as your last snip, taken straight away",
-                        "library": "Bring up the Library from anywhere"}
+                        "library": "Bring up the Library from anywhere",
+                        "record": "Choose an area and record a video of it; press it again to stop"}
         self.shortcut_edits: dict[str, ShortcutEdit] = {}
         rows: list[QWidget] = []
         for action, title in SHORTCUT_TITLES.items():
