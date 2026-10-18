@@ -46,7 +46,7 @@ HINTS = {
     "magnify": "Drag over what to enlarge. Drag the lens to move it, or inside the frame to show another area.",
     "text": "Click to type. Esc finishes.",
     "callout": "Drag a box, then type. Drag the orange dot to aim the pointer.",
-    "stamp": "Click to drop a stamp, or drag to size it.",
+    "stamp": "Click to drop a stamp, or drag to size it. App name and date adds where and when you took the snip.",
     "step": "Click to drop the next number.",
     "blur": "Drag over anything private. Redact in the toolbar finds emails, phone and card numbers for you.",
     "pixelate": "Drag over anything private.",
@@ -105,6 +105,7 @@ class PropertiesPanel(QScrollArea):
     pick_color = Signal()           # the eyedropper button: start (or stop) picking a color from the snip
     style_saved = Signal(str)       # the selection's look was saved as a quick style for this tool
     edges_changed = Signal(object)  # Edges: the snip's border and torn sides
+    source_stamp = Signal()         # add the "App name and date" text stamp
     cutout_changed = Signal(dict)   # the Cut out tool's direction or seam
     editing_done = Signal()         # finished typing in a field: give the keyboard back to the canvas
 
@@ -228,6 +229,11 @@ class PropertiesPanel(QScrollArea):
             self._stamp_buttons[name] = b
             grid.addWidget(b, i // STAMP_COLUMNS, i % STAMP_COLUMNS)
         col.addLayout(grid)
+        self._source_stamp = QPushButton("App name and date")
+        self._source_stamp.setAccessibleName("Add an app name and date stamp")
+        self._source_stamp.clicked.connect(self.source_stamp)
+        col.addWidget(self._source_stamp)
+        self.set_source_stamp_available(True)
 
     def _build_colors(self) -> None:
         col = self._section("color", None)
@@ -410,6 +416,16 @@ class PropertiesPanel(QScrollArea):
             self._shapes.set_value(style.shape)
         if style.stamp in self._stamp_buttons:
             self._stamp_buttons[style.stamp].setChecked(True)
+
+    def set_source_stamp_available(self, available: bool) -> None:
+        self._source_stamp.setEnabled(available)
+        why = ("Add text saying which app or window this snip came from, and when you took it" if available else
+               "Only for snips in your library: they remember where and when they were taken")
+        self._source_stamp.setToolTip(why)
+        self._source_stamp.setAccessibleDescription(why)
+
+    def source_stamp_button(self) -> QPushButton:
+        return self._source_stamp
 
     def load_edges(self, edges) -> None:
         self._edges.load(edges)

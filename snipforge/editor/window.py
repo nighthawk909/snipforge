@@ -29,6 +29,7 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from . import beautify
+from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
@@ -145,6 +146,8 @@ class EditorWindow(QMainWindow):
         self.panel.pick_color.connect(self._toggle_picking)
         self.panel.edges_changed.connect(self.canvas.set_edges)
         self.canvas.notice.connect(lambda text: self.statusBar().showMessage(text, 6000))
+        self.panel.source_stamp.connect(self.add_source_stamp)
+        self.panel.set_source_stamp_available(entry is not None)
         self.panel.cutout_changed.connect(lambda changes: self.canvas.set_cutout_options(**changes))
         self.panel.style_saved.connect(
             lambda kind: self.statusBar().showMessage(f"Saved as a quick style for {TOOL_NAMES.get(kind, kind)}", 3000))
@@ -326,6 +329,17 @@ class EditorWindow(QMainWindow):
         self.panel.set_picking(on)
         if not on and self.statusBar().currentMessage() == PICK_HINT:
             self.statusBar().clearMessage()
+
+    def add_source_stamp(self) -> None:
+        """The App name and date stamp, from what the Library recorded when the snip was taken."""
+        if self._entry is None:
+            return
+        meta = self._library.meta(self._entry)
+        where, time = stamp_parts(meta.title, meta.app, self._entry.created)
+        self.canvas.add_text_stamp(where, time)
+        self.statusBar().showMessage("Added where and when you took this snip. It's text: edit or move it."
+                                     if where else "Added when you took this snip (no app was recorded)", 5000)
+        self.canvas.setFocus()
 
     def _toggle_picking(self) -> None:
         if self.canvas.picking():
