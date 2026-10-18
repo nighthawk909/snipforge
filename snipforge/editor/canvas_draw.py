@@ -3,9 +3,12 @@ turn a press on an annotation into a click-select, a move or a draw, and record 
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtGui import QFontMetricsF
 
+from .app_stamp import fitted
 from .commands import AddItemsCommand, StateCommand
 from .crop import crop_handle_at
+from .edges import DEPTH as EDGE_DEPTH
 from .items import (
     Annotation,
     ArrowItem,
@@ -27,7 +30,7 @@ from .text_items import CalloutItem, TextItem
 DEFAULT_CALLOUT = (190.0, 64.0)
 TEXT_STAMP_STYLE = Style(color="#1c1c1e", fill=True, font_size=12, shadow=False)  # small, dark and readable
 STAMP_INSET = 10.0
-MIN_STAMP_FONT = 6
+MIN_STAMP_FONT, MAX_STAMP_FONT = 8, 28  # it grows with the snip: about 1 point per 100 px across
 
 
 class DrawMixin:
@@ -191,22 +194,29 @@ class DrawMixin:
         self.setFocus()
         item.start_editing()
 
-    def add_text_stamp(self, text: str) -> None:
-        """Text in the snip's bottom-left corner (like the App name and date stamp), selected so you
-        can move or restyle it; one undo step."""
+    def add_text_stamp(self, where: str, time: str) -> None:
+        """The App name and date stamp in the snip's bottom-left corner, clear of any border or torn
+        edge and sized to the snip, selected so you can move or restyle it; one undo step. If it's too
+        long to fit across, the window title is shortened with "…", never the date."""
         self.commit_text()
         self.set_tool("select")
         crop = self._crop_rect
-        item = self._adopt(TextItem(TEXT_STAMP_STYLE, text))
-        room = crop.width() - 2 * STAMP_INSET
-        if item.boundingRect().width() > room > 0:  # a small snip: smaller text, so it fits across
-            size = TEXT_STAMP_STYLE.font_size * room / item.boundingRect().width()
-            item.set_style(TEXT_STAMP_STYLE.with_changes(font_size=max(MIN_STAMP_FONT, int(size))))
+        edges = self._edges
+        inset = STAMP_INSET + edges.border + (EDGE_DEPTH if edges.torn & {"bottom", "left"} else 0)
+        size = min(MAX_STAMP_FONT, max(TEXT_STAMP_STYLE.font_size, round(crop.width() / 100)))
+        item = self._adopt(TextItem(TEXT_STAMP_STYLE.with_changes(font_size=size)))
+        margin = 2 * item.document().documentMargin() + 2
+        room = crop.width() - 2 * inset - margin
+        while size > MIN_STAMP_FONT and QFontMetricsF(item.font()).horizontalAdvance(time) > room:
+            size -= 1  # a narrow snip: smaller text, down to what's still readable
+            item.set_style(TEXT_STAMP_STYLE.with_changes(font_size=size))
+        item.setPlainText(fitted(where, time, QFontMetricsF(item.font()), room))
         box = item.boundingRect()
-        item.setPos(crop.left() + STAMP_INSET, max(crop.top(), crop.bottom() - STAMP_INSET - box.height()))
+        item.setPos(crop.left() + inset, max(crop.top(), crop.bottom() - inset - box.height()))
         item.setZValue(self._next_z())
         self.undo_stack.push(AddItemsCommand(self._scene, [item], "Add app name and date"))
         self._select([item])
+        self.ensureVisible(item)
 
     def _add_step(self, pos: QPointF) -> None:
         numbers = [i.number for i in self.annotations() if isinstance(i, StepItem)]

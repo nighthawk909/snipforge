@@ -29,7 +29,7 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from . import beautify
-from .app_stamp import stamp_text
+from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
@@ -335,7 +335,10 @@ class EditorWindow(QMainWindow):
         if self._entry is None:
             return
         meta = self._library.meta(self._entry)
-        self.canvas.add_text_stamp(stamp_text(meta.title, meta.app, self._entry.created))
+        where, time = stamp_parts(meta.title, meta.app, self._entry.created)
+        self.canvas.add_text_stamp(where, time)
+        self.statusBar().showMessage("Added where and when you took this snip. It's text: edit or move it."
+                                     if where else "Added when you took this snip (no app was recorded)", 5000)
         self.canvas.setFocus()
 
     def _toggle_picking(self) -> None:

@@ -419,9 +419,10 @@ class PropertiesPanel(QScrollArea):
 
     def set_source_stamp_available(self, available: bool) -> None:
         self._source_stamp.setEnabled(available)
-        self._source_stamp.setToolTip(
-            "Add text saying which app or window this snip came from, and when you took it" if available else
-            "Only for snips in your library: they remember where and when they were taken")
+        why = ("Add text saying which app or window this snip came from, and when you took it" if available else
+               "Only for snips in your library: they remember where and when they were taken")
+        self._source_stamp.setToolTip(why)
+        self._source_stamp.setAccessibleDescription(why)
 
     def source_stamp_button(self) -> QPushButton:
         return self._source_stamp
