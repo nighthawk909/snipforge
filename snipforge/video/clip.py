@@ -88,10 +88,11 @@ def make_test_clip(path: Path, seconds: float = 1.0, size: tuple[int, int] = (32
                    tone_hz: float = 440.0, container: str = "mp4") -> Path:
     """Encode `seconds` of numbered frames and a tone to `path` (MP4: H.264 + AAC).
 
-    The file is checked to start like an MP4. In about 1 test run in 65, one clip came out as
-    something else (FFmpeg read it as a different format), which never happened in 440 clips made
-    outside the test runner; that clip is recorded once more, with a warning in the log. The
-    recorder step investigates this with a stress test (docs/VIDEO-PLAN.md, Risks)."""
+    The file is checked to start like an MP4, and recorded once more (with a warning in the log) if
+    it doesn't. In early test runs, about 1 run in 65 had one clip come out as something else; since
+    recorders always shut down and let go of their file, the stress test (pytest -m stress) made 800
+    recordings without one bad file.
+    """
     path = Path(path).resolve()  # Qt puts a relative name in the Videos folder
     _record(path, seconds, size, fps, tone_hz, container)
     if container == "mp4" and not _starts_like_mp4(path):
