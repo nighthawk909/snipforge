@@ -21,12 +21,17 @@ class LevelPreview:
     def __init__(self, capture: Callable | None = None) -> None:
         self._make_capture = capture or _real_capture
         self._captures: dict[str, object] = {}
+        self._wanted: dict[str, tuple] = {}  # kind -> (on, device_id) as last asked
         self._peaks: dict[str, float] = {}
         self.problems: dict[str, str] = {}  # why a source couldn't be opened
         self._lock = threading.Lock()
 
     def set_source(self, kind: str, on: bool, device_id: str | None = None) -> None:
-        """Listen to `kind` (again, on `device_id`), or stop listening."""
+        """Listen to `kind` (on `device_id`), or stop listening. Asking for what's already so changes
+        nothing: reopening a device stalls for a moment, and switches a Bluetooth headset's mode."""
+        if self._wanted.get(kind) == (on, device_id):
+            return
+        self._wanted[kind] = (on, device_id)
         self._close(kind)
         self.problems.pop(kind, None)
         if not on:
@@ -50,6 +55,7 @@ class LevelPreview:
     def close(self) -> None:
         for kind in list(self._captures):
             self._close(kind)
+        self._wanted.clear()
 
     def _close(self, kind: str) -> None:
         capture = self._captures.pop(kind, None)

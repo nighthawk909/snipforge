@@ -26,8 +26,7 @@ from .recordings import duration_text, new_recording
 
 log = logging.getLogger(__name__)
 
-ENDED_BY = {"sleep": "Windows went to sleep", "session end": "Windows was signing out or shutting down",
-            "SnipForge closed": "SnipForge was closed"}
+ENDED_BY = {"sleep": "Windows went to sleep", "session end": "Windows was signing out or shutting down"}
 
 
 class RecordFlow(QObject):
@@ -68,11 +67,17 @@ class RecordFlow(QObject):
 
     def stop(self) -> None:
         """The tray's Stop, the shortcut again, or SnipForge quitting: end it, keeping what was recorded."""
-        if self.state == "ready" and self.panel is not None:
-            self.panel.cancel()
+        if self.state == "ready":
+            try:
+                if self.panel is not None:
+                    self.panel.cancel()
+            except RuntimeError:  # the panel was already gone
+                pass
+            self._end(None)
         elif self.state == "counting down":
             self._drop_countdown()
             self.recorder.cancel()
+            self._end(None)  # nothing was recorded: no need to wait for the recorder to agree
         elif self.state == "recording":
             self.recorder.stop()
 
@@ -113,6 +118,8 @@ class RecordFlow(QObject):
         self._drop_countdown()
         if self.state == "counting down":
             self.state = "recording"
+            if getattr(self.recorder, "state", "") == "launching":  # a cold start: say why nothing's happening
+                self._notify("Starting the recorder: recording begins in a moment")
             self.recorder.go()
 
     def _drop_countdown(self) -> None:
@@ -127,11 +134,12 @@ class RecordFlow(QObject):
     def _finished(self, result) -> None:
         why = ENDED_BY.get(getattr(self.recorder, "ended_by", None) or "")
         note = f"Recording saved ({duration_text(result.duration)})"
-        self._end(f"{note}: it stopped because {why}" if why else note)
         try:
             self._open_video(result.path)
-        except Exception:  # the recording is saved whatever happens to the window showing it
+        except Exception as exc:  # the recording is saved whatever happens to the window showing it
             log.exception("Couldn't open the recording %s", result.path)
+            note = f"{note}, but it couldn't be opened: it's at {result.path} ({exc})"
+        self._end(f"{note}: it stopped because {why}" if why else note)
 
     def _failed(self, message: str) -> None:
         self._end(f"The recording failed: {message}")
@@ -145,9 +153,11 @@ class RecordFlow(QObject):
         if self.frame is not None:
             self.frame.close()
             self.frame = None
-        if note:
-            self._notify(note)
-        self.ended.emit()
+        try:
+            if note:
+                self._notify(note)
+        finally:
+            self.ended.emit()  # whatever the note did: SnipForge must know the recording is over
 
 
 def _remote_recorder(settings: Settings):

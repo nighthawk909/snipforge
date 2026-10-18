@@ -185,7 +185,9 @@ class SnipForgeApp:
         if self._session is not None:
             self._session.snip_now()  # pressed again during a countdown: don't wait
             return
-        self._start(CaptureSession(self._on_captured, on_area=self._record_area))  # R switches to recording
+        # R switches a snip to recording, unless one is under way already
+        on_area = self._record_area if self._recording is None else None
+        self._start(CaptureSession(self._on_captured, on_area=on_area))
 
     def record(self) -> None:
         """Record video (the tray, or its shortcut): choose an area to record. Pressed again while
@@ -203,12 +205,19 @@ class SnipForgeApp:
         """The area chosen to record (physical desktop pixels): the recording takes it from here."""
         from .video import record_flow
 
+        if self._recording is not None:
+            self._note("A recording is already under way: stop it first.")
+            return
         self._recording = record_flow.RecordFlow(area, screen, self.library.root, notify=self._note,
                                                  open_video=self._open_video)
         self._recording.ended.connect(self._recording_ended)
         self._record_action.setVisible(False)
         self._stop_record_action.setVisible(True)
-        self._recording.start()
+        try:
+            self._recording.start()
+        except Exception as exc:  # never leave a recording that blocks every later one
+            log.exception("The recording couldn't start")
+            self._recording._end(f"The recording couldn't start: {exc}")
 
     def _recording_ended(self) -> None:
         self._recording = None

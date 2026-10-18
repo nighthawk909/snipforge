@@ -30,6 +30,7 @@ class ControlBar(QFrame):
         self.setObjectName("RecordBar")
         self.setAccessibleName("Recording")
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_AlwaysShowToolTips, True)  # it's never the active window
         self.recorder, self.settings = recorder, settings
         self._armed = False
         row = QHBoxLayout(self)
@@ -83,12 +84,15 @@ class ControlBar(QFrame):
     def showEvent(self, e) -> None:  # noqa: N802 - Qt API
         super().showEvent(e)
         exclude_from_capture(self)
+        self._place()
+        self._timer.start()
+        self.refresh()
+
+    def _place(self) -> None:
         self.adjustSize()
         area = QRect(*self.settings.area)
         screen = screen_of(area)
         self.move(place_beside(to_logical(area, screen), self.size(), screen.availableGeometry()))
-        self._timer.start()
-        self.refresh()
 
     def refresh(self) -> None:
         self.time.setText(duration_text(self.recorder.media_time()))
@@ -120,7 +124,7 @@ class ControlBar(QFrame):
         self.discard_button.setText(" Discard?")
         self.discard_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.discard_button.setToolTip("Click again to throw the recording away")
-        self.adjustSize()
+        self._place()
         QTimer.singleShot(DISARM_MS, self, self._disarm)
 
     def _disarm(self) -> None:
@@ -128,4 +132,4 @@ class ControlBar(QFrame):
         self.discard_button.setText("")
         self.discard_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.discard_button.setToolTip("Discard the recording")
-        self.adjustSize()
+        self._place()

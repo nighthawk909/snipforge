@@ -178,6 +178,8 @@ class ReadyPanel(QFrame):
         self.problem.setText("\n".join(problems))
         self.problem.setVisible(bool(problems))
         self.adjustSize()
+        if self.isVisible():
+            self._place()  # it may have grown: keep it on screen
 
     def _show_levels(self) -> None:
         levels = self.levels.levels()
@@ -189,17 +191,33 @@ class ReadyPanel(QFrame):
     def showEvent(self, e) -> None:  # noqa: N802 - Qt API
         super().showEvent(e)
         self.adjustSize()
-        self.move(place_beside(self._area, self.size(), self._screen.availableGeometry()))
+        self._place()
         self._meters.start()
         self.record_button.setFocus()
+
+    def _place(self) -> None:
+        self.move(place_beside(self._area, self.size(), self._screen.availableGeometry()))
 
     def keyPressEvent(self, e) -> None:  # noqa: N802 - Qt API
         if e.key() == Qt.Key_Escape:
             self.cancel()
         elif e.key() in (Qt.Key_Return, Qt.Key_Enter):
-            self._record()
+            focused = self.focusWidget()
+            if isinstance(focused, QToolButton):  # Enter presses the button you're on, not Record
+                if focused.menu() is not None and focused.popupMode() == QToolButton.InstantPopup:
+                    focused.showMenu()
+                else:
+                    focused.click()
+            else:
+                self._record()
         else:
             super().keyPressEvent(e)
+
+    def closeEvent(self, e) -> None:  # noqa: N802 - Qt API
+        """Alt+F4, or anything else that closes it, is a Cancel: never a flow left waiting."""
+        if not self._done:
+            self.cancel()
+        super().closeEvent(e)
 
     def _record(self) -> None:
         if not self._done:

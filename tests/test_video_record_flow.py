@@ -190,3 +190,53 @@ def test_warnings_from_the_recorder_are_passed_on(tmp_path, qapp):
     made["recorders"][0].warning.emit("The microphone was unplugged")
 
     assert notes == ["The microphone was unplugged"]
+
+
+def test_stop_during_the_countdown_ends_at_once_even_if_the_recorder_never_answers(tmp_path, qapp):
+    flow, made, notes, _opened, ended = make_flow(tmp_path)
+    record_with(flow, RecordingChoices(countdown=3))
+    recorder = made["recorders"][0]
+    recorder.cancel = lambda: recorder.calls.append("cancel")  # sent, but no reply comes
+
+    flow.stop()
+    flow.stop()  # pressed twice
+
+    assert recorder.calls[-1] == "cancel" and ended == [True] and flow.state == "ended"
+
+
+def test_a_late_recorder_process_says_so_when_the_countdown_ends(tmp_path, qapp):
+    flow, made, notes, *_ = make_flow(tmp_path)
+    record_with(flow, RecordingChoices(countdown=3))
+    made["recorders"][0].state = "launching"  # the process isn't up yet
+
+    made["countdowns"][0].finished.emit()
+
+    assert notes == ["Starting the recorder: recording begins in a moment"]
+
+
+def test_a_recording_that_cant_be_opened_says_where_it_was_saved(tmp_path, qapp):
+    flow, made, notes, *_ = make_flow(tmp_path)
+    record_with(flow, RecordingChoices(countdown=0))
+
+    def broken(path):
+        raise OSError("no editor today")
+
+    flow._open_video = broken
+    made["recorders"][0].finish(3)
+
+    assert notes[-1].startswith("Recording saved (0:03), but it couldn't be opened:")
+    assert str(made["recorders"][0].settings.output) in notes[-1]
+
+
+def test_the_flow_ends_even_if_the_note_cant_be_shown(tmp_path, qapp):
+    flow, made, _notes, _opened, ended = make_flow(tmp_path)
+    record_with(flow, RecordingChoices(countdown=0))
+
+    def broken(note):
+        raise RuntimeError("no tray")
+
+    flow._notify = broken
+    with pytest.raises(RuntimeError):
+        flow._failed("x")  # called directly: from a signal, PySide would only print the error
+
+    assert ended == [True]

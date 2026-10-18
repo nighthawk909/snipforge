@@ -79,7 +79,7 @@ def test_stop_saves_and_the_bar_goes(qapp):
     assert recorder.calls == ["stop"] and not bar.isVisible()
 
 
-def test_discard_asks_again_on_the_same_button(qapp, monkeypatch):
+def test_discard_asks_again_on_the_same_button(qapp):
     bar, recorder = make_bar()
 
     QTest.mouseClick(bar.discard_button, Qt.LeftButton)
@@ -103,6 +103,7 @@ def test_an_unanswered_discard_goes_back_to_how_it_was(qapp, monkeypatch):
 
 def test_it_never_takes_the_keyboard_from_the_app_being_recorded(qapp):
     bar, _recorder = make_bar()
+    assert bar.testAttribute(Qt.WA_AlwaysShowToolTips)  # tooltips though it's never the active window
 
     assert bar.windowFlags() & Qt.WindowDoesNotAcceptFocus
     assert all(b.focusPolicy() == Qt.NoFocus for b in (bar.pause_button, bar.stop_button, bar.discard_button))

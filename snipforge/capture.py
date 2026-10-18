@@ -532,9 +532,9 @@ class _ScreenOverlay(QWidget):
         self.last_source = self._source_for(sel)
         self.selected.emit(image)
 
-
     def _choose_to_record(self, physical: QRect) -> None:
-        if min(physical.width(), physical.height()) < MIN_RECORD_SIDE:
+        scale = min(1.0, 1920 / physical.width(), 1080 / physical.height())  # recorded at most 1080p
+        if min(physical.width(), physical.height()) * scale < MIN_RECORD_SIDE:
             self._say(f"That's too small to record: choose at least {MIN_RECORD_SIDE} × {MIN_RECORD_SIDE} pixels")
             return
         self.last_rect = QRect(physical)

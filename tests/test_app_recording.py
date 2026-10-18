@@ -131,3 +131,27 @@ def test_a_finished_recording_opens_in_the_video_editor(fakes, monkeypatch):
     FakeFlow.made[-1].open_video(Path("C:/rec.mp4"))
 
     assert opened == [Path("C:/rec.mp4")] and any(isinstance(w, QWidget) for w in fakes._windows)
+
+
+def test_no_second_recording_while_one_is_under_way(fakes):
+    fakes._record_area(QRect(10, 20, 640, 360), QGuiApplication.primaryScreen())
+
+    fakes.capture()  # the snip hotkey during a recording
+    assert FakeSession.made[-1].on_area is None  # no Record switch in that snip
+    fakes._record_area(QRect(0, 0, 320, 240), QGuiApplication.primaryScreen())  # however it got there
+
+    assert len(FakeFlow.made) == 1 and "already" in fakes.messages[-1]
+
+
+def test_a_recording_that_fails_to_start_leaves_nothing_behind(fakes, monkeypatch):
+    def broken_start(self):
+        raise RuntimeError("no panel today")
+
+    monkeypatch.setattr(FakeFlow, "start", broken_start)
+    monkeypatch.setattr(FakeFlow, "_end", lambda self, note: (fakes.messages.append(note), self.ended.emit()),
+                        raising=False)
+
+    fakes._record_area(QRect(10, 20, 640, 360), QGuiApplication.primaryScreen())
+
+    assert fakes._recording is None and tray_texts(fakes)["Record video"].isVisible()
+    assert "couldn't start" in fakes.messages[-1]

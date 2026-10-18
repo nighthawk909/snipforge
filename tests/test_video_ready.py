@@ -99,9 +99,11 @@ class FakeCapture:
     def stop(self):
         self.running = False
 
-    def play(self, level):
+    def play(self, level):  # on a thread of its own, as WASAPI's packets arrive
         samples = array.array("f", [level, -level / 2] * 480)
-        threading.Thread(target=self.on_packet, args=(samples.tobytes(), 480, None, False)).run()
+        sender = threading.Thread(target=self.on_packet, args=(samples.tobytes(), 480, None, False))
+        sender.start()
+        sender.join()
 
 
 def fake_captures(refuse_microphone=None):
@@ -229,3 +231,57 @@ def test_a_blocked_microphone_is_explained_on_the_panel(qapp):
     assert not panel.problem.isHidden()
     assert panel.problem.text() == "Microphone: Windows' privacy settings block the microphone"
     panel.cancel()
+
+
+def test_changing_one_source_leaves_the_other_open():
+    preview = LevelPreview(fake_captures())
+    preview.set_source("microphone", True)
+    preview.set_source("system", True)
+    mic = FakeCapture.made[0]
+
+    preview.set_source("system", False)
+    preview.set_source("microphone", True)  # unchanged: not reopened
+
+    assert mic.running and len([c for c in FakeCapture.made if c.kind == "microphone"]) == 1
+
+
+def test_closing_the_panel_any_other_way_cancels(qapp):
+    panel, _preview = make_panel()
+    panel.show()
+
+    panel.close()  # Alt+F4, or anything else that closes it
+
+    assert panel.got == ["cancel"] and not any(c.running for c in FakeCapture.made)
+
+
+def test_enter_on_a_focused_button_presses_that_button_not_record(qapp):
+    panel, _preview = make_panel()
+    panel.show()
+    panel.cancel_button.setFocus()
+
+    QApplication.sendEvent(panel.cancel_button, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+
+    assert panel.got == ["cancel"]
+
+
+class Screen:
+    """A monitor at 150%, left of the main one: Qt's numbers for it."""
+
+    def __init__(self, x=-1920, y=0, width=1280, height=720, ratio=1.5):
+        self._g, self._ratio = QRect(x, y, width, height), ratio
+
+    def geometry(self):
+        return self._g
+
+    def devicePixelRatio(self):
+        return self._ratio
+
+
+def test_physical_and_logical_on_a_scaled_monitor_left_of_the_main_one():
+    screen = Screen()
+    physical = QRect(-1920 + 300, 150, 960, 540)  # physical pixels, 300 in from its left edge
+
+    logical = geometry.to_logical(physical, screen)
+
+    assert logical == QRect(-1920 + 200, 100, 640, 360)  # top-left stays put; inside, 1.5x smaller
+    assert geometry.physical_geometry(screen) == QRect(-1920, 0, 1920, 1080)
