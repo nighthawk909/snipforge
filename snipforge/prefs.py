@@ -12,7 +12,7 @@ from pathlib import Path
 from .settings import app_settings
 
 DEFAULT_EXPORT_DIR = Path.home() / "Pictures" / "SnipForge"
-FORMATS = ("png", "jpg")
+FORMATS = ("png", "jpg", "webp", "pdf")  # what Save writes (snipforge.editor.export)
 CAPTURE_MODES = ("area", "window", "screen", "fixed", "scroll")  # the capture toolbar's modes, in its order
 DELAYS = (0, 3, 5, 10)  # seconds the capture toolbar's Delay menu offers
 DEFAULT_FIXED_SIZE = (800, 600)  # Fixed size mode's frame, in screen pixels
