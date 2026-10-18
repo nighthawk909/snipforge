@@ -37,7 +37,7 @@ def test_saved_styles_keep_what_the_tool_shows_and_survive_a_reload(qapp):
     assert saved_styles.fields_of("arrow", loaded["arrow"][0]) == {
         "color": "#123456", "width": 9.0, "dash": True, "shadow": False}
     assert loaded["rect"][0].fill is True
-    saved_styles.delete("arrow", 0)
+    saved_styles.delete("arrow", MINE)
     assert "arrow" not in saved_styles.load() and saved_styles.saved_for("rect")
 
 
@@ -173,3 +173,112 @@ def test_tiles_draw_their_style(qapp):
     reds = [image.pixelColor(x, y) for x in range(image.width()) for y in range(image.height())]
     assert any(c.red() > 200 and c.green() < 80 for c in reds)
 
+
+
+# --- review: damaged settings, keyboard, names ---------------------------------------------
+@pytest.mark.parametrize("entry", [
+    {"width": "9"}, {"width": "abc"}, {"width": [1]}, {"width": float("nan")}, {"width": float("inf")},
+    {"width": -1e15}, {"stamp": ["x"]}, {"font_size": 100000}, {"color": 7}, {"color": "not a color"},
+    {"shadow": "yes"}, {"shape": "hexagon"},
+])
+def test_wrong_values_in_settings_never_reach_the_editor(qapp, entry):
+    for kind in ("arrow", "pixelate", "stamp", "callout"):
+        app_settings().setValue(saved_styles.SETTING, json.dumps({kind: [entry]}))
+        style = saved_styles.saved_for(kind)[0]
+        assert isinstance(style.width, float) and 0.5 <= style.width <= 200
+        assert isinstance(style.stamp, str) and 4 <= style.font_size <= 400 and isinstance(style.shadow, bool)
+        panel = PropertiesPanel()
+        panel.load(kind, DEFAULT_TOOL_STYLES[kind], has_selection=False)
+        panel.saved_tile(0).grab()  # paints
+        seen = []
+        panel.changed.connect(seen.append)
+        click(panel.saved_tile(0))
+        assert seen
+
+
+def test_deeply_nested_settings_read_as_none(qapp):
+    app_settings().setValue(saved_styles.SETTING, "[" * 200000)
+    assert saved_styles.load() == {}
+    app_settings().setValue("tool_styles", "[" * 200000)
+    from snipforge.editor.window import load_tool_styles
+    assert load_tool_styles(app_settings()) == {}
+    app_settings().remove("tool_styles")
+
+
+def test_styles_from_a_newer_version_are_kept_when_saving(qapp):
+    app_settings().setValue(saved_styles.SETTING, json.dumps({"laser": [{"beam": 3}]}))
+    saved_styles.save("arrow", MINE)
+    stored = json.loads(app_settings().value(saved_styles.SETTING))
+    assert stored["laser"] == [{"beam": 3}] and stored["arrow"]
+
+
+def test_the_same_color_in_capitals_is_the_same_look(qapp):
+    assert saved_styles.save("arrow", MINE)
+    assert not saved_styles.save("arrow", MINE.with_changes(color="#123456".upper()))
+
+
+def test_tiles_say_what_they_are(qapp):
+    saved_styles.save("arrow", Style(color="#ff3b30", width=9.0, dash=True))
+    saved_styles.save("arrow", Style(color="#0a84ff", width=3.0))
+    panel = PropertiesPanel()
+    panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], has_selection=False)
+    names = [panel.saved_tile(i).accessibleName() for i in range(2)]
+    assert names[0] != names[1] and "Red" in names[0] and "9 px" in names[0] and "dashed" in names[0]
+    assert "Delete" in panel.saved_tile(0).toolTip()
+
+
+def test_tiles_keep_focus_and_tab_in_place(qapp):
+    saved_styles.save("arrow", MINE)
+    saved_styles.save("arrow", Style(color="#0a84ff"))
+    panel = PropertiesPanel()
+    panel.show()
+    panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], has_selection=False)
+    first = panel.saved_tile(0)
+
+    def next_stop(widget):  # where Tab goes: the next widget in the chain that takes Tab focus
+        widget = widget.nextInFocusChain()
+        while not widget.focusPolicy() & Qt.TabFocus:
+            widget = widget.nextInFocusChain()
+        return widget
+    assert next_stop(panel.quick_tile(len(QUICK_STYLES) - 1)) is first
+    assert next_stop(first) is panel.saved_tile(1) and next_stop(panel.saved_tile(1)) is panel.save_button()
+    panel.load("arrow", MINE, has_selection=True)  # as after applying one: the same tiles stay
+    assert panel.saved_tile(0) is first
+    second = panel.saved_tile(1)
+    second.setFocus()
+    QTest.keyClick(second, Qt.Key_Delete)
+    assert panel.saved_count() == 1
+    assert QApplication.focusWidget() in (panel.saved_tile(0), None)  # None: no active window offscreen
+
+
+def test_backspace_does_not_delete(qapp):
+    saved_styles.save("arrow", MINE)
+    panel = PropertiesPanel()
+    panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], has_selection=False)
+    QTest.keyClick(panel.saved_tile(0), Qt.Key_Backspace)
+    assert panel.saved_count() == 1
+
+
+def test_quick_styles_hide_when_theres_nothing_to_do(qapp):
+    panel = PropertiesPanel()
+    panel.load("blur", DEFAULT_TOOL_STYLES["blur"], has_selection=False)
+    assert panel.section("quick").isHidden()
+    saved_styles.save("blur", Style(width=9.0))
+    panel.load("blur", DEFAULT_TOOL_STYLES["blur"], has_selection=False)
+    assert not panel.section("quick").isHidden()
+
+
+def test_samples_stay_visible_on_either_theme(qapp):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from snipforge.editor.style_sample import paint_sample
+    for background, color in (("#f6f6f8", "#ffffff"), ("#2b2b30", "#1c1c1e")):
+        for kind in ("arrow", "rect", "pen", "text"):
+            image = QImage(48, 40, QImage.Format_ARGB32)
+            image.fill(QColor(background))
+            p = QPainter(image)
+            paint_sample(p, QRectF(4, 6, 40, 28), kind, Style(color=color, width=6.0), QColor(background))
+            p.end()
+            changed = sum(1 for x in range(48) for y in range(40) if image.pixelColor(x, y) != QColor(background))
+            assert changed > 30, (kind, background)

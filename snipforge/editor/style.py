@@ -1,10 +1,36 @@
 """Immutable annotation style and per-tool defaults."""
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, fields, replace
 
+from PySide6.QtGui import QColor
+
 PALETTE = ("#ff3b30", "#ff9500", "#ffd60a", "#34c759", "#0a84ff", "#bf5af2", "#ffffff", "#1c1c1e")
+COLOR_NAMES = {"#ff3b30": "Red", "#ff9500": "Orange", "#ffd60a": "Yellow", "#34c759": "Green",
+               "#0a84ff": "Blue", "#bf5af2": "Purple", "#ffffff": "White", "#1c1c1e": "Black"}
 CALLOUT_SHAPES = ("rounded", "rect", "ellipse", "pill")
+WIDTH_RANGE = (0.5, 200.0)  # wider than the panel's slider: a resized snip scales widths
+FONT_RANGE = (4, 400)
+
+
+def _clean(name: str, value):
+    """`value` if it's a usable value for the field `name`, else None."""
+    if name == "color":
+        return value if isinstance(value, str) and QColor(value).isValid() else None
+    if name == "width":
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            return None
+        return min(WIDTH_RANGE[1], max(WIDTH_RANGE[0], float(value)))
+    if name == "font_size":
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            return None
+        return min(FONT_RANGE[1], max(FONT_RANGE[0], int(value)))
+    if name == "shape":
+        return value if value in CALLOUT_SHAPES else None
+    if name == "stamp":
+        return value if isinstance(value, str) else None  # unknown names draw the check stamp
+    return value if isinstance(value, bool) else None  # shadow, fill, dash, tail
 
 
 @dataclass(frozen=True)
@@ -24,8 +50,11 @@ class Style:
 
     @staticmethod
     def from_dict(data: dict) -> Style:
+        """Unknown keys, and values of the wrong type or out of range, are left at their defaults:
+        styles come from settings and saved documents, which may be damaged."""
         known = {f.name for f in fields(Style)}
-        return Style(**{k: v for k, v in data.items() if k in known})
+        cleaned = {k: _clean(k, v) for k, v in data.items() if k in known} if isinstance(data, dict) else {}
+        return Style(**{k: v for k, v in cleaned.items() if v is not None})
 
     def with_changes(self, **changes) -> Style:
         known = {f.name for f in fields(Style)}

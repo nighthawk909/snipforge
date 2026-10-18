@@ -40,33 +40,40 @@ def fields_of(kind: str, style: Style) -> dict:
     return {name: getattr(style, name) for name in STYLE_FIELDS.get(kind, ())}
 
 
+def same_look(kind: str, a: Style, b: Style) -> bool:
+    """Whether two styles look the same on `kind` (#AABBCC is #aabbcc)."""
+    def key(style: Style) -> dict:
+        found = fields_of(kind, style)
+        if "color" in found:
+            found["color"] = found["color"].lower()
+        return found
+    return key(a) == key(b)
+
+
 def can_save(kind: str) -> bool:
     return bool(STYLE_FIELDS.get(kind))
 
 
-def load() -> dict[str, list[Style]]:
-    """Saved quick styles by tool. Anything damaged or unknown in the setting is skipped."""
+def _raw() -> dict:
+    """The setting as stored; {} if it isn't a JSON object."""
     raw = app_settings().value(SETTING, "")
     try:
         data = json.loads(raw) if isinstance(raw, str) and raw else {}
-    except ValueError:
+    except (ValueError, RecursionError):
         log.warning("Ignoring unreadable saved quick styles")
         return {}
-    if not isinstance(data, dict):
-        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load() -> dict[str, list[Style]]:
+    """Saved quick styles by tool. Values of the wrong type read as the default (Style.from_dict);
+    entries that aren't style objects, and tools this version doesn't have, are skipped."""
     out: dict[str, list[Style]] = {}
-    for kind, entries in data.items():
-        if not can_save(kind) or not isinstance(entries, list):
-            continue
-        styles = []
-        for entry in entries[:MAX_SAVED]:
-            if isinstance(entry, dict):
-                try:
-                    styles.append(Style.from_dict(entry))
-                except (TypeError, ValueError):
-                    continue
-        if styles:
-            out[kind] = styles
+    for kind, entries in _raw().items():
+        if can_save(kind) and isinstance(entries, list):
+            styles = [Style.from_dict(e) for e in entries[:MAX_SAVED] if isinstance(e, dict)]
+            if styles:
+                out[kind] = styles
     return out
 
 
@@ -74,8 +81,12 @@ def saved_for(kind: str) -> list[Style]:
     return load().get(kind, [])
 
 
-def _store(saved: dict[str, list[Style]]) -> None:
-    data = {kind: [fields_of(kind, s) for s in styles] for kind, styles in saved.items() if styles}
+def _store(kind: str, styles: list[Style]) -> None:
+    """Rewrite one tool's list. Other tools' entries stay exactly as stored, including ones a newer
+    SnipForge saved that this version can't read."""
+    data = {k: v for k, v in _raw().items() if k != kind}
+    if styles:
+        data[kind] = [fields_of(kind, s) for s in styles]
     app_settings().setValue(SETTING, json.dumps(data))
     notifier().changed.emit()
 
@@ -85,17 +96,17 @@ def save(kind: str, style: Style) -> bool:
     there, or the tool has MAX_SAVED already."""
     if not can_save(kind):
         return False
-    saved = load()
-    styles = saved.get(kind, [])
-    wanted = fields_of(kind, style)
-    if any(fields_of(kind, s) == wanted for s in styles) or len(styles) >= MAX_SAVED:
+    styles = saved_for(kind)
+    if any(same_look(kind, s, style) for s in styles) or len(styles) >= MAX_SAVED:
         return False
-    _store({**saved, kind: [*styles, Style().with_changes(**wanted)]})
+    _store(kind, [*styles, Style().with_changes(**fields_of(kind, style))])
     return True
 
 
-def delete(kind: str, index: int) -> None:
-    saved = load()
-    styles = saved.get(kind, [])
-    if 0 <= index < len(styles):
-        _store({**saved, kind: styles[:index] + styles[index + 1:]})
+def delete(kind: str, style: Style) -> None:
+    """Remove the saved style that looks like `style` (by look, not position, so another editor's
+    change in between can't make it remove a different one)."""
+    styles = saved_for(kind)
+    kept = [s for s in styles if not same_look(kind, s, style)]
+    if len(kept) != len(styles):
+        _store(kind, kept)

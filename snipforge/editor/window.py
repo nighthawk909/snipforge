@@ -62,9 +62,9 @@ JPG_QUALITY = 92  # text in screenshots blurs at Qt's default of 75
 def load_tool_styles(settings: QSettings) -> dict[str, Style]:
     raw = settings.value("tool_styles", "")
     try:
-        data = json.loads(raw) if raw else {}
-        return {k: Style.from_dict(v) for k, v in data.items()}
-    except (TypeError, ValueError):
+        data = json.loads(raw) if isinstance(raw, str) and raw else {}
+        return {k: Style.from_dict(v) for k, v in data.items() if isinstance(v, dict)}
+    except (TypeError, ValueError, AttributeError, RecursionError):
         return {}
 
 

@@ -39,8 +39,7 @@ def test_sections_follow_the_tool(qapp):
 
     panel.load("blur", DEFAULT_TOOL_STYLES["blur"], has_selection=False)
     assert visible(panel, "size") and panel.size_label() == "Strength"
-    assert not visible(panel, "color") and not panel.chip_visible()
-    assert visible(panel, "quick") and panel.quick_tile(0).isHidden()  # only your saved styles for blur
+    assert not visible(panel, "color") and not visible(panel, "quick") and not panel.chip_visible()
 
     panel.load("crop", None, has_selection=False)
     assert visible(panel, "crop") and not visible(panel, "size")

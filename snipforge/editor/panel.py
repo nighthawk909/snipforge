@@ -25,10 +25,9 @@ from PySide6.QtWidgets import (
 from .. import theme
 from ..icons import icon
 from ..widgets import Segmented, ToggleSwitch
-from . import saved_styles
 from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
-from .style import CALLOUT_SHAPES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style
+from .style import CALLOUT_SHAPES, COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style
 
 PANEL_WIDTH = 288
 TITLES = {
@@ -59,8 +58,6 @@ IMAGE_ACTIONS = (
     ("flip_horizontal", "flip", "Flip horizontal"),
     ("flip_vertical", "flip_vertical", "Flip vertical"),
 )
-COLOR_NAMES = {"#ff3b30": "Red", "#ff9500": "Orange", "#ffd60a": "Yellow", "#34c759": "Green",
-               "#0a84ff": "Blue", "#bf5af2": "Purple", "#ffffff": "White", "#1c1c1e": "Black"}
 
 
 class Swatch(QPushButton):
@@ -361,7 +358,7 @@ class PropertiesPanel(QScrollArea):
         self._hint.setText("" if has_selection else HINTS.get(kind, ""))
         self._hint.setVisible(bool(self._hint.text()))
         show = {
-            "quick": saved_styles.can_save(kind) and bool(fields), "shape": "shape" in fields,
+            "quick": bool(fields) and self._quick.worth_showing(kind, has_selection), "shape": "shape" in fields,
             "stamp": "stamp" in fields,
             "color": "color" in fields, "size": "width" in fields, "text": "font_size" in fields,
             "effects": any(f in fields for f in SWITCHES), "crop": kind == "crop", "image": kind == "select",

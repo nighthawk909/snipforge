@@ -18,7 +18,7 @@ from .. import theme
 from . import saved_styles
 from .items import readable_on
 from .quick_styles import QUICK_STYLES, QuickStyle, changes_for
-from .style import Style
+from .style import COLOR_NAMES, STRENGTH_KINDS, Style
 from .style_sample import paint_sample
 
 COLUMNS = 4
@@ -86,6 +86,25 @@ class QuickStyleTile(_Tile):
         p.end()
 
 
+def describe(kind: str, style: Style) -> str:
+    """Like "Red, 9 px, dashed": what tells one saved style from another."""
+    found = saved_styles.fields_of(kind, style)
+    parts = []
+    if "color" in found:
+        parts.append(COLOR_NAMES.get(style.color.lower(), style.color.upper()))
+    if "stamp" in found:
+        parts.append(style.stamp.replace("_", " "))
+    if "shape" in found:
+        parts.append({"rounded": "rounded box", "rect": "box", "ellipse": "ellipse", "pill": "pill"}[style.shape])
+    if "width" in found:
+        parts.append(f"strength {round(style.width)}" if kind in STRENGTH_KINDS else f"{round(style.width)} px")
+    if "font_size" in found:
+        parts.append(f"{style.font_size} pt")
+    parts += [label for name, label in (("fill", "filled"), ("dash", "dashed"), ("shadow", "shadow"))
+              if found.get(name)]
+    return ", ".join(parts) or "Saved style"
+
+
 class SavedStyleTile(_Tile):
     """One of your saved looks, drawn as its tool would draw it. Right-click or Delete removes it."""
 
@@ -94,8 +113,9 @@ class SavedStyleTile(_Tile):
     def __init__(self, kind: str, style: Style) -> None:
         super().__init__()
         self.kind, self.style = kind, style
-        self.setToolTip("Your quick style. Right-click to delete it.")
-        self.setAccessibleName(f"Saved quick style {style.color}")
+        description = describe(kind, style)
+        self.setToolTip(f"{description}\nRight-click, or press Delete, to remove it")
+        self.setAccessibleName(f"Your quick style: {description}")
 
     def contextMenuEvent(self, e) -> None:  # noqa: N802 - Qt API
         menu = QMenu(self)
@@ -113,18 +133,20 @@ class SavedStyleTile(_Tile):
         return menu.exec(pos)
 
     def keyPressEvent(self, e) -> None:  # noqa: N802 - Qt API
-        if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+        if e.key() == Qt.Key_Delete:
             self.delete_requested.emit()
             return
         super().keyPressEvent(e)
 
     def paintEvent(self, _e) -> None:  # noqa: N802 - Qt API
         p = QPainter(self)
-        self._paint_frame(p)
-        sample = QRectF(0, 0, 40, 28)
-        sample.moveCenter(QRectF(self.rect()).center())
-        paint_sample(p, sample, self.kind, self.style)
-        p.end()
+        try:
+            self._paint_frame(p)
+            sample = QRectF(0, 0, 40, 28)
+            sample.moveCenter(QRectF(self.rect()).center())
+            paint_sample(p, sample, self.kind, self.style, QColor(theme.current().palette.surface2))
+        finally:
+            p.end()
 
 
 class QuickStyles(QWidget):
@@ -156,6 +178,7 @@ class QuickStyles(QWidget):
             self._mine.setColumnStretch(col, 1)
         column.addLayout(self._mine)
         self.saved_tiles: list[SavedStyleTile] = []
+        self._shown: tuple[str, list[Style]] | None = None
         self.save_button = QPushButton("Save this style")
         self.save_button.setAccessibleName("Save this style as a quick style")
         self.save_button.setFocusPolicy(Qt.TabFocus)
@@ -163,36 +186,57 @@ class QuickStyles(QWidget):
         column.addWidget(self.save_button)
         saved_styles.notifier().changed.connect(self._reload)
 
+    @staticmethod
+    def has_built_ins(kind: str) -> bool:
+        return any(changes_for(kind, q) for q in QUICK_STYLES)
+
+    def worth_showing(self, kind: str, has_selection: bool) -> bool:
+        """Built-ins to click, a selection to save, or saved styles to use."""
+        return self.has_built_ins(kind) or has_selection or bool(saved_styles.saved_for(kind))
+
     def load(self, kind: str, style: Style | None, has_selection: bool) -> None:
         self._kind, self._style, self._selected = kind, style, has_selection
-        built_ins = any(changes_for(kind, q) for q in QUICK_STYLES)
+        built_ins = self.has_built_ins(kind)
         for tile in self.tiles:
             tile.setVisible(built_ins)
         self._reload()
 
     def _reload(self) -> None:
+        styles = saved_styles.saved_for(self._kind)
+        if (self._kind, styles) != self._shown:  # unchanged tiles stay, and so does keyboard focus
+            self._rebuild(styles)
+        self._refresh_save(styles)
+
+    def _rebuild(self, styles: list[Style]) -> None:
+        focused = next((i for i, t in enumerate(self.saved_tiles) if t.hasFocus()), None)
         for tile in self.saved_tiles:
             self._mine.removeWidget(tile)
             tile.hide()
             tile.deleteLater()
-        styles = saved_styles.saved_for(self._kind)
-        self.saved_tiles = [SavedStyleTile(self._kind, s) for s in styles]
+        kind = self._kind
+        self._shown = (kind, styles)
+        self.saved_tiles = [SavedStyleTile(kind, s) for s in styles]
+        previous = self.tiles[-1]
         for i, tile in enumerate(self.saved_tiles):
-            tile.clicked.connect(lambda _=False, s=tile.style: self.apply.emit(saved_styles.fields_of(self._kind, s)))
-            tile.delete_requested.connect(lambda i=i: saved_styles.delete(self._kind, i))
+            tile.clicked.connect(lambda _=False, s=tile.style: self.apply.emit(saved_styles.fields_of(kind, s)))
+            tile.delete_requested.connect(lambda s=tile.style: saved_styles.delete(kind, s))
             self._mine.addWidget(tile, i // COLUMNS, i % COLUMNS)
+            QWidget.setTabOrder(previous, tile)  # Tab goes through them where they are: before Save
+            previous = tile
+        QWidget.setTabOrder(previous, self.save_button)
         self._mine_label.setVisible(bool(styles))
-        self._refresh_save(styles)
+        if focused is not None:  # you deleted one with the keyboard: stay on the next one
+            neighbour = self.saved_tiles[min(focused, len(self.saved_tiles) - 1)] if self.saved_tiles else None
+            (neighbour or self.save_button).setFocus(Qt.OtherFocusReason)
 
     def _refresh_save(self, styles: list[Style]) -> None:
         name = TOOL_NAMES.get(self._kind, self._kind)
         if not self._selected or self._style is None:
             enabled, tip = False, f"Select markup to save its look as a quick style for {name}"
-        elif any(saved_styles.fields_of(self._kind, s) == saved_styles.fields_of(self._kind, self._style)
-                 for s in styles):
+        elif any(saved_styles.same_look(self._kind, s, self._style) for s in styles):
             enabled, tip = False, "This look is one of your quick styles already"
         elif len(styles) >= saved_styles.MAX_SAVED:
-            enabled, tip = False, f"You have {saved_styles.MAX_SAVED} for {name}. Right-click one to delete it."
+            enabled, tip = False, f"You have {saved_styles.MAX_SAVED} for {name}. Delete one to save another."
         else:
             enabled, tip = True, f"Save the selected markup's look as a quick style for {name}"
         self.save_button.setEnabled(enabled)
