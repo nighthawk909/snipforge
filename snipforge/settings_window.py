@@ -31,6 +31,7 @@ from . import __version__, autostart, prefs, project, theme
 from .capture_toolbar import MODES
 from .editor import beautify
 from .icons import icon
+from .preset_settings import PresetList
 from .shortcut_edit import ShortcutEdit
 from .shortcuts import ACTIONS as SHORTCUT_TITLES
 from .theme.tokens import DARK, LIGHT
@@ -42,7 +43,8 @@ SECTIONS = {
     "general": ("General", "settings", "Startup and the clipboard.", "startup sign in clipboard copy library"),
     "capture": ("Capture", "monitor", "Which keys start a snip and what you see while choosing.",
                 "shortcut keyboard win shift print screen hotkey magnifier mode area window full screen "
-                "delay timer countdown pointer cursor mouse repeat last snip own custom combination library"),
+                "delay timer countdown pointer cursor mouse repeat last snip own custom combination library "
+                "preset presets saved copy folder beautify border torn edges"),
     "saving": ("Saving", "save", "Where Save puts files, and in which format.",
                "save folder format png jpg webp pdf beautify export"),
     "appearance": ("Appearance", "palette", "Light or dark, and the accent color used across SnipForge.",
@@ -248,6 +250,7 @@ class SettingsWindow(QMainWindow):
         self.start_mode.set_value(self._start_mode())
         self.delay.set_value(str(prefs.capture_delay()))
         self._show_shortcuts()
+        self.preset_list.refresh()
         self._retheme()
 
     def _retheme(self, _theme=None) -> None:
@@ -329,7 +332,21 @@ class SettingsWindow(QMainWindow):
             SettingRow("Include the mouse pointer", "Draw the pointer into snips", self.include_pointer),
             SettingRow("Show the magnifier", "Pixel-exact zoom next to the pointer while you choose an area",
                        self.magnifier),
-            note)
+            note,
+            self._preset_list())
+
+    def _preset_list(self) -> PresetList:
+        self.preset_list = PresetList(self._shortcuts)
+        self.preset_list.changed.connect(lambda: self._on_shortcuts_changed and self._on_shortcuts_changed())
+        return self.preset_list
+
+    def show_presets(self) -> None:
+        """Settings > Capture, scrolled to the capture presets (the toolbar's Manage presets)."""
+        self.show_section("capture")
+        self.preset_list.refresh()
+        self._scroll.widget().layout().activate()
+        self._scroll.ensureWidgetVisible(self.preset_list.add_button)
+        self._scroll.ensureWidgetVisible(self.preset_list, 0, 0)
 
     def _shortcut_rows(self) -> list[QWidget]:
         """Shortcuts of your own: a key combination for each action, kept only if Windows lets
@@ -371,8 +388,8 @@ class SettingsWindow(QMainWindow):
         """Saved shortcuts that aren't working (another app has the combination), and why."""
         if self._shortcuts is None:
             return {}
-        bound = self._shortcuts.bindings()
-        return {a: p for a, p in self._shortcuts.problems.items() if a not in bound}
+        bound = self._shortcuts.bindings()  # presets' problems are shown with each preset
+        return {a: p for a, p in self._shortcuts.problems.items() if a not in bound and a in SHORTCUT_TITLES}
 
     def _show_shortcut_problems(self, problems: dict[str, str]) -> None:
         text = " ".join(f"{SHORTCUT_TITLES[action]}: {problem}" for action, problem in problems.items())
@@ -390,9 +407,11 @@ class SettingsWindow(QMainWindow):
         problems = self._shortcuts.resume()
         if problems:
             for action in problems:
-                self.shortcut_edits[action].set_text("")
-                self.shortcut_edits[action].set_stale(True)
+                if action in self.shortcut_edits:
+                    self.shortcut_edits[action].set_text("")
+                    self.shortcut_edits[action].set_stale(True)
             self._show_shortcut_problems(self._open_shortcut_problems())
+            self.preset_list.refresh()
             if self._on_shortcuts_changed is not None:
                 self._on_shortcuts_changed()  # e.g. the tray tooltip named the one that's gone
 

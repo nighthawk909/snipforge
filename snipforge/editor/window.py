@@ -79,7 +79,9 @@ def load_tool_styles(settings: QSettings) -> dict[str, Style]:
 class EditorWindow(QMainWindow):
     def __init__(self, image: QImage, library: Library, entry: Entry | None, document: dict | None = None,
                  on_new_snip=None, on_open_entry=None, on_pin=None, autosave: bool = True,
-                 on_open_library=None) -> None:
+                 on_open_library=None, beautify_on: bool | None = None) -> None:
+        """`beautify_on`: start with Beautify on or off (a capture preset's choice) instead of
+        following the switch in Settings; the switch still changes it."""
         super().__init__()
         self._library, self._entry = library, entry
         self._autosave_enabled = autosave and entry is not None
@@ -88,7 +90,7 @@ class EditorWindow(QMainWindow):
         self._on_open_library = on_open_library
         self._settings = app_settings()
         self._export_path: Path | None = None
-        self._beautify = beautify.enabled()
+        self._beautify = beautify.enabled() if beautify_on is None else beautify_on
 
         self.canvas = Canvas(image, load_tool_styles(self._settings))
         unsupported = False
