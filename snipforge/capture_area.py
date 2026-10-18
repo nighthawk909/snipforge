@@ -10,20 +10,15 @@ from PySide6.QtCore import QPoint, QRect
 from PySide6.QtGui import QGuiApplication
 
 from . import prefs
+from .privacy import is_private_window
 
 SOURCE_OVERLAP = 0.9  # share of a snip that must lie inside one window to credit that window
-PRIVATE_MARKERS = ("inprivate", "incognito", "private browsing")
 
 
 def span(a: QPoint, b: QPoint) -> QRect:
     """Rectangle between two drag points. QRect(a, b) includes both end pixels, which made a
     100-pixel drag capture 101 pixels."""
     return QRect(min(a.x(), b.x()), min(a.y(), b.y()), abs(b.x() - a.x()), abs(b.y() - a.y()))
-
-
-def _private(title: str) -> bool:
-    lowered = title.lower()
-    return any(marker in lowered for marker in PRIVATE_MARKERS)
 
 
 def source_for(sources: list, sel: QRect):
@@ -37,7 +32,7 @@ def source_for(sources: list, sel: QRect):
     for local, info in sources:
         overlap = local.intersected(sel)
         if overlap.width() * overlap.height() >= SOURCE_OVERLAP * area:
-            return info if not _private(info.title) else replace(info, title="")
+            return info if not is_private_window(info.title, info.app) else replace(info, title="")
         if local.contains(sel.center()):
             return None  # the window on top doesn't hold the snip: don't guess
     return None

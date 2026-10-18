@@ -32,6 +32,8 @@ from pathlib import Path
 from PySide6.QtCore import QFile, Qt
 from PySide6.QtGui import QImage
 
+from .privacy import is_private_window
+
 log = logging.getLogger(__name__)
 
 DEFAULT_ROOT = Path.home() / "Pictures" / "SnipForge" / "Library"
@@ -278,7 +280,14 @@ class Library:
             except OSError:
                 pass
             return EntryMeta()
-        return EntryMeta(**_normalized(data)) if isinstance(data, dict) else EntryMeta()
+        if not isinstance(data, dict):
+            return EntryMeta()
+        meta = EntryMeta(**_normalized(data))
+        if meta.title and is_private_window(meta.title, meta.app):
+            # Saved by an older version that didn't know this browser or language: never shown or
+            # searched, and gone from the file the next time the snip's details are saved.
+            meta = replace(meta, title="")
+        return meta
 
     def update_meta(self, entry: Entry, **changes) -> EntryMeta:
         known = {f.name for f in fields(EntryMeta)}
