@@ -40,9 +40,10 @@ def watcher(qapp, mac, monkeypatch):
 
 
 def test_a_dock_click_while_snipforge_is_in_front_brings_up_the_library(watcher):
-    watcher.state_changed(Qt.ApplicationActive)  # activated (an editor is up, say)
     watcher.shown["windows"] = True
-    watcher.got.clear()
+    watcher.state_changed(Qt.ApplicationActive)  # activated by a click on an editor, say
+    assert watcher.got == []
+    watcher.clock.now += 5
     watcher.state_changed(Qt.ApplicationActive)  # Qt passes the Dock's reopen on as active again
     assert watcher.got == [True]
 
@@ -50,6 +51,17 @@ def test_a_dock_click_while_snipforge_is_in_front_brings_up_the_library(watcher)
 def test_opened_again_with_nothing_on_screen_brings_up_the_library(watcher):
     watcher.state_changed(Qt.ApplicationActive)
     assert watcher.got == [True]
+
+
+def test_one_dock_click_brings_it_up_once(watcher):
+    """With nothing on screen, a Dock click arrives as the activation and then as Qt's reopen."""
+    watcher.state_changed(Qt.ApplicationActive)
+    watcher.clock.now += 0.05
+    watcher.state_changed(Qt.ApplicationActive)
+    assert watcher.got == [True]
+    watcher.clock.now += reopen.SAME_REOPEN_S + 1  # a second click, later on
+    watcher.state_changed(Qt.ApplicationActive)
+    assert watcher.got == [True, True]
 
 
 def test_clicking_one_of_its_windows_leaves_it_be(watcher):
@@ -74,20 +86,20 @@ def test_starting_up_is_the_command_line_s_business(qapp, mac, monkeypatch):
         w.stop()
 
 
-def test_watches_only_a_mac_s_window_server(qapp, monkeypatch, on_a_mac):
+def test_watches_only_a_mac_s_window_server(qapp, monkeypatch):
     """Windows hands over through a second launch instead, and Qt's offscreen platform (the tests)
     has no Dock: neither watches the app's activation."""
     signal = "2applicationStateChanged(Qt::ApplicationState)"
     before = qapp.receivers(signal)
-    monkeypatch.setattr(reopen, "_cocoa", lambda: True)
-    monkeypatch.setattr(reopen, "sys", SimpleNamespace(platform="win32"))
-    assert reopen.ReopenWatcher(qapp).active is False
-    on_a_mac(reopen)
-    monkeypatch.setattr(reopen, "_cocoa", lambda: False)
-    assert reopen.ReopenWatcher(qapp).active is False
+    with monkeypatch.context() as windows:
+        windows.setattr(reopen, "_cocoa", lambda: True)
+        windows.setattr(reopen, "sys", SimpleNamespace(platform="win32"))
+        assert reopen.ReopenWatcher(qapp).active is False
+    with monkeypatch.context() as offscreen_mac:
+        offscreen_mac.setattr(reopen, "sys", SimpleNamespace(platform="darwin"))
+        assert qapp.platformName() != "cocoa"  # what the test suite runs on
+        assert reopen.ReopenWatcher(qapp).active is False
     assert qapp.receivers(signal) == before
-    monkeypatch.undo()
-    assert reopen._cocoa() is (qapp.platformName() == "cocoa")
 
 
 def test_only_real_windows_count(qapp):

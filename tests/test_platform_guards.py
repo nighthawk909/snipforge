@@ -179,3 +179,13 @@ def test_windows_keeps_its_key_switches_and_words(qapp, tmp_path, monkeypatch):
     assert settings_window.theme_choices()[0] == ("system", "Match Windows")
     assert "for Windows" in app.about_text() and "in the install folder" in app.about_text()
     assert home.snip_hint() == "Press Win+Shift+S or Print Screen to snip from anywhere."
+
+
+def test_library_open_folder_says_so_when_finder_cant(mac, qapp, tmp_path, monkeypatch, no_dialogs):
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: False)
+    window = home.HomeWindow(Library(tmp_path / "lib"), lambda: None, lambda _entry_id: None)
+    try:
+        window._reveal(tmp_path / "lib")
+    finally:
+        window.close()
+    assert [kind for kind, _ in no_dialogs] == ["warning"] and "Finder" in no_dialogs[0][1][2]

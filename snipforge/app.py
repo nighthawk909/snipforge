@@ -91,6 +91,7 @@ class SnipForgeApp:
         app.aboutToQuit.connect(self._stop_recording_on_quit)
         self._reopen = ReopenWatcher(app)  # a Mac: opened again from Finder or the Dock
         self._reopen.reopened.connect(self.show_home)
+        QTimer.singleShot(0, screen_access.warm_up)  # a Mac's permission check, ready for the first snip
 
     def _forget_private_titles(self) -> None:
         """Once per version of the private-window check, in the background: clear private

@@ -44,7 +44,7 @@ SECTIONS = {
     "saving": ("Saving", "save", "Where Save puts files, and in which format.",
                "save folder format png jpg webp pdf beautify export"),
     "appearance": ("Appearance", "palette", "Light or dark, and the accent color used across SnipForge.",
-                   "theme dark light accent color match windows macos system"),
+                   f"theme dark light accent color match {wording.os_name().lower()}"),
     "updates": ("Updates", "refresh", "Choose how SnipForge stays up to date.",
                 "update version channel preview stable rollback install automatic"),
     "about": ("About", "info", "Version, license and links.", "about version license privacy"),

@@ -18,6 +18,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 STARTUP_GRACE_S = 2.0  # SnipForge's own start activates it: what to show then is its command's call
+SAME_REOPEN_S = 0.5  # activations this close together are one reopen
 
 
 def _cocoa() -> bool:
@@ -46,6 +47,7 @@ class ReopenWatcher(QObject):
         self._app = app
         self._clock = clock
         self._started = clock()
+        self._last = float("-inf")  # when it last emitted
         self._state = app.applicationState()
         self.active = sys.platform == "darwin" and _cocoa()
         if self.active:
@@ -58,7 +60,11 @@ class ReopenWatcher(QObject):
 
     def state_changed(self, state) -> None:
         was, self._state = self._state, state
-        if state != Qt.ApplicationActive or self._clock() - self._started < STARTUP_GRACE_S:
+        now = self._clock()
+        if state != Qt.ApplicationActive or now - self._started < STARTUP_GRACE_S:
             return
+        if now - self._last < SAME_REOPEN_S:
+            return  # one Dock click can arrive twice: as the activation, then as Qt's reopen
         if was == Qt.ApplicationActive or not _windows_shown(self._app):
+            self._last = now
             self.reopened.emit()

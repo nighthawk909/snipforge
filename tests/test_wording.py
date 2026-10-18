@@ -114,3 +114,26 @@ def test_the_theme_cache_is_in_the_cache_folder():
     from snipforge.theme import manager
 
     assert manager.ASSET_DIR == bundle.cache_dir() / "theme"
+
+
+def test_redo_and_trash_shortcuts(on_windows, on_a_mac):
+    on_windows(wording)
+    assert (wording.redo_keys(), wording.trash_shortcut()) == ("Ctrl+Y", None)
+    assert "Windows Recycle Bin" in wording.trash_tip()
+    on_a_mac(wording)
+    assert (wording.redo_keys(), wording.trash_shortcut()) == ("⇧⌘Z", "Ctrl+Backspace")
+    assert "Trash" in wording.trash_tip() and "Windows" not in wording.trash_tip()
+
+
+@pytest.mark.mac
+def test_the_editor_reads_the_mac_way_on_a_mac(qapp):
+    """Its hints and tooltips are written when it loads, so only a real Mac shows them (the CI job)."""
+    from PySide6.QtWidgets import QAbstractButton
+
+    from snipforge.editor import chrome, panel
+
+    assert "⌘D" in panel.HINTS["select"] and "⌘-click" in panel.HINTS["select"]
+    assert [tip for _action, _icon, tip in panel.IMAGE_ACTIONS[:2]] == ["Rotate left (⇧⌘R)", "Rotate right (⌘R)"]
+    bar = chrome.CommandBar()
+    tips = " ".join(button.toolTip() for button in bar.findChildren(QAbstractButton))
+    assert "⌘Z" in tips and "⇧⌘Z" in tips and "⌘C" in tips and "Ctrl" not in tips

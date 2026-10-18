@@ -48,12 +48,6 @@ def snip_hint() -> str:
     return f"To snip from anywhere, click SnipForge's {wording.tray_icon()}, then New snip."
 
 
-def trash_tip() -> str:
-    if wording.on_mac():
-        return "Snips you delete go to the Trash, so you can put them back"
-    return "Snips you delete go to the Windows Recycle Bin, so you can restore them"
-
-
 def _stamp(path, ns: bool):
     try:
         info = path.stat()
@@ -124,7 +118,7 @@ class HomeWindow(QMainWindow):
         col.addWidget(self._folder)
         self._bin = NavItem(wording.trash(), "trash", on_band=True)
         self._bin.setCheckable(False)
-        self._bin.setToolTip(trash_tip())
+        self._bin.setToolTip(wording.trash_tip())
         self._bin.clicked.connect(self._open_recycle_bin)
         col.addWidget(self._bin)
         self._settings = NavItem("Settings", "settings", on_band=True)
@@ -210,8 +204,8 @@ class HomeWindow(QMainWindow):
         # Only while the grid has focus, so typing in the search box never stars or tags anything.
         for keys, slot in (("F", self._favorite_current), ("T", self._tags_current)):
             QShortcut(QKeySequence(keys), self.grid, slot, Qt.WidgetShortcut)
-        if wording.on_mac():  # ⌘⌫ moves to the Trash, as in Finder (a Mac's Delete key is Backspace)
-            QShortcut(QKeySequence("Ctrl+Backspace"), self.grid, lambda: self._trash(self.grid.selected_ids()),
+        if trash_keys := wording.trash_shortcut():  # ⌘⌫ on a Mac, as in Finder
+            QShortcut(QKeySequence(trash_keys), self.grid, lambda: self._trash(self.grid.selected_ids()),
                       Qt.WidgetShortcut)
 
     def _retheme(self, _theme=None) -> None:
@@ -466,8 +460,9 @@ class HomeWindow(QMainWindow):
                            lambda: self.toggle_favorite(entry_id))
             menu.addAction(icon("tag"), "Tags…\tT", lambda: self.edit_tags(entry_id))
         menu.addSeparator()
-        trash_keys = f"\t{wording.keys('Ctrl+Backspace')}" if wording.on_mac() else ""
-        menu.addAction(icon("trash"), f"Move to {wording.trash()}{trash_keys}", lambda: self._trash(ids))
+        trash_keys = wording.trash_shortcut()
+        hint = f"\t{wording.keys(trash_keys)}" if trash_keys else ""
+        menu.addAction(icon("trash"), f"Move to {wording.trash()}{hint}", lambda: self._trash(ids))
         menu.exec(self.grid.viewport().mapToGlobal(pos))
 
     def _open_ids(self, ids: list[str | None]) -> None:
@@ -532,12 +527,17 @@ class HomeWindow(QMainWindow):
         except OSError as exc:
             log.info("Couldn't open the %s: %s", wording.trash(), exc)
 
-    @staticmethod
-    def _reveal(path) -> None:
+    def _reveal(self, path) -> None:
         """Our own folder, in File Explorer or Finder."""
-        path.mkdir(parents=True, exist_ok=True)
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
-            log.info("Couldn't open %s", path)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        except OSError as exc:
+            log.info("Couldn't open %s: %s", path, exc)
+            opened = False
+        if not opened:
+            log.info("Couldn't open %s in %s", path, wording.file_manager())
+            QMessageBox.warning(self, "SnipForge", f"Couldn't open {path} in {wording.file_manager()}.")
 
     # compatibility with callers that list selected snips
     def _selected_ids(self) -> list[str]:

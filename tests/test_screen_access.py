@@ -26,7 +26,25 @@ def macos(monkeypatch, on_a_mac):
     opened = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()) or True)
     fake.opened = opened
-    return fake
+    screen_access._macos.cache_clear()  # it's loaded once: load the fake
+    yield fake
+    screen_access._macos.cache_clear()
+
+
+def test_a_check_that_wont_load_is_said_once_and_snips_go_ahead(on_a_mac, monkeypatch, caplog):
+    on_a_mac(screen_access)
+    import snipforge
+    monkeypatch.setitem(sys.modules, "snipforge._screen_access_mac", None)  # importing it fails
+    monkeypatch.delattr(snipforge, "_screen_access_mac", raising=False)
+    screen_access._macos.cache_clear()
+    monkeypatch.setattr(screen_access, "_ask", lambda parent=None: pytest.fail("asked when macOS couldn't say"))
+    try:
+        screen_access.warm_up()
+        assert screen_access.ready_to_snip() is True and screen_access.ready_to_snip() is True
+        assert [r.message for r in caplog.records].count(
+            "Couldn't load macOS's Screen Recording check (PyObjC's Quartz)") == 1
+    finally:
+        screen_access._macos.cache_clear()
 
 
 def test_windows_never_asks(monkeypatch):

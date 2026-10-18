@@ -35,6 +35,13 @@ def trash() -> str:
     return "Trash" if on_mac() else "Recycle Bin"
 
 
+def trash_tip() -> str:
+    """What the Library's Recycle Bin (Trash) button says about deleted snips."""
+    if on_mac():
+        return "Snips you delete go to the Trash, so you can put them back"
+    return "Snips you delete go to the Windows Recycle Bin, so you can restore them"
+
+
 def tray_icon() -> str:
     """SnipForge's icon by the clock (Windows) or in the menu bar (Mac)."""
     return "menu bar icon" if on_mac() else "tray icon"
@@ -42,6 +49,17 @@ def tray_icon() -> str:
 
 def file_manager() -> str:
     return "Finder" if on_mac() else "File Explorer"
+
+
+def redo_keys() -> str:
+    """The redo shortcut people expect: Ctrl+Y on Windows, ⇧⌘Z on a Mac (the editor takes both)."""
+    return keys("Ctrl+Shift+Z") if on_mac() else "Ctrl+Y"
+
+
+def trash_shortcut() -> str | None:
+    """A Mac's Move to Trash, as in Finder: ⌘⌫ (Qt's Ctrl+Backspace), since its Delete key is
+    Backspace. None on Windows, where the Delete key already does it."""
+    return "Ctrl+Backspace" if on_mac() else None
 
 
 def keys(text: str) -> str:

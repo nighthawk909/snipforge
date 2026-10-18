@@ -8,6 +8,7 @@ never asks the person anything; only the Open System Settings button does. The m
 """
 from __future__ import annotations
 
+import functools
 import logging
 import sys
 
@@ -34,16 +35,33 @@ def asks() -> bool:
     return sys.platform == "darwin"
 
 
-def granted() -> bool:
-    """Whether SnipForge can capture other apps' windows now. True where no permission is needed,
-    and when macOS can't be asked (a snip is better than a stuck button)."""
-    if not asks():
-        return True
+@functools.cache
+def _macos():
+    """The macOS half, loaded once (PyObjC's Quartz takes a moment the first time); None if it
+    can't be, which is logged once."""
     try:
         from . import _screen_access_mac
 
-        return _screen_access_mac.preflight()
-    except Exception:  # an old PyObjC, or a macOS without the call: let the snip go ahead
+        return _screen_access_mac
+    except Exception:  # a packaging mistake or an old PyObjC: snips go ahead without the check
+        log.exception("Couldn't load macOS's Screen Recording check (PyObjC's Quartz)")
+        return None
+
+
+def warm_up() -> None:
+    """Loads the check ahead of the first snip (call once SnipForge is up), so that snip isn't slower."""
+    if asks():
+        _macos()
+
+
+def granted() -> bool:
+    """Whether SnipForge can capture other apps' windows now. True where no permission is needed,
+    and when macOS can't be asked (a snip is better than a stuck button)."""
+    if not asks() or (macos := _macos()) is None:
+        return True
+    try:
+        return macos.preflight()
+    except Exception:  # a macOS without the call: let the snip go ahead
         log.exception("Couldn't check the Screen Recording permission")
         return True
 
@@ -51,12 +69,11 @@ def granted() -> bool:
 def open_settings() -> None:
     """Adds SnipForge to the Screen Recording list (macOS shows its own prompt the first time) and
     opens that page of System Settings, so the switch is right there."""
-    try:
-        from . import _screen_access_mac
-
-        _screen_access_mac.request()
-    except Exception:
-        log.exception("Couldn't ask macOS for the Screen Recording permission")
+    if (macos := _macos()) is not None:
+        try:
+            macos.request()
+        except Exception:
+            log.exception("Couldn't ask macOS for the Screen Recording permission")
     if not QDesktopServices.openUrl(QUrl(SETTINGS_URL)):
         log.warning("Couldn't open System Settings at %s", SETTINGS_URL)
 

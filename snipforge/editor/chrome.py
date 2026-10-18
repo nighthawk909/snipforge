@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from .. import theme
 from ..icons import icon
 from ..widgets import ToggleSwitch
-from ..wording import keys, on_mac
+from ..wording import keys, redo_keys
 
 ZOOM_STEP = 1.25
 RECENT_COUNT = 10
@@ -67,7 +67,7 @@ class CommandBar(QWidget):
         row.addWidget(_divider())
         row.addSpacing(4)
         self.undo_button = self._tool("undo", f"Undo ({keys('Ctrl+Z')})", self.undo)
-        self.redo_button = self._tool("redo", f"Redo ({keys('Ctrl+Shift+Z') if on_mac() else 'Ctrl+Y'})", self.redo)
+        self.redo_button = self._tool("redo", f"Redo ({redo_keys()})", self.redo)
         row.addWidget(self.undo_button)
         row.addWidget(self.redo_button)
         row.addStretch(1)
