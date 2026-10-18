@@ -51,11 +51,15 @@ def test_space_is_read_again_and_again_on_a_thread_of_its_own(tmp_path):
         return 123
 
     watch = disk_space.SpaceWatch(tmp_path, read, seconds=0.05)
+    started = time.perf_counter()
     watch.start()
-    time.sleep(0.3)
+    deadline = started + 5.0
+    while watch.reads < 3 and time.perf_counter() < deadline:  # a busy machine's thread comes late
+        time.sleep(0.01)
     watch.stop()
+    took = time.perf_counter() - started
 
-    assert watch.latest == 123 and 3 <= watch.reads <= 10
+    assert watch.latest == 123 and 3 <= watch.reads <= took / 0.05 + 2  # again and again, not flat out
     assert set(threads) == {"disk-space"}
     assert not any(t.name == "disk-space" and t.is_alive() for t in threading.enumerate())
 
@@ -72,7 +76,7 @@ def test_a_drive_that_cant_be_read_is_unknown_not_full(tmp_path):
     watch = disk_space.SpaceWatch(tmp_path, read, seconds=0.05)
     watch.start()
     seen = set()
-    deadline = time.perf_counter() + 1
+    deadline = time.perf_counter() + 5
     while time.perf_counter() < deadline and 700 not in seen:
         seen.add(watch.latest)
         time.sleep(0.005)

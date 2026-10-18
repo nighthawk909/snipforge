@@ -55,7 +55,10 @@ combination another app already registered is refused. None are set by default.
 **Screen recording.** The screen is recorded only after the user chooses Record video (the tray,
 the Record switch on the capture toolbar, or a shortcut they set) and then an area, and only that
 area. Before recording starts, the panel beside the area opens the microphone and the computer's
-sound only to show their levels; they're let go when Record or Cancel is clicked. While recording,
+sound only to show their levels; they're let go when Record or Cancel is clicked. Unless the user
+picked a particular microphone, the recording uses Windows' default devices and follows them: when
+Windows makes another device the default (a headset plugged in), the recording moves to it within
+about a second. While recording,
 the recorder process has them open (Windows shows its microphone-in-use icon), and SnipForge's
 control bar (pause, stop, discard) stays on screen, kept out of the recording itself. Nothing is sent anywhere:
 the recording is saved in the Library folder (see Data on the PC). While it records (not while it's

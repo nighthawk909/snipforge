@@ -131,3 +131,23 @@ def test_a_device_that_isnt_there_is_explained(qapp):
     with pytest.raises(wasapi.AudioUnavailable, match="unplugged"):
         capture.start()
     assert time.perf_counter() - started < 2.0
+
+
+def test_the_default_device_followed_while_recording_is_windows_default(qapp):
+    """Recording Windows' default device, the capture checks its id now and then to follow it to a
+    new one: it must be the id Windows lists as the default."""
+    def default_ids():
+        enumerator = wasapi._Enumerator()
+        try:
+            return {kind: wasapi._default_id(enumerator, kind) for kind in (wasapi.SYSTEM, wasapi.MICROPHONE)}
+        finally:
+            enumerator.close()
+
+    found = wasapi._in_com(default_ids)
+    for kind, default in found.items():
+        listed = {device.id: device for device in wasapi.devices(kind)}
+        if not listed:
+            continue  # none of this kind on this PC
+        assert default in listed and listed[default].is_default, (kind, default, listed)
+    if not any(found.values()):
+        pytest.skip("no sound devices on this PC")

@@ -9,6 +9,7 @@ from ctypes import wintypes
 import pytest
 from PySide6.QtGui import QGuiApplication
 
+from snipforge.video import _power_win32 as win
 from snipforge.video import power
 
 pytestmark = pytest.mark.desktop
@@ -45,10 +46,10 @@ def test_sleep_and_session_end_are_signalled_while_windows_waits(qapp):
     try:
         assert watch.window_id in top_level_windows()  # not message-only: Windows' broadcasts reach it
 
-        send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_APMSUSPEND)
+        send(watch.window_id, win.WM_POWERBROADCAST, win.PBT_APMSUSPEND)
         assert heard == ["sleep"]  # handled before SendMessage returned
-        assert send(watch.window_id, power.WM_QUERYENDSESSION, 0) == 1  # yes, the session may end
-        send(watch.window_id, power.WM_ENDSESSION, 0)
+        assert send(watch.window_id, win.WM_QUERYENDSESSION, 0) == 1  # yes, the session may end
+        send(watch.window_id, win.WM_ENDSESSION, 0)
 
         assert heard == ["sleep", "ending?", "not ending"]
         watch.block_shutdown("Saving your screen recording")
@@ -64,19 +65,19 @@ def test_the_screen_and_the_lock_are_signalled_and_windows_agreed_to_tell(qapp):
     for name in ("display_off", "display_on", "locked", "unlocked"):
         getattr(watch, name).connect(lambda name=name: heard.append(name))
     try:
-        assert watch._display_note and watch._session_note  # Windows will send these for real
-        screen = power.GUID.from_buffer_copy(power.CONSOLE_DISPLAY_STATE)
-        off = power.POWERBROADCAST_SETTING(screen, 4, 0)
-        on = power.POWERBROADCAST_SETTING(screen, 4, 1)
+        assert watch._os.display_note and watch._os.session_note  # Windows will send these for real
+        screen = win.GUID.from_buffer_copy(win.CONSOLE_DISPLAY_STATE)
+        off = win.POWERBROADCAST_SETTING(screen, 4, 0)
+        on = win.POWERBROADCAST_SETTING(screen, 4, 1)
 
-        send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_POWERSETTINGCHANGE, ctypes.addressof(off))
-        send(watch.window_id, power.WM_WTSSESSION_CHANGE, power.WTS_SESSION_LOCK)
-        send(watch.window_id, power.WM_WTSSESSION_CHANGE, power.WTS_SESSION_UNLOCK)
-        send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_POWERSETTINGCHANGE, ctypes.addressof(on))
+        send(watch.window_id, win.WM_POWERBROADCAST, win.PBT_POWERSETTINGCHANGE, ctypes.addressof(off))
+        send(watch.window_id, win.WM_WTSSESSION_CHANGE, win.WTS_SESSION_LOCK)
+        send(watch.window_id, win.WM_WTSSESSION_CHANGE, win.WTS_SESSION_UNLOCK)
+        send(watch.window_id, win.WM_POWERBROADCAST, win.PBT_POWERSETTINGCHANGE, ctypes.addressof(on))
 
-        send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_POWERSETTINGCHANGE, 1)  # bogus: no crash
+        send(watch.window_id, win.WM_POWERBROADCAST, win.PBT_POWERSETTINGCHANGE, 1)  # bogus: no crash
 
         assert heard[-4:] == ["display_off", "locked", "unlocked", "display_on"]
     finally:
         watch.close()
-    assert watch._display_note is None and watch._session_note is False
+    assert watch._os is None and watch.window_id == 0

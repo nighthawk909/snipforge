@@ -38,9 +38,26 @@ def test_the_structures_windows_reads_have_its_sizes():
 # --- a fake IAudioCaptureClient --------------------------------------------------------------------
 
 class FakeCom:
-    """A COM object made in Python: a table of callbacks at the slots given, 0 (S_OK) elsewhere."""
+    """A COM object made in Python: a table of callbacks at the slots given, 0 (S_OK) elsewhere. It
+    counts its references (AddRef, Release; hand_out() is Windows handing one out) and Stop calls
+    (IAudioClient's slot 11), so leaks and double releases show."""
 
-    def __init__(self, methods: dict, slots: int = 8) -> None:
+    def __init__(self, methods: dict, slots: int = 16) -> None:
+        self.refs = self.stops = 0
+
+        def add_ref(_this):
+            self.refs += 1
+            return self.refs
+
+        def release(_this):
+            self.refs -= 1
+            return self.refs
+
+        def stop(_this):
+            self.stops += 1
+            return 0
+
+        methods = {1: ((), add_ref), 2: ((), release), 11: ((), stop), **methods}
         self.callbacks = []
         self.table = (c_void_p * slots)()
         for i in range(slots):
@@ -50,6 +67,10 @@ class FakeCom:
             self.table[i] = ctypes.cast(callback, c_void_p).value
         self.vtable_pointer = c_void_p(ctypes.addressof(self.table))
         self.ptr = c_void_p(ctypes.addressof(self.vtable_pointer))
+
+    def hand_out(self) -> c_void_p:
+        self.refs += 1
+        return self.ptr
 
 
 class FakeCaptureClient(FakeCom):
@@ -154,7 +175,7 @@ def test_any_failure_while_opening_is_reported_at_once(monkeypatch):
 
     with pytest.raises(wasapi.AudioUnavailable, match="computer's sound couldn't be opened"):
         capture.start()
-    assert time.perf_counter() - started < 1.0  # not the 5 s start timeout
+    assert time.perf_counter() - started < wasapi.START_TIMEOUT / 2  # said at once, not timed out
 
 
 @windows_only
@@ -172,3 +193,231 @@ def test_stopping_hands_on_what_was_still_waiting(monkeypatch):
     capture._pump(fake.ptr)
 
     assert len(got) == 1
+
+
+# --- following Windows' default device ------------------------------------------------------------
+
+class _Devices:
+    """Windows' sound devices as the capture sees them: fakes by name (the device, its audio client
+    and its capture client, each counting references), one of them the default (or none), each with
+    the packets its capture client hands out. Opening one in `refuse` fails, as a device still
+    settling does."""
+
+    def __init__(self, packets: dict) -> None:
+        self.coms = {name: FakeCom({}) for name in packets}
+        self.clients = {name: FakeCom({}) for name in packets}
+        self.captures = {name: FakeCaptureClient(queued) for name, queued in packets.items()}
+        self.default_name: str | None = next(iter(packets))
+        self.refuse: set[str] = set()
+        self.opened: list[str] = []
+
+    def name_of(self, device) -> str:
+        address = getattr(device, "value", device)
+        return next(n for n, com in self.coms.items() if com.ptr.value == address)
+
+    def leaks(self) -> dict:
+        everything = [*self.coms.items(), *self.clients.items(), *self.captures.items()]
+        return {name: com.refs for name, com in everything if com.refs}
+
+    def install(self, monkeypatch) -> None:
+        devices = self
+
+        class Enumerator:
+            def default(self, _kind):
+                return devices.coms[devices.default_name].hand_out() if devices.default_name else None
+
+            def by_id(self, device_id):
+                return devices.coms[device_id].hand_out()
+
+            def close(self):
+                pass
+
+        def open_(_capture, device):
+            name = devices.name_of(device)
+            devices.opened.append(name)
+            if name in devices.refuse:
+                raise wasapi.ComError("Initialize", wasapi.AUDCLNT_E_DEVICE_INVALIDATED)
+            return devices.clients[name].hand_out(), devices.captures[name].hand_out()
+
+        monkeypatch.setattr(wasapi, "_Enumerator", Enumerator)
+        monkeypatch.setattr(wasapi.WasapiCapture, "_open", open_)
+        monkeypatch.setattr(wasapi, "_device_id", devices.name_of)
+        monkeypatch.setattr(wasapi, "FOLLOW_SECONDS", 0.01)
+        monkeypatch.setattr(wasapi, "RETRY_SECONDS", 0.01)
+        monkeypatch.setattr(wasapi, "REOPEN_GRACE", 0.1)
+
+
+def unplugged() -> FakeCom:
+    """A capture client whose device was unplugged: GetNextPacketSize fails as Windows' does."""
+    return FakeCom({5: ((c_void_p,), lambda this, size: wasapi.AUDCLNT_E_DEVICE_INVALIDATED - 2**32)})
+
+
+def wait_until(condition, seconds=3.0) -> bool:
+    deadline = time.perf_counter() + seconds
+    while not condition() and time.perf_counter() < deadline:
+        time.sleep(0.005)
+    return condition()
+
+
+def pumping(devices, then):
+    """WasapiCapture._pump, calling then(name) as each device starts being pumped."""
+    pump = wasapi.WasapiCapture._pump
+
+    def wrapped(self, capture, moved=None):
+        then(devices.opened[-1])
+        return pump(self, capture, moved)
+    return wrapped
+
+
+@windows_only
+def test_the_computers_sound_follows_windows_to_a_new_default_device(monkeypatch):
+    devices = _Devices({"speakers": [(480, 0, 1_000_000_000, 0.1)],
+                        "headset": [(480, 0, 1_000_100_000, 0.2), (480, 0, 1_000_200_000, 0.2)]})
+    devices.install(monkeypatch)
+    got = []
+    capture = wasapi.WasapiCapture(wasapi.SYSTEM, lambda *packet: got.append(packet))
+    capture.start()
+
+    assert wait_until(lambda: len(got) == 1)
+    devices.default_name = "headset"  # Windows moves the sound there
+    assert wait_until(lambda: len(got) == 3)
+    capture.stop()
+
+    assert devices.opened == ["speakers", "headset"] and capture.switches == 1
+    assert [packet[3] for packet in got] == [False, True, False]  # a gap for the mixer, once
+    assert got[1][0] == bytes((ctypes.c_float * 960)(*([0.2] * 960)))  # from the headset
+    assert devices.clients["speakers"].stops == 1 and devices.leaks() == {}
+
+
+@windows_only
+def test_a_new_default_that_wont_open_yet_keeps_the_old_one_recording(monkeypatch):
+    devices = _Devices({"speakers": [], "headset": [(480, 0, 1_000_500_000, 0.2)]})
+    devices.install(monkeypatch)
+    devices.refuse.add("headset")  # a Bluetooth headset still switching profile
+    got = []
+    capture = wasapi.WasapiCapture(wasapi.SYSTEM, lambda *packet: got.append(packet))
+    capture.start()
+    devices.default_name = "headset"
+
+    assert wait_until(lambda: devices.opened.count("headset") >= 2)
+    devices.captures["speakers"].packets.append((480, 0, 1_000_000_000, 0.1))
+    assert wait_until(lambda: len(got) == 1)  # still recording the speakers meanwhile
+    devices.refuse.clear()
+    assert wait_until(lambda: len(got) == 2)
+    capture.stop()
+
+    assert capture.switches == 1 and got[1][3] is True and devices.leaks() == {}
+
+
+@windows_only
+def test_a_default_device_that_goes_away_is_followed_to_the_next(monkeypatch):
+    devices = _Devices({"usb": [], "speakers": [(480, 0, 1_000_000_000, 0.3)]})
+    devices.install(monkeypatch)
+    devices.captures["usb"] = unplugged()
+
+    def windows_settles(name):
+        if name == "usb":  # unplugged; for a moment Windows still names it the default, then moves on
+            devices.refuse.add("usb")
+            threading.Timer(0.05, lambda: setattr(devices, "default_name", "speakers")).start()
+
+    monkeypatch.setattr(wasapi.WasapiCapture, "_pump", pumping(devices, windows_settles))
+    errors, got = [], []
+    capture = wasapi.WasapiCapture(wasapi.SYSTEM, lambda *packet: got.append(packet), on_error=errors.append)
+    capture.start()
+
+    assert wait_until(lambda: got)
+    capture.stop()
+
+    assert devices.opened[0] == "usb" and devices.opened[-1] == "speakers" and errors == []
+    assert devices.leaks() == {}
+
+
+@windows_only
+def test_with_no_device_left_it_says_so_once_and_picks_up_one_that_comes_back(monkeypatch):
+    devices = _Devices({"headset": [], "headset again": [(480, 0, 1_000_000_000, 0.4)]})
+    devices.install(monkeypatch)
+    devices.captures["headset"] = unplugged()
+    monkeypatch.setattr(wasapi.WasapiCapture, "_pump",
+                        pumping(devices, lambda name: setattr(devices, "default_name", None)))
+    errors, got = [], []
+    capture = wasapi.WasapiCapture(wasapi.SYSTEM, lambda *packet: got.append(packet), on_error=errors.append)
+    capture.start()
+
+    assert wait_until(lambda: errors)
+    time.sleep(0.05)  # still looking, without saying it again
+    devices.default_name = "headset again"  # it reconnects
+    assert wait_until(lambda: got)
+    capture.stop()
+
+    assert len(errors) == 1 and "no others" in str(errors[0]) and devices.leaks() == {}
+
+
+@windows_only
+def test_stopping_while_waiting_for_a_device_ends_at_once(monkeypatch):
+    devices = _Devices({"usb": []})
+    devices.install(monkeypatch)
+    devices.captures["usb"] = unplugged()
+    monkeypatch.setattr(wasapi.WasapiCapture, "_pump",
+                        pumping(devices, lambda name: setattr(devices, "default_name", None)))
+    capture = wasapi.WasapiCapture(wasapi.SYSTEM, lambda *packet: None)
+    capture.start()
+    assert wait_until(lambda: devices.opened)
+    time.sleep(0.03)
+
+    started = time.perf_counter()
+    capture.stop()
+
+    assert not capture._thread.is_alive() and time.perf_counter() - started < 1.0
+    assert devices.leaks() == {}
+
+
+@windows_only
+def test_no_default_for_a_moment_keeps_the_device_being_recorded(monkeypatch):
+    devices = _Devices({"speakers": [(480, 0, 1_000_000_000, 0.1)]})
+    devices.install(monkeypatch)
+    got = []
+    capture = wasapi.WasapiCapture(wasapi.SYSTEM, lambda *packet: got.append(packet))
+    capture.start()
+    assert wait_until(lambda: got)
+
+    devices.default_name = None  # Windows between devices
+    time.sleep(0.1)  # ten checks
+    capture.stop()
+
+    assert devices.opened == ["speakers"] and capture.switches == 0 and devices.leaks() == {}
+
+
+@windows_only
+def test_a_chosen_device_is_kept_whatever_windows_makes_the_default(monkeypatch):
+    devices = _Devices({"usb mic": [(480, 0, 1_000_000_000, 0.1)], "laptop mic": []})
+    devices.install(monkeypatch)
+    devices.default_name = "laptop mic"
+    got = []
+    capture = wasapi.WasapiCapture(wasapi.MICROPHONE, lambda *packet: got.append(packet), device_id="usb mic")
+    capture.start()
+
+    assert wait_until(lambda: got)
+    time.sleep(0.1)  # many checks' worth, had it been following
+    capture.stop()
+
+    assert devices.opened == ["usb mic"] and capture.switches == 0 and devices.leaks() == {}
+
+
+@windows_only
+def test_a_device_id_is_read_and_its_memory_given_back():
+    text = "{0.0.0.00000000}.{6c2f9a3e-0000-4000-8000-000000000001}"
+    ole32 = ctypes.WinDLL("ole32")
+    ole32.CoTaskMemAlloc.restype = c_void_p
+    ole32.CoTaskMemAlloc.argtypes = [ctypes.c_size_t]
+
+    def get_id(_this, out):
+        size = (len(text) + 1) * 2
+        memory = ole32.CoTaskMemAlloc(size)
+        ctypes.memmove(memory, ctypes.create_unicode_buffer(text), size)
+        ctypes.cast(out, POINTER(c_void_p)).contents.value = memory
+        return 0
+
+    device = FakeCom({5: ((c_void_p,), get_id)})
+
+    assert wasapi._device_id(device.ptr) == text  # read, and freed with CoTaskMemFree (no crash)
+    assert wasapi._id_or_none(FakeCom({5: ((c_void_p,), lambda this, out: -2147024809)}).ptr) is None

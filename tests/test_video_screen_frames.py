@@ -1,15 +1,22 @@
-"""snipforge/video/screen_frames.py: numbered frames at a steady rate from a (fake) screen."""
+"""snipforge/video/screen_frames.py: numbered frames at a steady rate from a (fake) screen.
+
+What's checked is what the frame thread guarantees on any machine, however slow: each frame's
+number is the one due when it was made, give or take the LATE_FRAMES it may run behind before
+skipping ahead. How many frames a busy machine (a CI runner) manages in a given time isn't, so the
+tests run until what they need has happened (LIMIT is only a stuck test's way out)."""
 import threading
 import time
 
 import pytest
 from PySide6.QtGui import QColor, QImage
 
+from snipforge.video import screen_frames
 from snipforge.video.clock import Clock
-from snipforge.video.screen_frames import ScreenFrames
+from snipforge.video.screen_frames import LATE_FRAMES, ScreenFrames
 
 AREA = (0, 0, 64, 48)
 FPS = 50
+LIMIT = 10.0  # seconds a test may run before giving up on what it waits for
 
 
 class FakeScreen:
@@ -41,6 +48,20 @@ class NoPointer:
         self.drawn += 1
 
 
+class Timing(NoPointer):
+    """Writes into each frame (its text, not its pixels) the recording's time when it was made."""
+
+    def __init__(self, clock) -> None:
+        super().__init__()
+        self.clock = clock
+
+    def draw(self, frame, now) -> None:
+        super().draw(frame, now)
+        media = self.clock.media_time(now)
+        if media is not None:  # None only if a pause came in between the frame thread's look and this
+            frame.setText("media", repr(media))
+
+
 def first_image(_area) -> QImage:
     image = QImage(64, 48, QImage.Format.Format_RGB32)
     image.fill(QColor(0, 200, 0))
@@ -55,7 +76,19 @@ def assert_numbered_in_order(frames, numbers):
     assert missing <= frames.late_skipped + frames.queue_dropped
 
 
-def run(seconds, clock=None, screen=None, overlay=None, during=None, **kwargs):
+def assert_numbered_by_the_recordings_time(taken):
+    """Each frame's number is the one due when it was made: not before its time, and no more than
+    LATE_FRAMES whole frames after it (beyond that the frame thread skips ahead). Not frame 0, made
+    at the thread's first wake however late, and never skipped past."""
+    timed = [(index, float(image.text("media"))) for index, image in taken if index and image.text("media")]
+    assert timed
+    for index, media in timed:
+        assert index - 1e-6 <= media * FPS < index + LATE_FRAMES + 1 + 1e-6, (index, media * FPS)
+
+
+def run(until, limit=LIMIT, clock=None, screen=None, overlay=None, during=None, **kwargs):
+    """Make frames until until(taken) says enough (or `limit` seconds pass); `during(clock, now)`
+    is called as it goes."""
     clock = clock or Clock()
     clock.begin(time.perf_counter())
     screen = screen or FakeScreen()
@@ -63,8 +96,8 @@ def run(seconds, clock=None, screen=None, overlay=None, during=None, **kwargs):
                           first_image=first_image, **kwargs)
     frames.start()
     taken = []
-    end = time.perf_counter() + seconds
-    while time.perf_counter() < end:
+    deadline = time.perf_counter() + limit
+    while not until(taken) and time.perf_counter() < deadline:
         if during:
             during(clock, time.perf_counter())
         taken += frames.take()
@@ -73,25 +106,31 @@ def run(seconds, clock=None, screen=None, overlay=None, during=None, **kwargs):
     return frames, taken + frames.take(), screen
 
 
+def at_least(count):
+    return lambda taken: len(taken) >= count
+
+
 def test_frames_come_numbered_at_the_rate_asked_for():
     clock = Clock()
-    frames, taken, screen = run(1.0, clock=clock)
-    recorded = clock.media_time(time.perf_counter())  # at least the recording's length when it stopped
+    frames, taken, screen = run(lambda taken: taken and taken[-1][0] >= 40, clock=clock, overlay=Timing(clock))
 
     numbers = [index for index, _image in taken]
     assert_numbered_in_order(frames, numbers)
-    assert 40 <= numbers[-1] + 1 <= recorded * FPS + 1  # 50 a second (a busy machine may stop it late)
-    assert screen.closed and frames.error is None
+    assert_numbered_by_the_recordings_time(taken)  # 50 a second of recording
+    assert numbers[-1] >= 40 and screen.closed and frames.error is None
 
 
 def test_a_still_screen_repeats_its_first_image():
-    _frames, taken, _screen = run(0.3)
+    _frames, taken, _screen = run(at_least(3))
 
     assert {image.pixelColor(5, 5).name() for _i, image in taken} == {"#00c800"}
 
 
 def test_frames_show_the_newest_screen():
-    _frames, taken, _screen = run(0.6, screen=FakeScreen(every=0.1))
+    def three_changes_seen(taken):
+        return bool(taken) and taken[-1][1].pixelColor(5, 5).red() >= 3
+
+    _frames, taken, _screen = run(three_changes_seen, screen=FakeScreen(every=0.1))
 
     reds = [image.pixelColor(5, 5).red() for _i, image in taken]
     assert reds == sorted(reds) and reds[-1] >= 3  # the screen changed, and frames followed
@@ -99,9 +138,9 @@ def test_frames_show_the_newest_screen():
 
 def test_the_pointer_is_drawn_into_every_frame():
     overlay = NoPointer()
-    _frames, taken, _screen = run(0.3, overlay=overlay)
+    frames, taken, _screen = run(at_least(5), overlay=overlay)
 
-    assert overlay.drawn == len(taken) > 0
+    assert overlay.drawn == len(taken) + frames.queue_dropped and len(taken) >= 5
 
 
 def test_a_pointer_that_cant_be_drawn_is_left_out_and_frames_go_on():
@@ -111,7 +150,7 @@ def test_a_pointer_that_cant_be_drawn_is_left_out_and_frames_go_on():
             raise ValueError("no pointer shape")
 
     overlay = Broken()
-    frames, taken, _screen = run(0.3, overlay=overlay)
+    frames, taken, _screen = run(at_least(6), overlay=overlay)
 
     assert len(taken) > 5 and frames.error is None
     assert str(frames.overlay_error) == "no pointer shape" and overlay.drawn == 1  # tried once
@@ -121,38 +160,45 @@ def test_a_pause_leaves_no_gap_in_the_numbers():
     state = {}
 
     def pause_for_a_while(clock, now):
-        if "paused" not in state and clock.media_time(now) and clock.media_time(now) > 0.3:
+        media = clock.media_time(now)
+        if "paused" not in state and media and media > 0.3:
             clock.pause(now)
-            state["paused"] = now
+            state["paused"], state["media"] = now, media
         elif "paused" in state and "resumed" not in state and now - state["paused"] > 0.5:
             clock.resume(now)
             state["resumed"] = now
 
+    def well_after_the_pause(taken):  # frames made 0.2 s of recording after it: they'd show a gap
+        return "resumed" in state and any(float(image.text("media")) > state["media"] + 0.2
+                                          for _i, image in taken if image.text("media"))
+
     clock = Clock()
-    frames, taken, _screen = run(1.3, clock=clock, during=pause_for_a_while)
-    recorded = clock.media_time(time.perf_counter())  # at least the recording's length when it stopped
+    frames, taken, _screen = run(well_after_the_pause, clock=clock, overlay=Timing(clock), during=pause_for_a_while)
 
     numbers = [index for index, _image in taken]
-    assert_numbered_in_order(frames, numbers)
-    # ~0.8 s of recording in 1.3 s (more if a busy machine stopped it late): the pause made no frames.
-    # Had it made them, there'd be 0.5 s (25 frames) more than the recording's length.
     assert "resumed" in state, "the pause never ended"
-    assert numbers[-1] + 1 <= recorded * FPS + 1
+    assert_numbered_in_order(frames, numbers)
+    # Numbered by the recording's time, which stood still for the 0.5 s pause: had the pause made
+    # frames, those after it would be 25 numbers ahead of their time.
+    assert_numbered_by_the_recordings_time(taken)
 
 
 def test_falling_behind_skips_ahead_and_counts_it():
-    class SlowOnce(NoPointer):
+    class SlowOnce(Timing):
         def draw(self, frame, now):
             super().draw(frame, now)
             if self.drawn == 5:
                 time.sleep(0.3)  # 15 frames' worth
 
-    frames, taken, _screen = run(0.8, overlay=SlowOnce())
+    clock = Clock()
+    overlay = SlowOnce(clock)
+    frames, taken, _screen = run(at_least(8), clock=clock, overlay=overlay)
 
     numbers = [index for index, _image in taken]
     assert frames.late_skipped >= 10
     assert numbers == sorted(numbers) and len(set(numbers)) == len(numbers)
-    assert numbers[5] - numbers[4] > 3  # the jump after the stall
+    assert max(b - a for a, b in zip(numbers, numbers[1:])) > 3  # the jump after the stall
+    assert_numbered_by_the_recordings_time(taken)  # and no frame left more than LATE_FRAMES behind
 
 
 def test_a_full_queue_drops_new_frames_instead_of_waiting():
@@ -161,11 +207,13 @@ def test_a_full_queue_drops_new_frames_instead_of_waiting():
     frames = ScreenFrames(AREA, FPS, clock, NoPointer(), open_screen=lambda area: FakeScreen(),
                           first_image=first_image, queue_size=3)
     frames.start()
-    time.sleep(0.5)  # nobody takes them
+    deadline = time.perf_counter() + LIMIT
+    while frames.queue_dropped <= 10 and time.perf_counter() < deadline:
+        time.sleep(0.01)  # nobody takes them
     frames.stop()
 
     assert len(frames.take()) == 3 and frames.made == 3
-    assert frames.queue_dropped + frames.late_skipped > 10  # it kept going rather than waiting
+    assert frames.queue_dropped > 10  # it kept going rather than waiting
 
 
 def test_a_screen_that_cant_be_opened_is_reported_at_once():
@@ -177,12 +225,12 @@ def test_a_screen_that_cant_be_opened_is_reported_at_once():
 
     with pytest.raises(OSError, match="no duplication"):
         frames.start()
-    assert time.perf_counter() - started < 1.0
+    assert time.perf_counter() - started < screen_frames.START_TIMEOUT / 2  # said at once, not timed out
 
 
 def test_stopping_ends_the_thread_and_closes_the_screen():
     screen = FakeScreen()
-    frames, _taken, _ = run(0.2, screen=screen)
+    frames, _taken, _ = run(at_least(2), screen=screen)
 
     assert screen.closed
     assert not any(t.name == "screen-frames" and t.is_alive() for t in threading.enumerate())
@@ -196,11 +244,11 @@ def test_a_screen_that_answers_slowly_doesnt_hold_up_the_frames():
             time.sleep(1.0)  # far past its timeout
             return None
 
-    frames, taken, _screen = run(1.0, screen=Slow())
+    started = time.perf_counter()
+    frames, taken, _screen = run(at_least(25), limit=6.0, screen=Slow())
 
     numbers = [index for index, _image in taken]
     assert numbers[0] == 0 and numbers == sorted(set(numbers))
-    # Made on time anyway, from the screen's last image: ~50, fewer on a busy machine, where the frame
-    # thread itself waits its turn and skips ahead (counted in late_skipped, which is the machine's
-    # doing, not the screen's). Waiting on the screen made ~1 a second and skipped the rest.
-    assert len(numbers) >= 0.5 * FPS
+    # Made on time anyway, from the screen's last image: 25 in about half a second, more on a busy
+    # machine. Waiting on the screen, they'd come about one a second: 6 by the limit.
+    assert len(numbers) >= 25, (len(numbers), time.perf_counter() - started)
