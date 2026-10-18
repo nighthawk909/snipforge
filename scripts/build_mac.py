@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import universal  # noqa: E402 - sibling script: universal2 builds of single-architecture dependencies
+
 import build  # noqa: E402 - sibling script: version stamping, license files, checksums
 
 ROOT, DIST, BUILD = build.ROOT, build.DIST, build.BUILD
@@ -61,12 +63,18 @@ def run(cmd: list[str]) -> None:
 
 def build_app(version: str) -> Path:
     os.environ["SNIPFORGE_VERSION"] = bundle_version(version)
+    # The app is universal2; Pillow (and anything else in universal.SPLIT_WHEELS) comes from PyPI
+    # one architecture at a time, so its compiled files are fused first (docs/CROSS-PLATFORM.md).
+    for fused in universal.make_dependencies_universal():
+        print(f"Made universal: {fused}")
     run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
          "--distpath", str(DIST), "--workpath", str(BUILD / "pyinstaller"),
          str(ROOT / "packaging" / "snipforge.spec")])
     app = DIST / APP_NAME
     if not (app / "Contents" / "MacOS" / "SnipForge").exists():
         sys.exit(f"PyInstaller didn't produce {APP_NAME}")
+    for bundled in universal.check_bundle(app):
+        print(f"Universal in the app ({' '.join(sorted(universal.lipo_archs(bundled)))}): {bundled.relative_to(app)}")
     resources = app / "Contents" / "Resources"
     build.add_license_files(resources)  # LGPL notice: license texts ship with the app
     build.add_theme_packs(resources)

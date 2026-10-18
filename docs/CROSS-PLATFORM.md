@@ -86,6 +86,10 @@ Things that look the same as on Windows and aren't. Add to this list whenever on
   permissions, login items and IT profiles to it, as the installer's `AppId` is on Windows.
 - **Gatekeeper.** The free build isn't notarized, so the first launch needs System Settings >
   Privacy & Security > Open Anyway. Release notes and the download page say so.
+- **Compiled dependencies must be universal2 or get fused.** SnipForge.app is one build for Apple
+  silicon and Intel, so every compiled file in it needs both. A dependency PyPI ships one
+  architecture at a time (Pillow) goes in `SPLIT_WHEELS` in `scripts/universal.py`, which fuses
+  both wheels with `lipo` before PyInstaller runs and checks the built app.
 
 ## Checklist for a pull request
 
