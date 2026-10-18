@@ -135,7 +135,7 @@ class RecorderChild(QObject):
             return
         self.recorder = recorder = self._make_recorder(settings)
         recorder.state_changed.connect(lambda state: self.channel.send("state", state=state))
-        recorder.state_changed.connect(lambda state: self._show_bar(settings) if state == "recording" else None)
+        recorder.state_changed.connect(lambda state: self._show_bar() if state == "recording" else None)
         recorder.warning.connect(lambda text: self.channel.send("warning", message=text))
         recorder.finished.connect(self._finished)
         recorder.failed.connect(self._report_failure)
@@ -144,10 +144,12 @@ class RecorderChild(QObject):
             recorder.start(hold=hold)
         except RecordingError as exc:
             self._report_failure(str(exc))
+            return
+        if self._make_bar is not None:  # built now, while the encoder warms up (and any countdown runs):
+            self.bar = self._make_bar(recorder, settings)  # building it once recording began stalled it
 
-    def _show_bar(self, settings) -> None:
-        if self.bar is None and self._make_bar is not None:
-            self.bar = self._make_bar(self.recorder, settings)
+    def _show_bar(self) -> None:
+        if self.bar is not None and not self._done:
             self.bar.show()
 
     def _check_told(self) -> None:

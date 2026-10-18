@@ -56,6 +56,10 @@ class Encoder(QObject):
         super().__init__()
         from PySide6 import QtMultimedia as M  # loaded only when recording (startup stays as fast)
 
+        from . import ffmpeg
+
+        ffmpeg.quiet_logs()  # before Qt's FFmpeg plugin loads too: it lists the encoders it can use
+
         self.M = M
         self.path, self.fps, self.has_audio = Path(path).resolve(), fps, audio
         self.max_pending = max_pending_frames

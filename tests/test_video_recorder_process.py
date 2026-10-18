@@ -473,7 +473,7 @@ def test_the_control_bar_appears_once_recording_begins(tmp_path, qapp):
     remote = RemoteRecorder(settings(tmp_path), launch=launch)
     remote.start(hold=True)
     assert wait_for(lambda: remote.state == "starting")
-    assert bars == []  # not while held: the countdown is still running
+    assert len(bars) == 1 and not bars[0].shown  # built while held, not shown till recording begins
 
     remote.go()
 

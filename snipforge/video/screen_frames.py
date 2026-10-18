@@ -1,13 +1,20 @@
-"""The recorded area as numbered frames at a steady rate, made on a thread of their own.
+"""The recorded area as numbered frames at a steady rate, made on threads of their own.
 
-Frame n is due n/fps seconds into the recording (by the recording's Clock, so pauses are left out).
-Between frames the thread waits on DXGI for the screen to change and keeps the newest image; when a
-frame is due it copies that image, draws the pointer, its highlight and click rings into it, and
-queues it for the encoder. A still screen just repeats its last image.
+Two threads, so that a slow screen never holds up the frames:
 
-If the thread falls more than LATE_FRAMES behind (a busy moment), it skips ahead to the frame that's
-due rather than catching up with frames already late: the encoder places every frame by its number,
-so the video stays in time. If the queue is full (the encoder thread is behind), the new frame is
+    screen-watch   waits on DXGI for the screen to change and keeps the newest image
+    screen-frames  when frame n is due (n/fps seconds in, by the recording's Clock, so pauses are left
+                   out) copies the newest image, draws the pointer, its highlight and click rings into
+                   it, and queues it for the encoder
+
+A still screen just repeats its last image, and so does a screen that's slow to answer: a software
+graphics driver (GitHub's runners), a busy GPU or a display turned off can make each wait on DXGI
+take a second, which once left the frame thread making 3 frames in 3 s. Now the picture may lag,
+but the video stays in time and complete.
+
+If the frame thread falls more than LATE_FRAMES behind (a busy moment), it skips ahead to the frame
+that's due rather than catching up with frames already late: the encoder places every frame by its
+number, so the video stays in time. If the queue is full (the encoder is behind), the new frame is
 dropped. Both are counted.
 """
 from __future__ import annotations
@@ -27,6 +34,8 @@ log = logging.getLogger(__name__)
 QUEUE_SIZE = 8
 LATE_FRAMES = 3
 START_TIMEOUT = 5.0
+WATCH_MS = 100  # how long one wait on the screen may last before the watcher checks it should stop
+NAP = 0.05  # the longest the frame thread sleeps at once (it checks for stop in between)
 
 
 class ScreenFrames:
@@ -47,24 +56,30 @@ class ScreenFrames:
         self.overlay_error: Exception | None = None  # drawing the pointer failed: frames go on without it
         self._stop = threading.Event()
         self._ready = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._threads: list[threading.Thread] = []
         self._screen = None
         self._latest: QImage | None = None
+        self._lock = threading.Lock()  # around _latest, swapped by one thread and copied by the other
 
     def start(self) -> None:
         """Open the screen; raises whatever stops it from being recorded."""
-        self._thread = threading.Thread(target=self._run, name="screen-frames", daemon=True)
-        self._thread.start()
+        watcher = threading.Thread(target=self._watch_screen, name="screen-watch", daemon=True)
+        self._threads = [watcher]
+        watcher.start()
         if not self._ready.wait(START_TIMEOUT):
             self.stop()
             raise OSError("the screen took too long to open")
         if self.error:
             raise self.error
+        maker = threading.Thread(target=self._make_frames_safely, name="screen-frames", daemon=True)
+        self._threads.append(maker)
+        maker.start()
 
     def stop(self) -> None:
         self._stop.set()
-        if self._thread and self._thread is not threading.current_thread():
-            self._thread.join(5)
+        for thread in self._threads:
+            if thread is not threading.current_thread():
+                thread.join(5)
 
     def take(self) -> list[tuple[int, QImage]]:
         """The frames made since the last call, oldest first."""
@@ -75,7 +90,9 @@ class ScreenFrames:
             except queue.Empty:
                 return made
 
-    def _run(self) -> None:
+    # --- the screen-watch thread ------------------------------------------------------------------
+
+    def _watch_screen(self) -> None:
         try:
             self._screen = self._open_screen(self.area)
             self._latest = self._first_image(self.area)
@@ -86,27 +103,57 @@ class ScreenFrames:
         finally:
             self._ready.set()
         try:
-            self._make_frames()
+            while not self._stop.is_set():
+                self._watch(WATCH_MS)
         except Exception as exc:
-            log.exception("Making screen frames failed")
+            log.exception("Watching the screen failed")
             self.error = exc
         finally:
             self._close_screen()
 
+    def _watch(self, timeout_ms: int) -> None:
+        got = self._screen.grab(timeout_ms)
+        self.protected_content = bool(getattr(self._screen, "protected_content", False))
+        if got:
+            data, stride = got
+            width, height = self.area[2], self.area[3]
+            image = QImage(data, width, height, stride, QImage.Format.Format_RGB32).copy()
+            with self._lock:
+                self._latest = image
+            self.screen_updates += 1
+
+    def _close_screen(self) -> None:
+        if self._screen is not None:
+            self.reopens = getattr(self._screen, "reopens", 0)
+            try:
+                self._screen.close()
+            except Exception:
+                log.exception("Closing the screen duplication failed")
+            self._screen = None
+
+    # --- the screen-frames thread -----------------------------------------------------------------
+
+    def _make_frames_safely(self) -> None:
+        try:
+            self._make_frames()
+        except Exception as exc:
+            log.exception("Making screen frames failed")
+            self.error = exc
+
     def _make_frames(self) -> None:
         index, period = 0, 1 / self.fps
-        while not self._stop.is_set():
+        while not self._stop.is_set() and self.error is None:
             now = self.now()
             media = self.clock.media_time(now)
-            if media is None or media < index * period:  # paused, or not due yet: watch the screen
-                wait = period / 2 if media is None else min(period, index * period - media)
-                self._watch(wait)
+            if media is None or media < index * period:  # paused, or not due yet
+                time.sleep(min(NAP, period / 2 if media is None else index * period - media))
                 continue
             behind = int(media / period) - index
             if index and behind > LATE_FRAMES:
                 self.late_skipped += behind
                 index += behind
-            frame = self._latest.copy()
+            with self._lock:
+                frame = self._latest.copy()
             self._draw_pointer(frame, now)
             try:
                 self.frames.put_nowait((index, frame))
@@ -122,21 +169,3 @@ class ScreenFrames:
             except Exception as exc:  # the recording matters more than the pointer in it
                 log.exception("Drawing the pointer failed; recording without it")
                 self.overlay_error = exc
-
-    def _watch(self, seconds: float) -> None:
-        got = self._screen.grab(max(1, int(seconds * 1000)))
-        self.protected_content = bool(getattr(self._screen, "protected_content", False))
-        if got:
-            data, stride = got
-            width, height = self.area[2], self.area[3]
-            self._latest = QImage(data, width, height, stride, QImage.Format.Format_RGB32).copy()
-            self.screen_updates += 1
-
-    def _close_screen(self) -> None:
-        if self._screen is not None:
-            self.reopens = getattr(self._screen, "reopens", 0)
-            try:
-                self._screen.close()
-            except Exception:
-                log.exception("Closing the screen duplication failed")
-            self._screen = None

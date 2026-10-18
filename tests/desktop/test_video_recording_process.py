@@ -109,7 +109,10 @@ def test_a_recording_made_in_its_own_process(qapp, tmp_path):
 
     result = outcome["result"]
     info = ffmpeg.probe(result.path)
-    assert info.first("video").codec == "h264" and 1.2 < result.duration < 2.5
+    # Stopped 1.5 s after SnipForge heard "recording"; a slow runner delivers that stop late.
+    assert info.first("video").codec == "h264" and 1.2 < result.duration < 6
+    # Frames on time whatever the screen does (a software graphics driver once let 3 of 90 through).
+    assert result.stats["frames_made"] >= 0.8 * result.duration * 30, result.stats
     assert remote.pid > 0 and remote.ended_by is None
 
 
