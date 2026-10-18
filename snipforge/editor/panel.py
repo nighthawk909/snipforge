@@ -461,7 +461,9 @@ class PropertiesPanel(QScrollArea):
             self.changed.emit(changes)
 
     def _pick_clicked(self) -> None:
-        self._picker.setChecked(not self._picker.isChecked())  # the canvas says when picking starts or ends
+        # Undo the click's own toggle: the button follows the canvas (set_picking), which says
+        # whether picking really started or ended.
+        self._picker.setChecked(not self._picker.isChecked())
         self.pick_color.emit()
 
     def set_picking(self, on: bool) -> None:

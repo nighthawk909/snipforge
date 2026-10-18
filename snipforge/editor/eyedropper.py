@@ -50,9 +50,18 @@ class Loupe(QWidget):
         p = QPainter(self)
         grid = QRect(1, 1, SIDE, SIDE)
         p.fillRect(grid, QColor("#3a3a3c"))  # behind anything outside the snip
+        cell = CELL
         if self._sample is not None:
-            p.drawImage(grid, self._sample)  # no smoothing: each pixel is a crisp square
-        center = QRectF(1 + RADIUS * CELL, 1 + RADIUS * CELL, CELL, CELL)
+            # Whole device pixels per cell (12 at 125%, not 12.5), so every cell is the same size.
+            ratio = self.devicePixelRatioF() or 1.0
+            device_cell = max(1, round(CELL * ratio))
+            n = 2 * RADIUS + 1
+            enlarged = self._sample.scaled(n * device_cell, n * device_cell, Qt.IgnoreAspectRatio,
+                                           Qt.FastTransformation)  # no smoothing: crisp squares
+            enlarged.setDevicePixelRatio(ratio)
+            p.drawImage(QPoint(1, 1), enlarged)
+            cell = device_cell / ratio
+        center = QRectF(1 + RADIUS * cell, 1 + RADIUS * cell, cell, cell)
         p.setPen(QPen(QColor("#000000"), 3))
         p.drawRect(center.adjusted(-1, -1, 1, 1))
         p.setPen(QPen(QColor("#ffffff"), 1))

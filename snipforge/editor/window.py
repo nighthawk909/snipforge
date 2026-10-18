@@ -54,6 +54,7 @@ TOOLS = [
     ("crop", "Crop (C)"),
 ]
 AUTOSAVE_MS = 700
+PICK_HINT = "Click anywhere on the snip to pick its color. Esc or a right-click cancels."
 JPG_QUALITY = 92  # text in screenshots blurs at Qt's default of 75
 
 
@@ -126,7 +127,7 @@ class EditorWindow(QMainWindow):
         self.panel.crop_action.connect(self._crop_action)
         self.panel.image_action.connect(self.image_action)
         self.panel.pick_color.connect(self._toggle_picking)
-        self.canvas.picking_changed.connect(self.panel.set_picking)
+        self.canvas.picking_changed.connect(self._show_picking)
         self.canvas.color_picked.connect(
             lambda color: self.statusBar().showMessage(f"Picked {color.upper()}", 3000))
         self.panel.editing_done.connect(self.canvas.setFocus)
@@ -300,12 +301,17 @@ class EditorWindow(QMainWindow):
             self.canvas.set_tool("select")  # leaving Crop applies whatever is left pending
         self.canvas.setFocus()
 
+    def _show_picking(self, on: bool) -> None:
+        self.panel.set_picking(on)
+        if not on and self.statusBar().currentMessage() == PICK_HINT:
+            self.statusBar().clearMessage()
+
     def _toggle_picking(self) -> None:
         if self.canvas.picking():
             self.canvas.stop_picking()
         else:
             self.canvas.start_picking()
-            self.statusBar().showMessage("Click anywhere on the snip to pick its color. Esc cancels.", 6000)
+            self.statusBar().showMessage(PICK_HINT, 6000)
         self.canvas.setFocus()
 
     def image_action(self, action: str) -> None:
@@ -490,6 +496,7 @@ class EditorWindow(QMainWindow):
         self.tray.set_saved("Saved", dt.datetime.now().strftime("Saved to your library at %I:%M %p"))
 
     def closeEvent(self, e) -> None:
+        self.canvas.stop_picking()
         self.canvas.commit_text()
         self.canvas.apply_crop()
         self._autosave.stop()

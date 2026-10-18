@@ -175,3 +175,82 @@ def test_eyedropper_sits_beside_the_custom_color_and_fits(editor):
         assert editor.panel.widget().minimumSizeHint().width() <= PANEL_WIDTH - 14
     editor.canvas.set_tool("blur")  # no color to pick into
     assert not editor.panel.pick_button().isVisibleTo(editor)
+
+
+# --- review: picking always ends before the snip changes, and other keys wait ----------------
+def test_any_change_to_the_snip_ends_picking(striped):
+    c = make_canvas(striped)
+    drag(c, "rect", (10, 10), (60, 60))
+    c.set_tool("arrow")
+    for change in (c.undo_stack.undo, c.undo_stack.redo, lambda: c.rotate_image(True)):
+        c.start_picking()
+        change()
+        assert not c.picking()
+    c.start_picking()
+    click(c, (50, 150))  # inside the turned image, outside the old picture
+    assert not c.picking() and c.tool_styles["arrow"].color in ("#ff9500", "#2cb1bc")
+
+
+def test_other_keys_wait_while_picking(striped):
+    c = make_canvas(striped)
+    rect = drag(c, "rect", (10, 10), (60, 60))
+    c.start_picking()
+    for key in (Qt.Key_Delete, Qt.Key_Return, Qt.Key_Right):
+        QApplication.sendEvent(c, QKeyEvent(QEvent.KeyPress, key, Qt.NoModifier))
+    assert c.picking() and rect in c.annotations() and rect.pos() == QPointF(10, 10)
+    QApplication.sendEvent(c, QKeyEvent(QEvent.KeyPress, Qt.Key_A, Qt.NoModifier))  # a tool key
+    assert not c.picking() and c.tool == "arrow"
+
+
+def test_right_click_cancels(striped):
+    c = make_canvas(striped)
+    c.set_tool("arrow")
+    c.start_picking()
+    view_pt = QPointF(c.mapFromScene(QPointF(150, 50)))
+    QApplication.sendEvent(c.viewport(), QMouseEvent(QEvent.MouseButtonPress, view_pt, view_pt, Qt.RightButton,
+                                                     Qt.RightButton, Qt.NoModifier))
+    assert not c.picking() and c.tool_styles["arrow"].color == "#ff3b30"
+
+
+def test_space_drag_still_pans_while_picking(striped):
+    big = striped.scaled(800, 400)
+    c = make_canvas(big)
+    c.set_zoom(4.0)
+    c.start_picking()
+    QApplication.sendEvent(c, QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier))
+    before = c.horizontalScrollBar().value()
+    start = QPointF(300, 200)
+    QApplication.sendEvent(c.viewport(), QMouseEvent(QEvent.MouseButtonPress, start, start, Qt.LeftButton,
+                                                     Qt.LeftButton, Qt.NoModifier))
+    for dx in (20, 60, 120):
+        at = start + QPointF(dx, 0)
+        QApplication.sendEvent(c.viewport(), QMouseEvent(QEvent.MouseMove, at, at, Qt.NoButton, Qt.LeftButton,
+                                                         Qt.NoModifier))
+    assert c.horizontalScrollBar().value() != before and c.picking()
+
+
+def test_a_mid_pixel_pointer_picks_the_pixel_under_it(striped):
+    c = make_canvas(striped)
+    c.set_tool("arrow")
+    c.start_picking()
+    view = c.mapFromScene(QPointF(99, 50))  # the last orange column...
+    at = QPointF(view) + QPointF(0.6, 0.2)  # ...with the pointer in its right half, as at 150% scaling
+    for kind, buttons in ((QEvent.MouseButtonPress, Qt.LeftButton), (QEvent.MouseButtonRelease, Qt.NoButton)):
+        QApplication.sendEvent(c.viewport(), QMouseEvent(kind, at, at, Qt.LeftButton, buttons, Qt.NoModifier))
+    assert c.tool_styles["arrow"].color == "#ff9500"
+
+
+def test_losing_focus_ends_picking(striped):
+    from PySide6.QtGui import QFocusEvent
+    c = make_canvas(striped)
+    c.start_picking()
+    c.focusOutEvent(QFocusEvent(QEvent.FocusOut, Qt.ActiveWindowFocusReason))
+    assert not c.picking()
+
+
+def test_cancelling_clears_the_hint(editor):
+    editor.canvas.set_tool("rect")
+    QTest.mouseClick(editor.panel.pick_button(), Qt.LeftButton)
+    assert "pick its color" in editor.statusBar().currentMessage()
+    QApplication.sendEvent(editor.canvas, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+    assert editor.statusBar().currentMessage() == ""

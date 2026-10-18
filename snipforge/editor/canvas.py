@@ -91,6 +91,9 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         self._scene.selectionChanged.connect(self._on_selection_changed)
         theme.on_change(self.retheme)
         self.undo_stack.indexChanged.connect(self._on_undo_index)
+        for bar in (self.horizontalScrollBar(), self.verticalScrollBar()):
+            bar.valueChanged.connect(self._refresh_loupe)
+        self.zoom_changed.connect(self._refresh_loupe)
         self._apply_drag_mode()
 
     # ------------------------------------------------------------------ queries
@@ -401,6 +404,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         self.selection_changed.emit()
 
     def _on_undo_index(self, _index: int) -> None:
+        self.stop_picking()  # the snip changed (undo, redo, a turn, a delete...): the eyedropper's picture is old
         self._overlay.update()
         self.selection_changed.emit()
         self.document_changed.emit()
