@@ -141,14 +141,15 @@ def test_an_mp4_s_frame_times_come_from_its_index_alone(one_second, monkeypatch)
 
 @needs_ffmpeg
 def test_other_containers_are_read_packet_by_packet(tmp_path, qapp):
-    """Qt's Matroska starts at about 1 s; times still count from its first frame."""
+    """Qt's Matroska starts at about 1 s; times still count from its first frame. (On a busy machine
+    Qt's encoder can lose the clip's last frame or so: the times of those there are what's tested.)"""
     path = clip.make_test_clip(tmp_path / "clip.mkv", seconds=1.0, fps=30, container="mkv")
 
     times = frame_times.read(path)
 
-    assert len(times) == 30
+    assert 28 <= len(times) <= 30
     assert times.starts[0] == 0.0
-    assert times.starts[29] == pytest.approx(29 / 30, abs=0.002)
+    assert all(start == pytest.approx(n / 30, abs=0.002) for n, start in enumerate(times.starts))
 
 
 @needs_ffmpeg

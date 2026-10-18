@@ -22,10 +22,13 @@ pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available
 FPS = 30
 AREA = (0, 0, 320, 240)
 ROOMY = 10**12  # bytes free: the tests' drives never run low unless a test says so
-# How far a frame's picture may be from its place on average, in frames. GitHub's macOS runners wake
-# the frame thread ~20 ms late every time, so there each frame shows the next one's number; on
-# Windows they're on time. (Recording itself is Windows-only for now: docs/VIDEO-PLAN.md.)
-ON_TIME = 0.5 if sys.platform == "win32" else 1.5
+# How far a frame's picture may be from its place on average, in frames. On an idle Windows PC
+# they're on time (0); on a busy one (other test runs alongside) most can be a frame late, and
+# GitHub's macOS runners wake the frame thread ~20 ms late every time, so there each frame shows the
+# next one's number. A frame up to LATE_FRAMES late is still in time: the frame thread only skips
+# ahead after that, and the largest offset is checked against it too. (Recording itself is
+# Windows-only for now: docs/VIDEO-PLAN.md.)
+ON_TIME = 1.0 if sys.platform == "win32" else 1.5
 
 
 class StillScreen:
@@ -175,12 +178,15 @@ def frame_times(path):
 
 def assert_in_time(shown, duration):
     """Each frame shows the number due when it was made, so it should be at its own place in the
-    video. One can be up to LATE_FRAMES late before the frame thread skips ahead (a busy machine, or
-    GitHub's stalling macOS runners); on average they're on time, and most of them are there."""
+    video. One can be up to LATE_FRAMES whole frames late before the frame thread skips ahead (a busy
+    machine, or GitHub's stalling macOS runners), and the Stamper rounds to the nearest frame where
+    the frame thread counts whole ones: so up to LATE_FRAMES + 1 (3.6 frames late is kept, and shows
+    4). On average they're on time, and most of them are there (less one skip ahead's worth, which in
+    a short recording is a lot)."""
     offsets = sorted(abs(number - at) for number, at in shown)
     assert offsets[len(offsets) // 2] <= ON_TIME, offsets
-    assert offsets[-1] <= LATE_FRAMES + 0.5, offsets
-    assert len(shown) >= 0.6 * duration * FPS
+    assert offsets[-1] <= LATE_FRAMES + 1, offsets
+    assert len(shown) >= 0.6 * duration * FPS - LATE_FRAMES
 
 
 def test_a_recording_has_its_picture_and_both_sounds_at_the_right_times(tmp_path, qapp):

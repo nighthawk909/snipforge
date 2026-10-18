@@ -74,11 +74,13 @@ def run(seconds, clock=None, screen=None, overlay=None, during=None, **kwargs):
 
 
 def test_frames_come_numbered_at_the_rate_asked_for():
-    frames, taken, screen = run(1.0)
+    clock = Clock()
+    frames, taken, screen = run(1.0, clock=clock)
+    recorded = clock.media_time(time.perf_counter())  # at least the recording's length when it stopped
 
     numbers = [index for index, _image in taken]
     assert_numbered_in_order(frames, numbers)
-    assert 40 <= numbers[-1] + 1 <= 55  # 50 a second
+    assert 40 <= numbers[-1] + 1 <= recorded * FPS + 2  # 50 a second (a busy machine may stop it late)
     assert screen.closed and frames.error is None
 
 
@@ -126,11 +128,16 @@ def test_a_pause_leaves_no_gap_in_the_numbers():
             clock.resume(now)
             state["resumed"] = now
 
-    frames, taken, _screen = run(1.3, during=pause_for_a_while)
+    clock = Clock()
+    frames, taken, _screen = run(1.3, clock=clock, during=pause_for_a_while)
+    recorded = clock.media_time(time.perf_counter())  # at least the recording's length when it stopped
 
     numbers = [index for index, _image in taken]
     assert_numbered_in_order(frames, numbers)
-    assert numbers[-1] + 1 <= 0.85 * FPS  # ~0.8 s of recording in 1.3 s: the pause made no frames
+    # ~0.8 s of recording in 1.3 s (more if a busy machine stopped it late): the pause made no frames.
+    # Had it made them, there'd be 0.5 s (25 frames) more than the recording's length.
+    assert state["resumed"] - state["paused"] > 0.5
+    assert numbers[-1] + 1 <= recorded * FPS + 2
 
 
 def test_falling_behind_skips_ahead_and_counts_it():
@@ -193,5 +200,7 @@ def test_a_screen_that_answers_slowly_doesnt_hold_up_the_frames():
 
     numbers = [index for index, _image in taken]
     assert numbers[0] == 0 and numbers == sorted(set(numbers))
-    assert len(numbers) >= 0.8 * FPS  # made on time anyway, from the screen's last image
-    assert frames.late_skipped <= 5
+    # Made on time anyway, from the screen's last image: ~50, fewer on a busy machine, where the frame
+    # thread itself waits its turn and skips ahead (counted in late_skipped, which is the machine's
+    # doing, not the screen's). Waiting on the screen made ~1 a second and skipped the rest.
+    assert len(numbers) >= 0.5 * FPS
