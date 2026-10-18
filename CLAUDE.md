@@ -48,4 +48,5 @@ Releases as a per-user installer. These rules make agent-driven changes safe to 
   a job that builds unreviewed code, and never add a client secret or certificate file for signing.
 - Pin GitHub Actions to full commit SHAs; pin Python dependencies in `requirements.txt`.
 - The keyboard hook (`snipforge/hotkey.py`) must only ever act on Win+Shift+S and Print Screen.
+  Any other global shortcut goes through `RegisterHotKey` (`snipforge/shortcuts.py`), never the hook.
 - Keep the installer per-user (no admin) and the `AppId` in `packaging/installer.iss` unchanged.

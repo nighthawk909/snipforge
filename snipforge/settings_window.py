@@ -31,6 +31,8 @@ from . import __version__, autostart, prefs, project, theme
 from .capture_toolbar import MODES
 from .editor import beautify
 from .icons import icon
+from .shortcut_edit import ShortcutEdit
+from .shortcuts import ACTIONS as SHORTCUT_TITLES
 from .theme.tokens import DARK, LIGHT
 from .widgets import NavItem, Segmented, SettingRow, ToggleSwitch, stack
 
@@ -40,7 +42,7 @@ SECTIONS = {
     "general": ("General", "settings", "Startup and the clipboard.", "startup sign in clipboard copy library"),
     "capture": ("Capture", "monitor", "Which keys start a snip and what you see while choosing.",
                 "shortcut keyboard win shift print screen hotkey magnifier mode area window full screen "
-                "delay timer countdown pointer cursor mouse"),
+                "delay timer countdown pointer cursor mouse repeat last snip own custom combination library"),
     "saving": ("Saving", "save", "Where Save puts files, and in which format.",
                "save folder format png jpg beautify export"),
     "appearance": ("Appearance", "palette", "Light or dark, and the accent color used across SnipForge.",
@@ -105,10 +107,11 @@ class ThemeTile(QAbstractButton):
 
 class SettingsWindow(QMainWindow):
     def __init__(self, *, theme_manager=None, update_controller=None, hotkey=None, library_root: Path | None = None,
-                 on_shortcuts_changed=None, parent=None) -> None:
+                 on_shortcuts_changed=None, shortcuts=None, parent=None) -> None:
         super().__init__(parent)
         self._themes = theme_manager
         self._hotkey = hotkey
+        self._shortcuts = shortcuts  # snipforge.shortcuts.GlobalShortcuts: shortcuts of your own
         self._library_root = library_root
         self._on_shortcuts_changed = on_shortcuts_changed
         self.setWindowTitle("SnipForge settings")
@@ -242,6 +245,8 @@ class SettingsWindow(QMainWindow):
         self.format.set_value(prefs.export_format())
         self.start_mode.set_value(self._start_mode())
         self.delay.set_value(str(prefs.capture_delay()))
+        for action, edit in self.shortcut_edits.items():
+            edit.set_text(prefs.shortcut(action))
         self._retheme()
 
     def _retheme(self, _theme=None) -> None:
@@ -316,6 +321,7 @@ class SettingsWindow(QMainWindow):
                        self.key_win_shift_s),
             SettingRow("Print Screen opens SnipForge", "Alt+Print Screen and Win+Print Screen stay with Windows",
                        self.key_print_screen),
+            *self._shortcut_rows(),
             SettingRow("Start in", "The capture toolbar's mode when a snip starts (it remembers the last one "
                        "you used; Scrolling is chosen afresh each time)", self.start_mode),
             SettingRow("Delay", "Count down before the screen freezes, to snip menus and tooltips", self.delay),
@@ -323,6 +329,42 @@ class SettingsWindow(QMainWindow):
             SettingRow("Show the magnifier", "Pixel-exact zoom next to the pointer while you choose an area",
                        self.magnifier),
             note)
+
+    def _shortcut_rows(self) -> list[QWidget]:
+        """Shortcuts of your own: a key combination for each action, kept only if Windows lets
+        SnipForge have it. Hidden where they can't work (not Windows)."""
+        descriptions = {"snip": "Your own combination, besides Win+Shift+S and Print Screen",
+                        "repeat": "The same area as your last snip, taken straight away",
+                        "library": "Bring up the Library from anywhere"}
+        self.shortcut_edits: dict[str, ShortcutEdit] = {}
+        rows: list[QWidget] = []
+        for action, title in SHORTCUT_TITLES.items():
+            edit = ShortcutEdit(prefs.shortcut(action))
+            edit.setAccessibleName(f"Shortcut for {title}")
+            edit.changed.connect(lambda text, a=action: self._set_shortcut(a, text))
+            self.shortcut_edits[action] = edit
+            rows.append(SettingRow(title, descriptions[action], edit))
+        self.shortcut_problem = QLabel()
+        self.shortcut_problem.setProperty("sfRole", "error")
+        self.shortcut_problem.setWordWrap(True)
+        self.shortcut_problem.setTextFormat(Qt.PlainText)
+        self.shortcut_problem.hide()
+        available = self._shortcuts is not None and self._shortcuts.supported
+        for row in rows:
+            row.setVisible(available)
+        return [*rows, self.shortcut_problem]
+
+    def _set_shortcut(self, action: str, text: str) -> None:
+        problem = self._shortcuts.set(action, text) if self._shortcuts is not None else None
+        if problem:
+            self.shortcut_edits[action].set_text(prefs.shortcut(action))  # back to the one that works
+            self.shortcut_problem.setText(f"{SHORTCUT_TITLES[action]}: {problem}")
+            self.shortcut_problem.show()
+            return
+        prefs.set_shortcut(action, self._shortcuts.bindings().get(action, "") if self._shortcuts else text)
+        self.shortcut_problem.hide()
+        if self._on_shortcuts_changed is not None:
+            self._on_shortcuts_changed()
 
     @staticmethod
     def _start_mode() -> str:

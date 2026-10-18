@@ -8,7 +8,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from shiboken6 import isValid
 
 SERVER_NAME = f"SnipForge-{getpass.getuser()}"
-COMMANDS = {"home", "snip", "background", "settings"}
+COMMANDS = {"home", "snip", "repeat", "background", "settings"}
 TIMEOUT_MS = 500
 
 

@@ -5,12 +5,12 @@ import ctypes
 import logging
 import sys
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, prefs, project, theme
-from .capture import CaptureSession
+from .capture import CaptureSession, on_screen
 from .editor.window import EditorWindow
 from .home import HomeWindow
 from .hotkey import SUPPORTED as HOTKEYS_SUPPORTED
@@ -19,6 +19,9 @@ from .indexer import TextIndexer
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
 from .settings_window import SECTIONS, SettingsWindow
+from .shortcuts import ACTIONS as SHORTCUT_TITLES
+from .shortcuts import GlobalShortcuts
+from .shortcuts import label as shortcut_label
 from .single_instance import InstanceServer, send_to_running
 from .theme.tokens import BRAND
 from .update_flow import UpdateFlow
@@ -66,8 +69,17 @@ class SnipForgeApp:
         self._rehook = QTimer(interval=REHOOK_MS)
         self._rehook.timeout.connect(self._hotkey.refresh)
         self._rehook.start()
+        self._shortcuts = GlobalShortcuts()  # shortcuts of your own (RegisterHotKey, not the hook)
+        self._shortcuts.triggered.connect(self._on_shortcut, Qt.QueuedConnection)
+        shortcut_problems = self._shortcuts.apply_saved()
         self._build_tray()
+        if shortcut_problems:
+            self._tray.showMessage(
+                "SnipForge", "Some of your shortcuts couldn't be set: " + " ".join(
+                    f"{SHORTCUT_TITLES[action]}: {problem}" for action, problem in shortcut_problems.items())
+                + " Change them in Settings > Capture.", QSystemTrayIcon.Warning)
         app.aboutToQuit.connect(self._hotkey.stop)
+        app.aboutToQuit.connect(self._shortcuts.close)
         app.aboutToQuit.connect(self.indexer.close)
 
     # ------------------------------------------------------------------ tray
@@ -78,6 +90,8 @@ class SnipForgeApp:
         self._updates.ui_shows_updates = self._settings_shows_updates
         menu = QMenu()
         menu.addAction("New snip", self.capture)
+        self._repeat_action = menu.addAction("Repeat last snip", self.repeat_last)
+        self._repeat_action.setEnabled(prefs.last_area() is not None)  # after the first snip
         self._cancel_snip_action = menu.addAction("Cancel snip", self.cancel_snip)
         self._cancel_snip_action.setVisible(False)  # only while a snip is under way
         menu.addAction("Library", self.show_home)
@@ -100,6 +114,8 @@ class SnipForgeApp:
     def _update_tray_tip(self) -> None:
         keys = [name for name, on in zip(("Win+Shift+S", "Print Screen"), prefs.hotkeys(), strict=True)
                 if on and HOTKEYS_SUPPORTED]
+        if own := self._shortcuts.bindings().get("snip"):
+            keys.append(shortcut_label(own))
         click = "click this icon, then New snip" if sys.platform == "darwin" else "click this icon to snip"
         how = " or ".join(keys) if keys else click
         self._tray.setToolTip(f"SnipForge {__version__} — {how}")
@@ -125,7 +141,8 @@ class SnipForgeApp:
             self._settings = SettingsWindow(theme_manager=theme.get_manager(),
                                             update_controller=self._updates.controller,
                                             hotkey=self._hotkey, library_root=self.library.root,
-                                            on_shortcuts_changed=self._update_tray_tip)
+                                            on_shortcuts_changed=self._update_tray_tip,
+                                            shortcuts=self._shortcuts)
         self._settings.show_section(section if section in SECTIONS else "general")
         self._settings.showNormal()
         self._bring_to_front(self._settings)
@@ -142,6 +159,8 @@ class SnipForgeApp:
     def handle_command(self, command: str) -> None:
         if command == "snip":
             self.capture()
+        elif command == "repeat":
+            self.repeat_last()
         elif command == "home":
             self.show_home()
         elif command == "settings":
@@ -161,9 +180,32 @@ class SnipForgeApp:
         if self._session is not None:
             self._session.snip_now()  # pressed again during a countdown: don't wait
             return
-        self._session = CaptureSession(self._on_captured)
+        self._start(CaptureSession(self._on_captured))
+
+    def repeat_last(self) -> None:
+        """Repeat last snip: the same area of the same monitor again, straight away (after the
+        delay, if one is set). With nothing to repeat, or an area that's gone, a normal snip."""
+        if self._session is not None:
+            self._session.snip_now()
+            return
+        last = prefs.last_area()
+        area = (last[0], QRect(*last[1])) if last is not None else None
+        if area is None or not on_screen(*area):
+            self._tray.showMessage(
+                "SnipForge", "Nothing to repeat yet: choose what to snip." if area is None
+                else "Your last snip's area isn't on screen any more, so choose what to snip.",
+                QSystemTrayIcon.Information, 4000)
+            self.capture()
+            return
+        self._start(CaptureSession(self._on_captured, repeat=area))
+
+    def _start(self, session: CaptureSession) -> None:
+        self._session = session
         self._cancel_snip_action.setVisible(True)
-        QTimer.singleShot(CAPTURE_DELAY_MS, self._session.start)
+        QTimer.singleShot(CAPTURE_DELAY_MS, session.start)
+
+    def _on_shortcut(self, action: str) -> None:
+        {"snip": self.capture, "repeat": self.repeat_last, "library": self.show_home}[action]()
 
     def cancel_snip(self) -> None:
         """From the tray: stop a snip in progress, e.g. during a countdown, which has no keyboard."""
@@ -173,12 +215,17 @@ class SnipForgeApp:
     def _on_captured(self, image: QImage | None) -> None:
         source = self._session.source if self._session is not None else None
         note = getattr(self._session, "note", None)
+        area = getattr(self._session, "area", None)
         self._session = None
         self._cancel_snip_action.setVisible(False)
         if note:  # a scrolling capture that ended early says why
             self._tray.showMessage("SnipForge", note, QSystemTrayIcon.Information, 6000)
         if image is None:
             return
+        if area is not None:  # for Repeat last snip
+            name, rect = area
+            prefs.set_last_area(name, rect.x(), rect.y(), rect.width(), rect.height())
+            self._repeat_action.setEnabled(True)
         if prefs.copy_on_capture():  # like Win+Shift+S: the raw snip is on the clipboard too
             QGuiApplication.clipboard().setImage(image)
         try:
@@ -266,6 +313,8 @@ def _command_from_args(argv: list[str]) -> str:
         return "background"
     if "--snip" in argv:
         return "snip"
+    if "--repeat" in argv:
+        return "repeat"
     if "--settings" in argv:
         return "settings"
     return "home"

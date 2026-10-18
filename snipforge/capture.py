@@ -51,6 +51,17 @@ def _grab_screen(screen) -> QPixmap:
     return screen.grabWindow(0)
 
 
+def on_screen(name: str, rect: QRect) -> bool:
+    """Whether a remembered area (a monitor's name, and screen pixels on it) is still all on that
+    monitor, for Repeat last snip."""
+    screen = next((s for s in QGuiApplication.screens() if s.name() == name), None)
+    if screen is None:
+        return False
+    dpr = screen.devicePixelRatio()
+    size = QSize(round(screen.geometry().width() * dpr), round(screen.geometry().height() * dpr))
+    return QRect(QPoint(0, 0), size).contains(rect)
+
+
 def _pointer_unavailable_reason() -> str:
     if pointer.available():
         return "The pointer was hidden when the screen froze"
@@ -91,6 +102,7 @@ class _ScreenOverlay(QWidget):
         self._sources = [(local, info) for r, info in zip(window_rects, sources or [], strict=False)
                          if (local := self._map(origin, r)) is not None]
         self.last_source = None  # the window the latest selection came from, if any
+        self.last_rect: QRect | None = None  # the latest snip, in this monitor's screen pixels
         self._magnifier = prefs.magnifier()
         self._press: QPoint | None = None
         self._current: QPoint | None = None
@@ -557,6 +569,7 @@ class _ScreenOverlay(QWidget):
         """Snip `physical` (screen pixels); `sel` is the same area in overlay coordinates."""
         image = self._image.copy(physical)
         image.setDevicePixelRatio(1.0)
+        self.last_rect = QRect(physical)
         self.last_source = self._source_for(sel)
         self.selected.emit(image)
 
@@ -572,8 +585,12 @@ def _nudge_step(modifiers) -> int:
 class CaptureSession:
     """Owns the overlays for one capture; calls back with the image or None."""
 
-    def __init__(self, on_done) -> None:
+    def __init__(self, on_done, repeat: tuple[str, QRect] | None = None) -> None:
+        """`repeat`: Repeat last snip, (monitor name, area in its screen pixels) taken again with no
+        overlay."""
         self._on_done = on_done
+        self._repeat = repeat
+        self.area: tuple[str, QRect] | None = None  # where the snip came from, for the next repeat
         self._overlays: list[_ScreenOverlay] = []
         self._finished = False
         self.focus: _ScreenOverlay | None = None  # the overlay that has the keyboard
@@ -628,7 +645,10 @@ class CaptureSession:
 
     def _freeze(self) -> None:
         try:
-            self._show_overlays()
+            if self._repeat is not None:
+                self._take_again()
+            else:
+                self._show_overlays()
         except Exception:  # never leave a half-open session that blocks the next snip
             logging.getLogger(__name__).exception("Capture failed to start")
             self._finish(None)
@@ -655,7 +675,7 @@ class CaptureSession:
                                      delay=prefs.capture_delay(), pointer_shot=shot,
                                      include_pointer=prefs.capture_pointer(),
                                      scrolling=scroll_input.available(), fixed_size=prefs.capture_fixed_size())
-            overlay.selected.connect(lambda image, o=overlay: self._finish(image, o.last_source))
+            overlay.selected.connect(lambda image, o=overlay: self._took(o, image))
             overlay.cancelled.connect(lambda: self._finish(None))
             overlay.mode_changed.connect(self._set_mode)
             overlay.delay_changed.connect(self._set_delay)
@@ -719,6 +739,38 @@ class CaptureSession:
             logging.getLogger(__name__).exception("Scrolling capture failed to start")
             self.note = "Scrolling capture couldn't start. Try again, or snip the area instead."
             self._finish(None)
+
+    def _took(self, overlay: _ScreenOverlay, image: QImage) -> None:
+        """A snip chosen on `overlay` (or repeated there): remember where, for Repeat last snip."""
+        if overlay.last_rect is not None:
+            self.area = (overlay.capture_screen.name(), QRect(overlay.last_rect))
+        self._finish(image, overlay.last_source)
+
+    def _take_again(self) -> None:
+        """Repeat last snip: the same area of the same monitor, straight away. It goes through an
+        overlay that's never shown, so the pointer, the window it came from and the image come out
+        exactly as a chosen snip's would. An area that's no longer on screen gets a normal snip."""
+        name, rect = self._repeat
+        self._repeat = None
+        screen = next((s for s in QGuiApplication.screens() if s.name() == name), None)
+        shot = pointer.grab() if screen is not None else None  # first, as for any snip
+        pixmap = _grab_screen(screen) if screen is not None else None
+        if pixmap is None or not QRect(QPoint(0, 0), pixmap.size()).contains(rect):
+            self.note = "Your last snip's area isn't on screen any more, so choose what to snip."
+            self._show_overlays()
+            return
+        try:
+            from .winrects import window_infos
+            infos = window_infos()
+        except OSError:
+            infos = []
+        overlay = _ScreenOverlay(screen, pixmap, [info.rect for info in infos], infos, pointer_shot=shot,
+                                 include_pointer=prefs.capture_pointer(), scrolling=False)
+        try:
+            overlay.selected.connect(lambda image: self._took(overlay, image))
+            overlay._emit_physical(rect, overlay._to_logical(rect))
+        finally:
+            overlay.deleteLater()
 
     def _scroll_done(self, image, source) -> None:
         self.note = getattr(self.scrolling, "note", None)

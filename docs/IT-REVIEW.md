@@ -41,6 +41,12 @@ claim. The hook only acts on **S while Win+Shift are held** and **Print Screen w
 through. Nothing is logged, stored or sent anywhere. Endpoint tools sometimes flag any keyboard hook
 as keylogger-like; this is a false positive, and the ~150-line source shows the full logic.
 
+**Shortcuts of your own** (optional, `snipforge/shortcuts.py`). In Settings > Capture a user can
+add key combinations for New snip, Repeat last snip and Open the Library. These are registered with
+`RegisterHotKey`, not the hook: Windows tells SnipForge only when one of its own combinations is
+pressed and never shows it any other keystroke. Each needs Ctrl, Alt or the Windows key; a
+combination another app already registered is refused. None are set by default.
+
 **Screen capture.** The screen is read only after the hotkey is pressed or the user chooses New snip.
 
 **Startup entry** (optional). Written to the `Run` key so the hotkey works after sign-in.
