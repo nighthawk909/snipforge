@@ -127,13 +127,7 @@ class _ScreenOverlay(WindowKeys, QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)  # Tab goes round the toolbar and back here
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setAccessibleName("Choose what to snip")
-        self.setAccessibleDescription(
-            "A to drag an area, W for a window (arrow keys go from window to window), F for the full screen, "
-            "X for a fixed size frame (arrow keys move it, Enter snips it, X again picks its size), "
-            + ("S to scroll a long page or list, " if self._scrolling else "")
-            + "Enter for the whole monitor, D for a delay, P to include the pointer, "
-            + ("1 to 9 for a capture preset and 0 for your usual choices, " if presets else "") + "Esc to cancel")
+        self._describe_keys(bool(presets))  # capture_keys.py
 
     # ------------------------------------------------------------------ what's on screen
     def _pointer_shown(self) -> bool:
@@ -502,6 +496,8 @@ class _ScreenOverlay(WindowKeys, QWidget):
         self._emit(sel)
 
     def keyPressEvent(self, e) -> None:
+        if self._window_key(e):  # the arrow keys choosing a window, and Enter snipping it (capture_keys.py)
+            return
         if e.key() == Qt.Key_Escape:
             self.cancelled.emit()
         elif e.key() in (Qt.Key_Return, Qt.Key_Enter):

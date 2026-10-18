@@ -5,7 +5,7 @@ or changing the mode hands the choice back. Mixed into the capture overlay (capt
 Tab for its toolbar."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRect, Qt
+from PySide6.QtCore import QRect, Qt
 
 KEYS_ON = (Qt.Key_Right, Qt.Key_Down)
 KEYS_BACK = (Qt.Key_Left, Qt.Key_Up)
@@ -13,19 +13,25 @@ CHOOSING_MODES = ("window", "area", "scroll")
 
 
 class WindowKeys:
-    """For _ScreenOverlay: uses its mode, window list, hover, dragging state and _emit."""
+    """For _ScreenOverlay: uses its mode, window list, hover, dragging state and _emit. Its
+    keyPressEvent asks _window_key first, since Enter otherwise means the whole monitor. (No event()
+    override: that would run Python for every event the overlay gets.)"""
 
     _key_choice: tuple[str, int] | None = None  # (the mode it was made in, which of _choices())
 
-    def event(self, e) -> bool:
-        """Ahead of the overlay's own key handling, where Enter means the whole monitor."""
-        if e.type() == QEvent.MouseMove:
-            self._key_choice = None  # the pointer leads again
-        elif e.type() == QEvent.KeyPress and self._window_key(e):
-            return True
-        return super().event(e)
+    def _describe_keys(self, presets: bool) -> None:
+        """The overlay's name and keys, for screen readers."""
+        self.setAccessibleName("Choose what to snip")
+        self.setAccessibleDescription(
+            "A to drag an area, W for a window (arrow keys go from window to window), F for the full screen, "
+            "X for a fixed size frame (arrow keys move it, Enter snips it, X again picks its size), "
+            + ("S to scroll a long page or list, " if self._scrolling else "")
+            + "Enter for the whole monitor, D for a delay, P to include the pointer, "
+            + ("1 to 9 for a capture preset and 0 for your usual choices, " if presets else "") + "Esc to cancel")
 
     def _window_key(self, e) -> bool:
+        """True if `e` chose a window or snipped the one chosen (a moved pointer changes what's shown,
+        and so what Enter snips: _chosen checks)."""
         plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
         if self._mode not in CHOOSING_MODES or self._press is not None or not plain:
             return False

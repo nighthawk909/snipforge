@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import QGraphicsItem
 
 from .commands import StateCommand
@@ -23,16 +23,14 @@ PLACED_MIN = (40.0, 30.0)
 class KeyboardMixin:
     """For the Canvas: uses its scene, selection, tool, undo stack, `notice` and DrawMixin's creation."""
 
-    def event(self, e) -> bool:
-        if (e.type() == QEvent.KeyPress and e.key() in (Qt.Key_Tab, Qt.Key_Backtab)
-                and not e.modifiers() & (Qt.ControlModifier | Qt.AltModifier) and self.editing_text_item() is None
-                and not self.choosing() and not self.picking() and not self.crop_editing()):
-            forward = e.key() == Qt.Key_Tab and not e.modifiers() & Qt.ShiftModifier
-            if not self.step_selection(forward):
-                self._scene.clearSelection()
-                self.focusNextPrevChild(forward)  # on to the next part of the window
-            return True
-        return super().event(e)
+    def focusNextPrevChild(self, forward: bool) -> bool:  # noqa: N802 - Qt API
+        """Tab and Shift+Tab on the canvas (Qt asks this only when no markup is being typed in:
+        the scene keeps Tab then). Not an event() override, which would run Python for every event."""
+        if self.hasFocus() and not (self.choosing() or self.picking() or self.crop_editing()):
+            if self.step_selection(forward):
+                return True
+            self._scene.clearSelection()  # past the end: on to the next part of the window
+        return super().focusNextPrevChild(forward)
 
     def step_selection(self, forward: bool) -> bool:
         """Select the next (or previous) markup; False past the end, or when there's none."""

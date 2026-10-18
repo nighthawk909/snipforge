@@ -174,7 +174,7 @@ class HomeWindow(QMainWindow):
         self._stack = QStackedWidget()
         self.grid = SnipGrid()
         self.grid.activated.connect(lambda index: self._open_ids([self.grid.current_id()]))
-        self.grid.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.grid.setContextMenuPolicy(Qt.DefaultContextMenu)  # SnipGrid.contextMenuEvent asks for the menu
         self.grid.customContextMenuRequested.connect(self._context_menu)
         self.grid.delegate.favorite_clicked.connect(self.toggle_favorite)
         self.grid.delegate.copy_clicked.connect(self._copy)
