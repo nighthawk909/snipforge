@@ -55,6 +55,12 @@ selected. Everything you add stays editable:
 
 Undo/redo, duplicate (Ctrl+D), nudge with arrow keys, zoom with Ctrl+wheel.
 
+**Edit the snip itself.** With the Select tool, the panel's **Image** section turns the snip left or
+right (Ctrl+Shift+R, Ctrl+R), flips it, and resizes it by pixels or percent with the aspect ratio
+kept. Your markup follows: shapes and blurs turn with the image, while text, callouts and stamps
+move with it and stay upright. Each change is one undo step, and the original capture is never
+lost, so resizing down and back up gives you the original pixels.
+
 **Share.** Copy (Ctrl+C), save (Ctrl+S), or use **Share**: a new Outlook email with the snip inline,
 open a Teams chat with the people you pick, get a OneDrive link, or the Windows share sheet.
 **Drag out** drops the image straight into Teams, Outlook, PowerPoint or a folder.

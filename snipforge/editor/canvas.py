@@ -12,23 +12,29 @@ from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 from .. import theme
 from .beautify import BeautifyStyle
 from .canvas_draw import DrawMixin
+from .canvas_image import ImageMixin
 from .canvas_input import InputMixin
 from .canvas_view import MAX_ZOOM as MAX_ZOOM  # re-exported: the window's zoom buttons use these
 from .canvas_view import MIN_ZOOM as MIN_ZOOM
-from .canvas_view import ViewMixin
+from .canvas_view import SCENE_MARGIN, ViewMixin
 from .commands import AddItemsCommand, CropCommand, RemoveItemsCommand, StateCommand
 from .crop import MIN_CROP, CropMask
 from .factory import create_item
 from .handles import HandleOverlay
+from .image_ops import ImageGeometry
 from .items import Annotation, EffectItem
 from .style import DEFAULT_TOOL_STYLES, Style
 from .text_items import EditableText
 
 DUPLICATE_OFFSET = 16.0
-SCENE_MARGIN = 60.0
+DOCUMENT_VERSION = 1  # documents from newer versions are opened read-only (see load_document)
 
 
-class Canvas(InputMixin, DrawMixin, ViewMixin, QGraphicsView):
+class UnsupportedDocument(ValueError):
+    """Saved by a newer SnipForge, in a way this version can't show correctly."""
+
+
+class Canvas(InputMixin, DrawMixin, ImageMixin, ViewMixin, QGraphicsView):
     tool_changed = Signal(str)
     selection_changed = Signal()
     zoom_changed = Signal(float)
@@ -36,7 +42,9 @@ class Canvas(InputMixin, DrawMixin, ViewMixin, QGraphicsView):
 
     def __init__(self, image: QImage, tool_styles: dict[str, Style] | None = None, parent=None) -> None:
         super().__init__(parent)
-        self.base_image = image
+        self.original_image = image  # as captured; never changed
+        self.base_image = image  # what you mark up: the original turned, flipped or resized
+        self._geometry = ImageGeometry.of(image)
         self.undo_stack = QUndoStack(self)
         self.tool = "select"
         self.tool_styles: dict[str, Style] = {**DEFAULT_TOOL_STYLES, **(tool_styles or {})}
@@ -291,10 +299,24 @@ class Canvas(InputMixin, DrawMixin, ViewMixin, QGraphicsView):
         items = sorted(self.annotations(), key=lambda i: i.zValue())
         r = self._crop_rect
         states = [i.get_state() for i in items if not i.is_degenerate()]
-        return {"version": 1, "crop": [r.x(), r.y(), r.width(), r.height()],
-                "items": states + self._unparsed}
+        doc = {"version": 1, "crop": [r.x(), r.y(), r.width(), r.height()], "items": states + self._unparsed}
+        if not self._geometry.is_original(self.original_image):
+            doc["image"] = self._geometry.to_dict()  # items and crop are on the turned/resized image
+        return doc
 
     def load_document(self, doc: dict) -> None:
+        """Raises UnsupportedDocument, before changing anything, for a document whose markup this
+        version would put in the wrong place. The caller opens the snip without it and doesn't
+        autosave, so the file and its rendered image aren't overwritten."""
+        version = doc.get("version", 1)
+        if not isinstance(version, int) or version > DOCUMENT_VERSION:
+            raise UnsupportedDocument(f"document version {version!r} is newer than this SnipForge")
+        if "image" in doc:
+            geometry = ImageGeometry.from_dict(doc["image"], self.original_image.size())
+            if geometry is None:
+                raise UnsupportedDocument(f"can't draw the snip as saved: {doc['image']!r}"[:200])
+            self.set_image_geometry(geometry)
+            self.set_crop_rect(QRectF(self._image_rect))  # until the saved crop says otherwise
         for state in doc.get("items", []):
             try:
                 self._scene.addItem(self._adopt(create_item(state, self.base_image, self._image_rect)))

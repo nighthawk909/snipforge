@@ -37,6 +37,10 @@ class HandleOverlay(QGraphicsItem):
             self._hover = item
             self.update()
 
+    def set_bounds(self, bounds: QRectF) -> None:
+        self.prepareGeometryChange()
+        self._bounds = QRectF(bounds)
+
     @property
     def target(self):
         return self._selected[0] if len(self._selected) == 1 else None

@@ -282,6 +282,12 @@ class EffectItem(BoxItem):
     def kind(self) -> str:  # type: ignore[override]
         return self.mode
 
+    def set_base(self, base: QImage) -> None:
+        """The snip was turned or resized: blur or pixelate the new pixels."""
+        self._base = base
+        self._cache = None
+        self.update()
+
     def _margin(self) -> float:
         return 1.0
 
@@ -321,6 +327,11 @@ class SpotlightItem(BoxItem):
         self._image_rect = QRectF(image_rect)
         super().__init__(style)
         self.setZValue(-500)  # under other annotations so they stay lit
+
+    def set_image_rect(self, image_rect: QRectF) -> None:
+        self.prepareGeometryChange()
+        self._image_rect = QRectF(image_rect)
+        self.update()
 
     def boundingRect(self) -> QRectF:
         return self.mapRectFromScene(self._image_rect).united(self._rect).adjusted(-2, -2, 2, 2)

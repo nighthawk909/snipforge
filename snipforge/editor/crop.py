@@ -98,6 +98,12 @@ class CropMask(QGraphicsItem):
         self.crop = QRectF(rect)
         self.update()
 
+    def set_image_rect(self, rect: QRectF) -> None:
+        """The snip was turned or resized."""
+        self.prepareGeometryChange()
+        self._image = QRectF(rect)
+        self.update()
+
     def set_background(self, color: QColor) -> None:
         self._background = QColor(color)
         self.update()

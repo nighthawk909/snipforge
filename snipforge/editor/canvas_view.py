@@ -8,6 +8,7 @@ from .. import theme
 
 DOT_GAP = 18  # on-screen pixels between background dots
 MIN_ZOOM, MAX_ZOOM = 0.05, 16.0
+SCENE_MARGIN = 60.0  # room to scroll past the snip's edges
 
 
 class ViewMixin:
