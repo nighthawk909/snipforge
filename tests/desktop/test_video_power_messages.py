@@ -20,11 +20,11 @@ def real_platform(qapp):
         pytest.skip("desktop tests need a real display: set QT_QPA_PLATFORM=windows")
 
 
-def send(window: int, message: int, wparam: int) -> int:
+def send(window: int, message: int, wparam: int, lparam: int = 0) -> int:
     user32 = ctypes.WinDLL("user32")
     user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     user32.SendMessageW.restype = ctypes.c_ssize_t
-    return user32.SendMessageW(window, message, wparam, 0)
+    return user32.SendMessageW(window, message, wparam, lparam)
 
 
 def top_level_windows() -> list[int]:
@@ -56,3 +56,24 @@ def test_sleep_and_session_end_are_signalled_while_windows_waits(qapp):
     finally:
         watch.close()
     assert watch.window_id == 0
+
+
+def test_the_screen_and_the_lock_are_signalled_and_windows_agreed_to_tell(qapp):
+    watch = power.SessionWatch()
+    heard = []
+    for name in ("display_off", "display_on", "locked", "unlocked"):
+        getattr(watch, name).connect(lambda name=name: heard.append(name))
+    try:
+        assert watch._display_note and watch._session_note  # Windows will send these for real
+        off = power.POWERBROADCAST_SETTING(power.CONSOLE_DISPLAY_STATE, 4, 0)
+        on = power.POWERBROADCAST_SETTING(power.CONSOLE_DISPLAY_STATE, 4, 1)
+
+        send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_POWERSETTINGCHANGE, ctypes.addressof(off))
+        send(watch.window_id, power.WM_WTSSESSION_CHANGE, power.WTS_SESSION_LOCK)
+        send(watch.window_id, power.WM_WTSSESSION_CHANGE, power.WTS_SESSION_UNLOCK)
+        send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_POWERSETTINGCHANGE, ctypes.addressof(on))
+
+        assert heard[-4:] == ["display_off", "locked", "unlocked", "display_on"]
+    finally:
+        watch.close()
+    assert watch._display_note is None and watch._session_note is False

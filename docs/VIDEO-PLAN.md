@@ -270,7 +270,7 @@ encoding, or a Windows-only ffmpeg.exe, would each be a second encoder to write 
 | Qt changes between releases (frame timestamps, container quirks, codec fallbacks, FFmpeg's DLL versions) | Tests pin each behaviour the design relies on (see the build plan); the ctypes layer refuses to run with an FFmpeg major version it wasn't tested with, and says so, instead of misbehaving. Dependabot's PySide6 updates run those tests. |
 | Monitors: several, mixed scaling, rotated, HDR | One monitor per recording; physical pixels throughout; rotation handled when drawing; DXGI hands HDR screens over in normal colour (the prototype requests 8-bit BGRA). Each gets a manual check in the hardening PR. |
 | Microphone muted or blocked by privacy settings | The ready panel shows the live level before recording and names the cause (Windows mute, privacy setting, no device). |
-| UAC prompts, the lock screen, sleep | DXGI reopens after a desktop switch (in the prototype); frames meanwhile repeat the last image; sleep pauses the recording. |
+| UAC prompts, the lock screen, sleep, the screen turning off | DXGI reopens after a desktop switch; frames meanwhile repeat the last image. Locking pauses the recording (and says so); sleep and the session ending finish the file first; Windows is asked not to sleep or turn the screen off for inactivity while recording, and a screen turned off anyway is mentioned. |
 
 ## Build plan
 
@@ -355,7 +355,13 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    recording stops and is kept, since a full drive can't finish the file), Windows "N" editions
    (`support.py`: the recorder and the self-test say to add the Media Feature Pack), a sound device
    unplugged (a warning, step 5), the screen lost (kept, step 5), sleep, shutdown and sign-out
-   (the file is finished first, step 5b).
+   (the file is finished first, step 5b). Staying awake: while recording, Windows isn't to sleep
+   or turn the screen off for inactivity (`power.stay_awake`, `SetThreadExecutionState` on the
+   recorder process's main thread, given back when it ends). Lock: Windows locked (Win+L, or by
+   policy) pauses the recording with a note; it's resumed from the control bar (`power.py` listens
+   with `WTSRegisterSessionNotification`). The screen turning off anyway (a closed lid set to do
+   nothing, say) is mentioned: the video shows the last picture until it's back
+   (`RegisterPowerSettingNotification`, `GUID_CONSOLE_DISPLAY_STATE`).
 
 Later, not in Phase 4: following a moving or covered window (Windows.Graphics.Capture), editing the
 pointer effects after recording (by saving the pointer's path separately), noise suppression.

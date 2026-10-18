@@ -58,7 +58,13 @@ area. Before recording starts, the panel beside the area opens the microphone an
 sound only to show their levels; they're let go when Record or Cancel is clicked. While recording,
 the recorder process has them open (Windows shows its microphone-in-use icon), and SnipForge's
 control bar (pause, stop, discard) stays on screen, kept out of the recording itself. Nothing is sent anywhere:
-the recording is saved in the Library folder (see Data on the PC).
+the recording is saved in the Library folder (see Data on the PC). While it records, the recorder
+process asks Windows not to sleep or turn the screen off for inactivity (`SetThreadExecutionState`,
+the request video players and calls make), so like a video call it can keep the screen from locking
+for inactivity until the recording ends; the request ends with the recording (or the process).
+Sleep the user asks for (closing the lid, Start > Sleep) still happens, once the file is finished.
+Locking Windows pauses the recording: the locked screen can't be recorded, and the microphone
+shouldn't go on recording an empty desk. It's resumed from the control bar.
 
 **Webcam** (optional, off until the user switches Camera on when getting ready to record). The
 camera is opened only while that switch is on, for the bubble that shows it and for the recording;

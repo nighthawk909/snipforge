@@ -31,7 +31,7 @@ from PySide6.QtCore import QCoreApplication, QObject, QTimer
 
 from .. import __version__
 from .channel import Channel, connect, is_name, settings_from_message
-from .power import SessionWatch
+from .power import SessionWatch, stay_awake
 from .recorder import ACTIVE, Recorder, RecordingError
 
 log = logging.getLogger(__name__)
@@ -82,9 +82,11 @@ def main(argv: list[str] | None = None) -> int:
 class RecorderChild(QObject):
     """The recorder process's side of the channel: runs one Recorder as SnipForge says."""
 
-    def __init__(self, channel: Channel, watch, *, make_recorder=None, quit=None) -> None:
+    def __init__(self, channel: Channel, watch, *, make_recorder=None, quit=None, keep_awake=None) -> None:
         super().__init__()
         self.channel, self.watch = channel, watch
+        self._keep_awake = keep_awake or stay_awake
+        self._awake = False
         self.recorder = None
         self.ended_by: str | None = None  # "sleep", "session end", "SnipForge closed"
         self._make_recorder = make_recorder or self._recorder_with_camera
@@ -99,6 +101,8 @@ class RecorderChild(QObject):
         watch.ending_soon.connect(self._ending_soon)
         watch.ending.connect(self._ending)
         watch.not_ending.connect(watch.allow_shutdown)
+        watch.display_off.connect(self._display_off)
+        watch.locked.connect(self._locked)
         channel.send("hello", pid=os.getpid(), window=watch.window_id, version=__version__)
         QTimer.singleShot(START_TIMEOUT_MS, self, self._check_told)
 
@@ -151,6 +155,7 @@ class RecorderChild(QObject):
         except RecordingError as exc:
             self._report_failure(str(exc))
             return
+        self._awake = self._keep_awake(True)  # no idle sleep or dark screen until it's over
         self._progress.start()
 
     def _send_progress(self) -> None:
@@ -185,7 +190,7 @@ class RecorderChild(QObject):
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
             self.ended_by = self.ended_by or "sleep"
             if not self.recorder.finish_now(SLEEP_FINISH_SECONDS):
-                self._late("Windows went to sleep before the recording was finished; it finishes on waking")
+                self._warn("Windows went to sleep before the recording was finished; it finishes on waking")
 
     def _ending_soon(self) -> None:
         if self.recorder is not None and self.recorder.state in ACTIVE:
@@ -195,10 +200,21 @@ class RecorderChild(QObject):
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
             self.ended_by = self.ended_by or "session end"
             if not self.recorder.finish_now(END_FINISH_SECONDS):
-                self._late("Windows ended the session before the recording was finished")
+                self._warn("Windows ended the session before the recording was finished")
         self.watch.allow_shutdown()
 
-    def _late(self, message: str) -> None:
+    def _display_off(self) -> None:
+        if self.recorder is not None and self.recorder.state == "recording":
+            self._warn("The screen turned off: until it's back on, the recording shows the last picture")
+
+    def _locked(self) -> None:
+        """Locked, the screen can't be recorded, and whoever locked it has probably walked away from a
+        microphone still recording: paused, to be resumed from the control bar."""
+        if self.recorder is not None and self.recorder.state == "recording":
+            self.recorder.pause()
+            self._warn("Windows was locked, so the recording is paused: resume it from the control bar")
+
+    def _warn(self, message: str) -> None:
         log.warning(message)
         self.channel.send("warning", message=message)
 
@@ -231,6 +247,9 @@ class RecorderChild(QObject):
             return
         self._done = True
         self._progress.stop()
+        if self._awake:
+            self._awake = False
+            self._keep_awake(False)
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
             self.recorder.finish_now(EXIT_FINISH_SECONDS)  # reports "finished" on the way
         self.channel.close()
