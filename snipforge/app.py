@@ -134,7 +134,7 @@ class SnipForgeApp:
         self._repeat_action.setEnabled(prefs.last_area() is not None)  # after the first snip
         self._presets_menu = menu.addMenu("Snip with a preset")
         self._show_presets()
-        presets.changes().changed.connect(self._show_presets)
+        presets.changes().changed.connect(self._presets_changed)
         self._cancel_snip_action = menu.addAction("Cancel snip", self.cancel_snip)
         self._cancel_snip_action.setVisible(False)  # only while a snip is under way
         self._record_action = menu.addAction("Record video", self.record)
@@ -156,6 +156,11 @@ class SnipForgeApp:
             self._tray.showMessage("SnipForge", "Couldn't install the keyboard hook, so Win+Shift+S "
                                    "won't work. Use the tray icon to snip.", QSystemTrayIcon.Warning)
         self._updates.start()
+
+    def _presets_changed(self) -> None:
+        """Presets added, changed or deleted (Settings checked each new shortcut before saving it)."""
+        self._shortcuts.apply_presets(presets.load())
+        self._show_presets()
 
     def _show_presets(self) -> None:
         """The tray's capture presets (a submenu shown only when there are any)."""

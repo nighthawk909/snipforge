@@ -21,7 +21,7 @@ be checked in the source code; file references are given where useful.
 | What | Where | Removed on uninstall? |
 |---|---|---|
 | The user's snips (original capture, editable markup, rendered image) | `%USERPROFILE%\Pictures\SnipForge` | No (it's the user's work) |
-| Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses, update choices (mode, channel, pinned or skipped version, the waiting download), capture choices (mode, delay, pointer, Fixed size), shortcuts of your own, which version of the private-window check last swept the Library, and the last snip's area for Repeat last snip (the monitor's name, position, size and scale, and a rectangle on it; no image) | `HKCU\Software\SnipForge\SnipForge` | Yes |
+| Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses, update choices (mode, channel, pinned or skipped version, the waiting download), capture choices (mode, delay, pointer, Fixed size), capture presets (a name, those choices, effects, where the snip goes and, for Save to a folder, the folder's path, and each one's shortcut), shortcuts of your own, which version of the private-window check last swept the Library, and the last snip's area for Repeat last snip (the monitor's name, position, size and scale, and a rectangle on it; no image) | `HKCU\Software\SnipForge\SnipForge` | Yes |
 | Small theme images (check mark, arrows) regenerated at start | `%LOCALAPPDATA%\SnipForge\cache` | Yes |
 | Per snip in the library: `meta.json` with the app name and window title it came from (best effort: windows recognised as private browsing, such as InPrivate, Incognito, Private Browsing and their equivalents in other browsers and several languages, keep only the app name; titles an older version saved are always hidden, and cleared from these files in the background; a file locked at the time is cleared at a later start), favorite, tags, and the words Windows OCR read in the finished snip (for Library search; read offline, cleared and re-read after each edit, so blurred or cropped text doesn't stay searchable) | `%USERPROFILE%\Pictures\SnipForge\Library\<snip>` | No (it's the user's work) |
 | Screen recordings: `recording.mp4` in a folder of its own per recording (H.264 video, AAC sound), with `recording.json` (its length and size, written once it's finished, which is when the Library lists it), `preview.png` (a frame from it for its Library card, made the first time it's shown) and, once it's tagged or made a favorite, `meta.json` | `%USERPROFILE%\Pictures\SnipForge\Library\<recording>` | No (it's the user's work) |
@@ -45,12 +45,13 @@ through. Nothing is logged, stored or sent anywhere. Endpoint tools sometimes fl
 as keylogger-like; this is a false positive, and the ~150-line source shows the full logic.
 
 **Shortcuts of your own** (optional, `snipforge/shortcuts.py`). In Settings > Capture a user can
-add key combinations for New snip, Repeat last snip and Open the Library. These are registered with
+add key combinations for New snip, Repeat last snip, Open the Library, Record video and each capture
+preset. These are registered with
 `RegisterHotKey`, not the hook: Windows tells SnipForge only when one of its own combinations is
 pressed and never shows it any other keystroke. Each needs Ctrl, Alt or the Windows key; a
 combination another app already registered is refused. None are set by default.
 
-**Screen capture.** The screen is read only when the user asks for a snip: the hotkey, New snip, Repeat last snip, or one of their own shortcuts. Repeat last snip reads the same area again straight away, without the chooser. A second `SnipForge.exe --snip` or `--repeat` started by the same user is passed to the running copy over a local per-user pipe, which is how the Start menu and taskbar entries reach it.
+**Screen capture.** The screen is read only when the user asks for a snip: the hotkey, New snip, Repeat last snip, a capture preset, or one of their own shortcuts. A Full screen preset takes the monitor under the pointer without the chooser; a Save to a folder preset writes the image to the folder the user chose for it (or the Save folder). Repeat last snip reads the same area again straight away, without the chooser. A second `SnipForge.exe --snip` or `--repeat` started by the same user is passed to the running copy over a local per-user pipe, which is how the Start menu and taskbar entries reach it.
 
 **Screen recording.** The screen is recorded only after the user chooses Record video (the tray,
 the Record switch on the capture toolbar, or a shortcut they set) and then an area, and only that

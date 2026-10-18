@@ -23,6 +23,7 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | Settings, themes, accents | ✅ | 🟡 | |
 | **Capture** | The snip key (Win+Shift+S, Print Screen) | ✅ | ❌ | Phase 3: `RegisterEventHotKey` (e.g. ⌘⇧2) |
 | | Shortcuts of your own | ✅ | ❌ hidden | Phase 3: same API |
+| | Capture presets (toolbar, menu bar, Settings; effects; editor, copy or folder) | ✅ | 🟡 same code; a preset's own shortcut is hidden with the other shortcuts | Phase 3: shortcuts |
 | | Screen Recording permission check | n/a | ❌ | Phase 1 |
 | | Area and Full screen | ✅ | 🟡 needs Screen Recording | Phase 1 |
 | | Window (click a window), and where a snip came from | ✅ | ❌ | Phase 2: `CGWindowListCopyWindowInfo` |

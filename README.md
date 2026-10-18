@@ -44,6 +44,13 @@ copied to the clipboard, just like the built-in Snipping Tool. Either key can be
 Windows in Settings, and you can add **shortcuts of your own** there for New snip, Repeat last snip,
 the Library and recording a video.
 
+**Capture presets** save the ways you snip most: a mode (a Full screen preset takes the monitor
+you're on straight away), a delay, the pointer, a Fixed size, effects (Beautify, a border, torn
+edges) and where the snip goes: the editor, the clipboard, or a folder. Make them in Settings ›
+Capture, give each a shortcut of its own if you like, and pick one from the **Presets** menu on the
+capture toolbar (or press 1 to 9 there) or from the tray menu. A preset never changes your usual
+choices, and every snip still lands in the Library.
+
 **Mark up.** Every snip opens in the editor: tools on the left, the snip in the middle, and a
 properties panel on the right with **quick styles**, colors, sizes and effects for whatever you've
 selected. **Save this style** keeps the selected markup's look as one of your own quick styles for

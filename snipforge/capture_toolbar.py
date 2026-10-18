@@ -323,7 +323,7 @@ class CaptureToolbar(QFrame):
         if not presets:
             self._preset_actions = {}
         self.presets_menu.addSeparator()
-        self.presets_menu.addAction("Manage presets…", self.manage_presets)
+        self.presets_menu.addAction("Manage presets…", self.manage_presets.emit)
         self.presets_button.setMenu(self.presets_menu)
         self._preset_ids = [pid for pid, _name in presets]
         return self.presets_button

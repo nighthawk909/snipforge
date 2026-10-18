@@ -105,7 +105,7 @@ class PresetDialog(QDialog):
         self.problem.hide()
         col.addWidget(stack(
             SettingRow("Name", "", self.name),
-            SettingRow("Capture mode", "Full screen takes the monitor the pointer is on, straight away", self.mode),
+            SettingRow("Capture mode", "Full screen snips the monitor you're on at once", self.mode),
             self.size_row,
             SettingRow("Delay", "Count down before the screen freezes", self.delay),
             SettingRow("Include the mouse pointer", "", self.pointer),

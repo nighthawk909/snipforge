@@ -5,7 +5,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt
+from PySide6.QtCore import QEvent, QRect, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QKeyEvent, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
@@ -307,7 +307,8 @@ def test_a_copy_preset_copies_the_finished_snip_and_keeps_it_editable(forge):
     forge._on_captured(snip())
     copied = QGuiApplication.clipboard().image()
     pad = beautify.DEFAULT_STYLE.padding
-    assert copied.size().toTuple() == (200 + 6 + 2 * pad, 100 + 6 + 2 * pad)  # border, then Beautify
+    assert copied.size().toTuple() == (200 + 2 * pad, 100 + 2 * pad)  # Beautify around it
+    assert copied.pixelColor(pad + 1, pad + 50).name() == "#1c1c1e"  # the border, inside the snip's edge
     assert not forge._windows and "Copied (Docs)" in forge.notes[0]
     [entry] = forge.library.entries()
     document = forge.library.load_document(entry)
@@ -377,7 +378,7 @@ def fill(dialog_steps):
         dialog_steps(self)
         QTest.mouseClick(self.save_button, Qt.LeftButton)
         return self.result()
-    return PresetDialog, run
+    return PresetDialog, "exec", run
 
 
 def test_add_a_preset_from_settings(settings_window, monkeypatch):
@@ -460,12 +461,8 @@ def test_settings_finds_presets():
     assert "preset" in SECTIONS["capture"][3]
 
 
-def test_the_mac_has_presets_without_their_shortcuts(qapp):
+def test_without_shortcuts_of_your_own_presets_have_no_shortcut_row(qapp):
     from snipforge.preset_settings import PresetDialog
-    dialog = PresetDialog(DOCS, shortcuts.GlobalShortcuts(api=None) if False else None)
-    assert dialog.shortcut.parentWidget().isHidden()  # no shortcut row without shortcuts of your own
+    dialog = PresetDialog(DOCS, None)  # the Mac today: no GlobalShortcuts
+    assert dialog.shortcut.parentWidget().isHidden()
     dialog.close()
-
-
-def test_point_is_in_bounds():
-    assert QPoint(1, 1)  # keeps the QPoint import honest for the hover helpers above

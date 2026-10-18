@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, QSize, Qt, QUrl
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -344,7 +344,10 @@ class SettingsWindow(QMainWindow):
         """Settings > Capture, scrolled to the capture presets (the toolbar's Manage presets)."""
         self.show_section("capture")
         self.preset_list.refresh()
-        self._scroll.widget().layout().activate()
+        QTimer.singleShot(0, self._scroll_to_presets)  # once the page is laid out
+
+    def _scroll_to_presets(self) -> None:
+        QApplication.sendPostedEvents(None, QEvent.LayoutRequest)  # the page's new size, so it can scroll
         self._scroll.ensureWidgetVisible(self.preset_list.add_button)
         self._scroll.ensureWidgetVisible(self.preset_list, 0, 0)
 
