@@ -3,9 +3,11 @@ keyboard (and you can see where the keyboard is), and SnipForge follows the syst
 setting (Windows' contrast themes, the Mac's Increase contrast: snipforge/theme/contrast.py)."""
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QAccessible, QColor, QContextMenuEvent, QGuiApplication, QImage, QPixmap
+from PySide6.QtCore import QEvent, QRect, QRectF, Qt
+from PySide6.QtGui import QAccessible, QColor, QContextMenuEvent, QGuiApplication, QImage, QKeyEvent, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -103,6 +105,19 @@ def test_every_control_in_the_library_and_settings_has_a_name(qapp, tmp_path, mo
     settings.close()
 
 
+def test_every_control_while_taking_a_snip_has_a_name(qapp):
+    from snipforge.capture import _ScreenOverlay
+
+    desk = QPixmap(1000, 700)
+    desk.fill(QColor("#1E3550"))
+    overlay = _ScreenOverlay(QGuiApplication.primaryScreen(), desk, [QRect(100, 80, 300, 200)], mode="area",
+                             toolbar=True, scrolling=True)
+    overlay.resize(1000, 700)
+    overlay.show()
+    assert unnamed(overlay) == [] and overlay.accessibleName()
+    overlay.close()
+
+
 # --- The editor from the keyboard --------------------------------------------------------------
 def test_the_tool_rail_is_one_tab_stop_with_the_arrow_keys_inside_it(editor):
     rail = editor.tool_rail
@@ -163,22 +178,41 @@ def test_enter_with_a_drawing_tool_puts_its_markup_in_the_middle(editor):
     canvas = editor.canvas
     canvas.setFocus()
     visible = canvas.mapToScene(canvas.viewport().rect()).boundingRect().intersected(canvas.crop_rect())
-    for tool in ("rect", "arrow", "blur", "step", "stamp"):
+    kinds = {"rect": "rect", "ellipse": "ellipse", "arrow": "arrow", "line": "line", "blur": "blur",
+             "pixelate": "pixelate", "erase": "erase", "spotlight": "spotlight", "magnify": "magnify",
+             "step": "step", "stamp": "stamp", "callout": "callout"}
+    for tool, kind in kinds.items():
         canvas.set_tool(tool)
+        canvas.setFocus()
         QTest.keyClick(canvas, Qt.Key_Return)
+        canvas.commit_text()  # a callout starts you typing
         added = canvas.selected_annotations()
-        assert len(added) == 1 and added[0].kind == tool, tool
-        assert visible.contains(added[0].sceneBoundingRect().center()), tool
+        assert len(added) == 1 and added[0].kind == kind, tool
+        assert visible.intersects(added[0].sceneBoundingRect()), tool
     canvas.set_tool("text")
     QTest.keyClick(canvas, Qt.Key_Return)
     assert canvas.editing_text_item() is not None  # type straight away
     QTest.keyClicks(canvas, "Hi")
     QTest.keyClick(canvas, Qt.Key_Escape)
     assert any(getattr(i, "toPlainText", lambda: "")() == "Hi" for i in canvas.annotations())
-    canvas.set_tool("pen")
-    before = len(canvas.annotations())
-    QTest.keyClick(canvas, Qt.Key_Return)  # freehand needs a pointer: nothing, and it says so
-    assert len(canvas.annotations()) == before
+    said = []
+    canvas.notice.connect(said.append)
+    for tool in ("pen", "highlight", "move", "cutout"):  # these follow the pointer: nothing, and it says so
+        canvas.set_tool(tool)
+        before = len(canvas.annotations())
+        QTest.keyClick(canvas, Qt.Key_Return)
+        assert len(canvas.annotations()) == before and said and "pointer" in said[-1], tool
+        said.clear()
+
+
+def test_holding_enter_adds_one(editor):
+    canvas = editor.canvas
+    canvas.set_tool("step")
+    canvas.setFocus()
+    QTest.keyClick(canvas, Qt.Key_Return)
+    for _ in range(4):  # the key held down: auto-repeats
+        QApplication.sendEvent(canvas, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier, "", True))
+    assert len(canvas.annotations()) == 1
 
 
 def test_ctrl_arrows_resize_what_is_selected(editor):
@@ -194,7 +228,29 @@ def test_ctrl_arrows_resize_what_is_selected(editor):
     QTest.keyClick(canvas, Qt.Key_Left, Qt.ControlModifier | Qt.ShiftModifier)
     assert box.scene_rect().width() == size.width() - 9
     canvas.undo_stack.undo()
-    assert box.scene_rect().width() == size.width() + 1  # each press is a step
+    assert box.scene_rect().size() == size  # presses in a row are one step, as nudges are
+    canvas.set_tool("stamp")
+    canvas.setFocus()
+    QTest.keyClick(canvas, Qt.Key_Return)
+    stamp = canvas.selected_annotations()[0]
+    QTest.keyClick(canvas, Qt.Key_Right, Qt.ControlModifier)
+    QTest.keyClick(canvas, Qt.Key_Up, Qt.ControlModifier | Qt.ShiftModifier)
+    w, h = stamp.scene_rect().size().toTuple()
+    assert w == h  # stamps stay square
+
+
+def test_the_crop_moves_and_sizes_with_the_keys(editor):
+    canvas = editor.canvas
+    canvas.set_tool("crop")
+    canvas.setFocus()
+    whole = canvas.crop_rect()
+    QTest.keyClick(canvas, Qt.Key_Left, Qt.ControlModifier | Qt.ShiftModifier)  # 10 narrower
+    QTest.keyClick(canvas, Qt.Key_Up, Qt.ControlModifier)  # 1 shorter
+    QTest.keyClick(canvas, Qt.Key_Right)  # then moved a pixel right
+    QTest.keyClick(canvas, Qt.Key_Right, Qt.ShiftModifier)  # and as far as it can go (9 more)
+    QTest.keyClick(canvas, Qt.Key_Tab)  # Tab doesn't wander into the markup while cropping
+    QTest.keyClick(canvas, Qt.Key_Return)  # keeps it
+    assert canvas.crop_rect() == QRectF(whole.left() + 10, whole.top(), whole.width() - 10, whole.height() - 1)
 
 
 # --- The Library and capture from the keyboard -------------------------------------------------
@@ -213,8 +269,8 @@ def test_the_menu_key_opens_the_menu_for_the_current_snip_where_it_is(qapp, tmp_
     grid = home.grid
     grid.setCurrentIndex(grid.model().index(2, 0))
     middle = grid.viewport().rect().center()
-    QApplication.sendEvent(grid.viewport(), QContextMenuEvent(QContextMenuEvent.Keyboard, middle,
-                                                              grid.viewport().mapToGlobal(middle)))
+    QApplication.sendEvent(grid, QContextMenuEvent(QContextMenuEvent.Keyboard, middle,  # where Qt sends it
+                                                   grid.viewport().mapToGlobal(middle)))
     menu, at = shown[0]
     assert grid.visualRect(grid.currentIndex()).contains(grid.viewport().mapFromGlobal(at))
     assert grid.selected_ids() == [grid.current_id()] and menu.actions()[0].text() == "Open"
@@ -238,6 +294,25 @@ def test_the_arrow_keys_pick_a_window_to_snip_without_the_mouse(qapp):
     QTest.keyClick(overlay, Qt.Key_Return)
     assert [image.size().toTuple() for image in got] == [(200, 150)]
     assert overlay.accessibleName()
+
+
+def test_a_window_chosen_with_the_keys_is_forgotten_when_the_mode_changes(qapp):
+    from snipforge.capture import _ScreenOverlay
+
+    desk = QPixmap(1000, 700)
+    desk.fill(QColor("#1E3550"))
+    overlay = _ScreenOverlay(QGuiApplication.primaryScreen(), desk, [QRect(100, 80, 300, 200)], mode="area")
+    overlay.resize(1000, 700)
+    got = []
+    overlay.selected.connect(got.append)
+    QTest.keyClick(overlay, Qt.Key_Left)  # Area mode: round to the whole monitor, its last choice
+    QTest.keyClick(overlay, Qt.Key_W, Qt.NoModifier)
+    QTest.keyClick(overlay, Qt.Key_Return)  # nothing chosen in Window mode: the whole monitor, no error
+    QTest.keyClick(overlay, Qt.Key_Right)
+    QTest.keyClick(overlay, Qt.Key_A, Qt.NoModifier)
+    QTest.keyClick(overlay, Qt.Key_W, Qt.NoModifier)
+    QTest.keyClick(overlay, Qt.Key_Return)  # the window isn't shown any more: not snipped
+    assert [image.size().toTuple() for image in got] == [overlay.size().toTuple()] * 2
 
 
 # --- High contrast ----------------------------------------------------------------------------
@@ -264,12 +339,33 @@ def test_the_app_follows_the_system_contrast_setting(qapp, monkeypatch):
         manager.contrast_changed()
         assert manager.theme.palette.bg == "#000000" and manager.high_contrast
         assert "#1AEBFF" in qapp.styleSheet()  # focus and selection drawn in the system's highlight
+        monkeypatch.setattr(contrast, "system_colors", lambda dark: HC_WHITE)  # another contrast theme
+        QApplication.sendEvent(qapp.topLevelWidgets()[0] if qapp.topLevelWidgets() else qapp,
+                               QEvent(QEvent.ThemeChange))
+        QTest.qWait(20)
+        assert manager.theme.palette.bg == "#FFFFFF"
         monkeypatch.setattr(contrast, "high", lambda: False)
-        manager.contrast_changed()
+        QGuiApplication.styleHints().accessibility().contrastPreferenceChanged.emit(Qt.ContrastPreference.NoPreference)
         assert manager.theme == normal
     finally:
         manager.close()
         qapp.setStyleSheet("")
+
+
+def test_unreadable_system_colors_fall_back_to_black_and_white(monkeypatch):
+    import sys
+    import types
+
+    import snipforge.theme
+
+    gray = dataclasses.replace(HC_BLACK, window="#808080", text="#808080")
+    fake = types.SimpleNamespace(colors=lambda: gray)  # Windows' colors, as _contrast_win32 reads them
+    monkeypatch.setattr(contrast.sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "snipforge.theme._contrast_win32", fake)
+    monkeypatch.setattr(snipforge.theme, "_contrast_win32", fake, raising=False)
+    assert contrast.system_colors(dark=True) == contrast.DARK
+    fake.colors = lambda: HC_WHITE
+    assert contrast.system_colors(dark=True) == HC_WHITE
 
 
 def test_settings_say_when_the_system_contrast_setting_is_in_charge(qapp, tmp_path, monkeypatch):
@@ -293,23 +389,86 @@ def test_settings_say_when_the_system_contrast_setting_is_in_charge(qapp, tmp_pa
         qapp.setStyleSheet("")
 
 
-def test_where_the_keyboard_is_can_be_seen(qapp):
+def focus_shows(host: QWidget, widget: QWidget, elsewhere: QWidget) -> bool:
+    """Whether `widget` looks different with the keyboard on it (in its window, which is active)."""
+    elsewhere.setFocus(Qt.TabFocusReason)
+    QApplication.processEvents()
+    plain = widget.grab().toImage()
+    widget.setFocus(Qt.TabFocusReason)
+    QApplication.processEvents()
+    assert widget.hasFocus()
+    return widget.grab().toImage() != plain
+
+
+@pytest.mark.parametrize("theme_of", [lambda: tokens.resolve("light", tokens.BUILTIN_ACCENTS["snipforge"]),
+                                      lambda: tokens.resolve("dark", tokens.BUILTIN_ACCENTS["teal"]),
+                                      lambda: tokens.contrast_theme(HC_BLACK), lambda: tokens.contrast_theme(HC_WHITE)],
+                         ids=["light", "dark", "contrast-black", "contrast-white"])
+def test_where_the_keyboard_is_can_always_be_seen(qapp, theme_of):
+    """Every kind of control, including the ones already drawn in the accent color (a primary
+    button, a chosen option, a checked tool in high contrast, the record button)."""
+    from PySide6.QtWidgets import QCheckBox, QPushButton, QToolButton, QVBoxLayout
+
     from snipforge.theme import styles
-
-    sheet = styles.build_stylesheet(tokens.resolve("light", tokens.BUILTIN_ACCENTS["snipforge"]), {})
-    for selector in ("QToolButton:focus", "QCheckBox:focus", "QListView:focus", "QPushButton:focus"):
-        assert selector in sheet, selector
-
-
-def test_painted_controls_show_focus(qapp):
     from snipforge.widgets import ToggleSwitch
 
-    switch = ToggleSwitch()
-    switch.resize(switch.sizeHint())
-    plain = switch.grab().toImage()
-    switch.show()
-    switch.setFocus(Qt.TabFocusReason)
-    active(switch)
-    assert switch.grab().toImage() != plain
-    switch.close()
+    def inside(name: str, child: QWidget) -> QWidget:
+        box = QWidget()
+        box.setObjectName(name)
+        QVBoxLayout(box).addWidget(child)
+        return box
+
+    def button(cls, text="Go", name="", checked=None, variant=None):
+        b = cls()
+        b.setText(text)
+        b.setObjectName(name)
+        if checked is not None:
+            b.setCheckable(True)
+            b.setChecked(checked)
+        if variant:
+            b.setProperty("variant", variant)
+        return b
+
+    controls = {
+        "button": button(QPushButton), "primary": button(QPushButton, variant="primary"),
+        "bar primary": button(QPushButton, variant="primary"), "tool": button(QToolButton),
+        "checked tool": button(QToolButton, checked=True), "rail tool": button(QToolButton, checked=True),
+        "segment": button(QToolButton, checked=True), "accent choice": button(QPushButton, name="AccentChoice",
+                                                                              checked=True),
+        "record": button(QPushButton, name="RecordStart"), "check box": QCheckBox("Box"), "switch": ToggleSwitch("On"),
+    }
+    controls["check box"].setFocusPolicy(Qt.StrongFocus)
+    for control in controls.values():
+        control.setFocusPolicy(control.focusPolicy() | Qt.TabFocus)
+    host = QWidget()
+    column = QVBoxLayout(host)
+    elsewhere = QLineEdit()
+    column.addWidget(elsewhere)
+    parents = {"bar primary": "CommandBar", "rail tool": "ToolRail", "segment": "Segmented"}
+    for name, control in controls.items():
+        column.addWidget(inside(parents[name], control) if name in parents else control)
+    qapp.setStyleSheet(styles.build_stylesheet(theme_of(), {}))
+    try:
+        active(host)
+        hidden = [name for name, control in controls.items() if not focus_shows(host, control, elsewhere)]
+        assert hidden == []
+    finally:
+        host.close()
+        qapp.setStyleSheet("")
+
+
+def test_the_editor_has_no_light_dark_switch_while_the_system_contrast_is_on(editor, qapp, monkeypatch):
+    from snipforge import theme
+    from snipforge.theme.manager import ThemeManager
+
+    monkeypatch.setattr(contrast, "high", lambda: True)
+    monkeypatch.setattr(contrast, "system_colors", lambda dark: HC_BLACK)
+    manager = ThemeManager(qapp, packs=[])
+    try:
+        monkeypatch.setattr(theme, "get_manager", lambda: manager)
+        editor._retheme()
+        assert not editor.commands.theme_button.isVisibleTo(editor)
+    finally:
+        manager.close()
+        qapp.setStyleSheet("")
 

@@ -1,23 +1,29 @@
 # Accessibility
 
-SnipForge can be used from the keyboard alone, every control has a name a screen reader (Narrator,
-NVDA, JAWS; VoiceOver on a Mac) can read, and it follows the system's high-contrast setting. This
-page lists the keys and what to expect, for people who use them and for IT reviews.
+SnipForge can be used from the keyboard: taking a snip, marking it up, cropping, saving and sharing
+it, the Library and Settings. A few things follow the pointer and need a mouse, pen or touch: drawing
+freehand, Smart Move, Cut out and choosing Edit text's line (see the editor below). Every control has
+a name a screen reader (Narrator, NVDA, JAWS; VoiceOver on a Mac) can read, and SnipForge follows
+the system's high-contrast setting. This page lists the keys and what to expect, for people who use
+them and for IT reviews.
 
 On a Mac, Ctrl in the keys below is ⌘.
 
 ## Seeing where the keyboard is
 
-Whatever has the keyboard gets a border in the accent color: buttons, tools, switches, lists and the
-Library card you're on.
+Whatever has the keyboard gets a border: in the accent color, or in a color that stands out from it
+on controls already drawn in the accent (a primary button, a chosen option). That's buttons, tools,
+switches, check boxes, lists and the Library card you're on.
 
 ## High contrast
 
 With a Windows contrast theme on (Settings > Accessibility > Contrast themes), SnipForge draws its
 windows in that theme's colors: its background, text and highlight. What's selected, checked or
-focused is marked with the highlight color and a border, not with shades of gray. On a Mac, Increase
-contrast (System Settings > Accessibility > Display) gives the same black-and-white look. While it's
-on, Settings › Appearance says so, and the light/dark and accent choices come back when it's off.
+focused is marked with the highlight color and a border, not with shades of gray. If a theme's text
+can't be read on its background, SnipForge uses black and white instead. On a Mac, Increase contrast
+(System Settings > Accessibility > Display) switches SnipForge to black and white (macOS has no
+contrast colors for apps to read). While it's on, Settings › Appearance says so, the editor hides its
+light/dark switch, and your light/dark and accent choices come back when it's off.
 
 Your snips and the markup on them keep their own colors: they're your content.
 
@@ -30,8 +36,8 @@ Your snips and the markup on them keep their own colors: they're your content.
 | Arrow keys, Home, End | In the tools: move between tools. Enter or Space picks one and goes to the snip; Esc goes back without picking |
 | V, A, L, R, E, S, M, T, K, I, N, P, H, B, X, W, C, U, G | Pick a tool (they're shown in each tool's tip) |
 | Enter | With a drawing tool: add its markup in the middle of the snip you can see, selected. With text selected: edit it (F2 too) |
-| Arrow keys | Move what's selected by a pixel (Shift: 10) |
-| Ctrl+arrow keys | Make what's selected wider, narrower, taller or shorter by a pixel (Shift: 10) |
+| Arrow keys | Move what's selected by a pixel (Shift: 10). While cropping (C), move the crop |
+| Ctrl+arrow keys | Make what's selected wider, narrower, taller or shorter by a pixel (Shift: 10); stamps stay square. While cropping, size the crop. Presses in a row are one undo step |
 | Delete | Remove what's selected |
 | Esc | Stop typing, deselect, then go back to Select |
 | Ctrl+A, Ctrl+D | Select all markup; duplicate what's selected |
@@ -47,6 +53,7 @@ Your snips and the markup on them keep their own colors: they're your content.
 
 The pen, highlighter, Smart Move and Cut out follow the pointer, so they need a mouse, pen or touch
 (Enter with one of them says so). Edit text's line is chosen by clicking it; its new words are typed.
+Crop from the keyboard: C, then the arrow keys and Ctrl+arrow keys, then Enter.
 
 ## The Library
 
@@ -67,7 +74,7 @@ The pen, highlighter, Smart Move and Cut out follow the pointer, so they need a 
 | Keys | What they do |
 |---|---|
 | A, W, F, X, S | Area, Window, Full screen, Fixed size, Scrolling |
-| Arrow keys | In Window and Area modes: go from window to window (Area mode ends with the whole monitor). In Fixed size: move the frame (Shift: by 10) |
+| Arrow keys | In Window, Area and Scrolling modes: go from window to window (Area and Scrolling end with the whole monitor). In Fixed size: move the frame (Shift: by 10) |
 | Enter | Snip the window you chose with the arrow keys, the Fixed size frame, or else the whole monitor |
 | Tab | Go round the capture toolbar |
 | D, P, R | Delay, include the pointer, record |
@@ -91,5 +98,8 @@ accessibility support, which talks to Windows UI Automation and to the Mac's acc
 
 ## Checked how
 
-`tests/test_accessibility.py` checks every window's controls for a name, the keyboard paths above
-with real key presses, the contrast colors (at least 7:1, WCAG AAA) and that focus is drawn.
+`tests/test_accessibility.py` checks the controls of the editor (with every tool's panel), the
+Library, Settings (every page) and the capture overlay for a name; the keyboard paths above with
+real key presses; that the colors of two Windows contrast themes keep their text and highlights at
+7:1 or better (WCAG AAA); and, by comparing pictures, that focus shows on every kind of control in
+light, dark and both contrast themes.

@@ -227,7 +227,7 @@ QScrollArea#TrayThumbs, QScrollArea#TrayThumbs > QWidget > QWidget {{ background
 #Thumb {{ background: {p.surface2}; border: 1px solid {p.border}; border-radius: 6px; padding: 2px; }}
 #Thumb:hover {{ border-color: {a.fill}; }}
 #ZoomLabel {{ color: {h.text2}; }}
-""" + _focus_rules(theme) + (_contrast_rules(theme) if theme.contrast else "")
+""" + _focus_rules(theme) + (_contrast_rules(theme) if theme.contrast else "") + _focus_on_accent(theme)
 
 
 def _focus_rules(theme: Theme) -> str:
@@ -247,6 +247,26 @@ QListView#SnipGrid:focus {{ border: none; }}
 QListView::item:focus {{ border: 1px solid {a.fill}; }}
 QSlider:focus {{ border: 1px solid {a.fill}; border-radius: 4px; }}
 """
+
+
+def _focus_on_accent(theme: Theme) -> str:
+    """Controls already filled or edged with the accent (primary buttons, chosen options; in high
+    contrast every checked control) show the keyboard in a color that stands out from it. Last, so
+    these win over the rules above."""
+    p, a, h = theme.palette, theme.accent, theme.header
+    checked_in_contrast = f"""
+QToolButton:checked:focus, #ToolRail QToolButton:checked:focus, #Segmented QToolButton:checked:focus,
+#CaptureToolbar QToolButton:checked:focus, #RecordPanel QToolButton:checked:focus,
+QToolButton#Chip:checked:focus, QPushButton#AccentChoice:checked:focus {{ border: 1px solid {a.on}; }}
+""" if theme.contrast else ""
+    return f"""
+QPushButton[variant="primary"]:focus {{ border: 1px solid {a.on}; }}
+#CommandBar QPushButton[variant="primary"]:focus, #Sidebar QPushButton[variant="primary"]:focus {{
+    border: 1px solid {h.primary_text}; }}
+QPushButton#RecordStart:focus {{ border: 1px solid {p.bg}; }}  /* on its red (its text color in contrast) */
+QPushButton#AccentChoice:checked:focus, QToolButton#Chip:checked:focus, QToolButton#StampChoice:checked:focus,
+QToolButton#PickColor:checked:focus {{ border: 1px solid {p.text}; }}
+""" + checked_in_contrast
 
 
 def _contrast_rules(theme: Theme) -> str:

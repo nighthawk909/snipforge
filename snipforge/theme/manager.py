@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -58,6 +58,8 @@ class ThemeManager(QObject):
         self._theme = self._resolve()
         self._hints.colorSchemeChanged.connect(self._on_system_scheme)
         self._contrast_hints = contrast.on_change(self.contrast_changed)
+        self._recolor = QTimer(self, singleShot=True, interval=0)  # every window hears a theme change: once
+        self._recolor.timeout.connect(self.refresh)
         app.installEventFilter(self)
 
     # ------------------------------------------------------------------ state
@@ -127,6 +129,7 @@ class ThemeManager(QObject):
         except (RuntimeError, TypeError):
             pass
         contrast.stop(self._contrast_hints, self.contrast_changed)
+        self._recolor.stop()
         self._hints.unsetColorScheme()
 
     def contrast_changed(self, *_args) -> None:
@@ -136,6 +139,8 @@ class ThemeManager(QObject):
     def eventFilter(self, obj, event) -> bool:
         if event.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow():
             self.style_window(obj)
+        elif event.type() == QEvent.Type.ThemeChange and self._theme.contrast:
+            self._recolor.start()  # one contrast theme for another: the setting stays on, the colors change
         return False
 
     # ------------------------------------------------------------------ internals

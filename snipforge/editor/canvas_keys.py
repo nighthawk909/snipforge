@@ -5,6 +5,7 @@
 - Enter with a drawing tool adds its markup in the middle of the part of the snip you can see,
   selected (the arrow keys then move it). Freehand tools need a pointer, and say so.
 - Ctrl+arrow keys make what's selected wider, narrower, taller or shorter (with Shift, by 10).
+- While cropping, the arrow keys move the crop and Ctrl+arrow keys size it (Enter keeps it).
 """
 from __future__ import annotations
 
@@ -12,8 +13,9 @@ from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtWidgets import QGraphicsItem
 
 from .commands import StateCommand
+from .crop import MIN_CROP
 
-POINTER_TOOLS = {"pen": "the pen", "highlight": "the highlighter", "move": "Smart Move", "cut": "Cut out"}
+POINTER_TOOLS = {"pen": "the pen", "highlight": "the highlighter", "move": "Smart Move", "cutout": "Cut out"}
 PLACED_SHARE = 0.25  # markup placed from the keyboard: this much of the visible snip's width and height
 PLACED_MIN = (40.0, 30.0)
 
@@ -24,7 +26,7 @@ class KeyboardMixin:
     def event(self, e) -> bool:
         if (e.type() == QEvent.KeyPress and e.key() in (Qt.Key_Tab, Qt.Key_Backtab)
                 and not e.modifiers() & (Qt.ControlModifier | Qt.AltModifier) and self.editing_text_item() is None
-                and not self.choosing() and not self.picking()):
+                and not self.choosing() and not self.picking() and not self.crop_editing()):
             forward = e.key() == Qt.Key_Tab and not e.modifiers() & Qt.ShiftModifier
             if not self.step_selection(forward):
                 self._scene.clearSelection()
@@ -52,6 +54,8 @@ class KeyboardMixin:
     def place_from_keyboard(self) -> bool:
         """The current tool's markup in the middle of what you can see; False if it can't be placed."""
         tool = self.tool
+        if self._drag is not None:  # a drag with the pointer is under way: finish that first
+            return False
         if tool in POINTER_TOOLS:
             self.notice.emit(f"Draw with the mouse or a pen: {POINTER_TOOLS[tool]} follows the pointer.")
             return False
@@ -91,7 +95,11 @@ class KeyboardMixin:
             if "size" in before:
                 min_w, min_h = getattr(item, "min_size", (6.0, 6.0))
                 w, h = before["size"]
-                after["size"] = [max(min_w, w + dw), max(min_h, h + dh)]
+                if getattr(item, "always_square", False):  # stamps stay square: either key sizes both
+                    side = max(min_w, min_h, max(w, h) + (dw or dh))
+                    after["size"] = [side, side]
+                else:
+                    after["size"] = [max(min_w, w + dw), max(min_h, h + dh)]
             elif "p2" in before:
                 x, y = before["p2"]
                 after["p2"] = [x + dw, y + dh]
@@ -101,4 +109,19 @@ class KeyboardMixin:
                 item.set_state(after)
                 records.append((item, before, item.get_state()))
         if records:
-            self.undo_stack.push(StateCommand(records, "Size"))
+            key = ("size", tuple(id(r[0]) for r in records))  # held or repeated presses are one step, as nudges are
+            self.undo_stack.push(StateCommand(records, "Size", merge_key=key))
+
+    def crop_by_keys(self, dx: float, dy: float, resize: bool) -> None:
+        """While cropping: move the crop by (dx, dy), or with `resize` make it that much bigger,
+        staying inside the snip and at least MIN_CROP across."""
+        crop, bounds = QRectF(self._mask.crop), self._image_rect
+        if resize:
+            crop.setWidth(min(bounds.right() - crop.left(), max(MIN_CROP, crop.width() + dx)))
+            crop.setHeight(min(bounds.bottom() - crop.top(), max(MIN_CROP, crop.height() + dy)))
+        else:
+            x = min(max(bounds.left(), crop.left() + dx), bounds.right() - crop.width())
+            y = min(max(bounds.top(), crop.top() + dy), bounds.bottom() - crop.height())
+            crop.moveTo(x, y)
+        self._mask.set_crop(crop)
+        self._overlay.update()

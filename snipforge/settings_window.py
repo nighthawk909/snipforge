@@ -129,6 +129,7 @@ class SettingsWindow(QMainWindow):
         row.addWidget(self._build_nav())
         self._scroll = scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
+        scroll.setFocusPolicy(Qt.NoFocus)  # Tab goes to the settings in it (and scrolls them into view)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         body = QWidget()
@@ -522,8 +523,9 @@ class SettingsWindow(QMainWindow):
             note.setProperty("sfRole", "muted")
             col.addWidget(note)
             return box
-        self.contrast_note = QLabel(f"{wording.contrast_setting()} is on, so SnipForge uses its colors. "
-                                    "The theme and accent color you choose here come back when it's off.")
+        self.contrast_note = QLabel(f"{wording.contrast_setting()} is on, so SnipForge "
+                                    f"{wording.contrast_look()}. The theme and accent color you choose here come "
+                                    "back when it's off.")
         self.contrast_note.setWordWrap(True)
         self.contrast_note.setProperty("sfRole", "secondary")
         self.contrast_note.setContentsMargins(0, 0, 0, 10)

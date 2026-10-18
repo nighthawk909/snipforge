@@ -502,12 +502,13 @@ class SnipGrid(QListView):
         row = self.currentIndex().data(ROW_ROLE)
         return row.item.entry.id if row is not None and not row.is_header else None
 
-    def viewportEvent(self, event) -> bool:  # noqa: N802 - Qt API
-        """The menu key (or Shift+F10) opens the menu for the snip the keyboard is on, beside it, not
-        for whatever happens to be in the middle of the grid."""
+    def event(self, event) -> bool:
+        """The menu key (or Shift+F10) goes to the grid, which has the keyboard: the menu is for the
+        snip the keyboard is on, scrolled into view and opened beside it (never for a date header or
+        whatever happens to be under the middle of the grid)."""
         if event.type() == QEvent.ContextMenu and event.reason() == QContextMenuEvent.Keyboard:
             if self.current_id() is not None:
                 self.scrollTo(self.currentIndex())
                 self.customContextMenuRequested.emit(self.visualRect(self.currentIndex()).center())
             return True
-        return super().viewportEvent(event)
+        return super().event(event)

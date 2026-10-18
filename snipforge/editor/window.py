@@ -304,6 +304,8 @@ class EditorWindow(QMainWindow):
             act.setIcon(icon(name))
         self.commands.retheme()
         self.panel.retheme()
+        manager = theme.get_manager()  # the system's high contrast decides the colors: no light/dark switch
+        self.commands.theme_button.setVisible(manager is None or not manager.high_contrast)
 
     # ------------------------------------------------------------------ state sync
     def _choose_tool(self, name: str) -> None:

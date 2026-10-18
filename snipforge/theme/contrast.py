@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 
+from .tokens import READABLE, contrast_ratio
+
 log = logging.getLogger(__name__)
 
 
@@ -46,12 +48,17 @@ def high() -> bool:
 
 
 def system_colors(dark: bool) -> SystemColors:
-    """The colors to draw with while high contrast is on: Windows' own, else black and white."""
+    """The colors to draw with while high contrast is on: Windows' own, else black and white (and
+    black and white too if Windows' text can't be read on its background)."""
     if sys.platform == "win32":
         from . import _contrast_win32
         try:
-            return _contrast_win32.colors()
-        except OSError as exc:
+            colors = _contrast_win32.colors()
+            if contrast_ratio(colors.text, colors.window) >= READABLE:
+                return colors
+            log.warning("Windows' contrast colors %s on %s can't be read; using black and white",
+                        colors.text, colors.window)
+        except (OSError, ValueError) as exc:
             log.warning("Couldn't read Windows' contrast colors (%s); using black and white", exc)
     return DARK if dark else LIGHT
 
