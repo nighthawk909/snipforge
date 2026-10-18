@@ -120,9 +120,6 @@ _PATHS = {
     "zoom_out": (
         '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'
         '<line x1="8" y1="11" x2="14" y2="11"/>'),
-    "magnify": (
-        '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'
-        '<line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>'),
     "area": (
         '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>'
         '<path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>'),
@@ -212,6 +209,8 @@ _PATHS = {
     "shape_pill": '<rect x="3" y="7" width="18" height="10" rx="5"/>',
     "tail": '<path d="M4 4h16v10H11l-6 6 2-6H4z"/>',
 }
+
+_PATHS["magnify"] = _PATHS["zoom_in"]  # the Magnify tool
 
 
 def _svg(name: str, color: str) -> bytes:

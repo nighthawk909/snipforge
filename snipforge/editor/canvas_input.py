@@ -150,7 +150,7 @@ class InputMixin:
         if self.tool == "crop":
             self._drag = self._begin_crop_drag(pos)
             return
-        handle = self._overlay.handle_at(pos, self.zoom()) or self._area_handle_at(pos)
+        handle = self._overlay.handle_at(pos, self.zoom()) or self._area_handle_at(view_pos, pos)
         if handle:
             target = self._overlay.target
             target.begin_handle_drag()
@@ -275,12 +275,15 @@ class InputMixin:
         self._overlay.update()
 
     # ------------------------------------------------------------------ hit testing and hover
-    def _area_handle_at(self, scene_pos: QPointF) -> str | None:
+    def _area_handle_at(self, view_pos, scene_pos: QPointF) -> str | None:
         """Some selected items can be dragged by an area, not just a handle: inside a magnifier's
-        source frame moves what it shows."""
+        source frame moves what it shows. Other markup on top there still gets the click."""
         target = self._overlay.target
         area = getattr(target, "area_handle_at", None) if target is not None and target.scene() else None
-        return area(scene_pos) if area is not None else None
+        handle = area(scene_pos) if area is not None else None
+        if handle and self._annotation_at(view_pos) not in (None, target):
+            return None
+        return handle
 
     def _annotation_at(self, view_pos) -> Annotation | None:
         for item in self.items(view_pos):
@@ -302,7 +305,7 @@ class InputMixin:
             else:
                 self.viewport().setCursor(Qt.CrossCursor)
             return
-        handle = self._overlay.handle_at(scene_pos, self.zoom()) or self._area_handle_at(scene_pos)
+        handle = self._overlay.handle_at(scene_pos, self.zoom()) or self._area_handle_at(view_pos, scene_pos)
         hit = None if handle else self._annotation_at(view_pos)
         self._overlay.set_hover(hit)
         if handle:

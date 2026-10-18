@@ -70,7 +70,8 @@ class HandleOverlay(QGraphicsItem):
         if hover is not None and hover.scene() is not None and hover not in self._selected:
             p.setPen(QPen(hover_color, 2.0 / scale))
             p.setBrush(Qt.NoBrush)
-            p.drawRect(hover.sceneBoundingRect())
+            for rect in hover.selection_rects() if hasattr(hover, "selection_rects") else [hover.sceneBoundingRect()]:
+                p.drawRect(rect)
         outline = QPen(accent, 1.0 / scale, Qt.DashLine)
         for item in self._selected:
             if item.scene() is None:

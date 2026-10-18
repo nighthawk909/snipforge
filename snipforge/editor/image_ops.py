@@ -180,10 +180,8 @@ def mapped_state(item, remap: Remap) -> dict:
     return state
 
 
-MIN_BOX = 6.0  # the smallest a shrunk box (or a magnifier's source) is kept
-
-
 MIN_LINE = 6.0  # a shrunk line is kept at least this long (LineItem drops lines under 4 px)
+MIN_BOX = 6.0  # the smallest a shrunk box (or a magnifier's source) is kept
 
 
 def _long_enough(p1: QPointF, p2: QPointF) -> QPointF:

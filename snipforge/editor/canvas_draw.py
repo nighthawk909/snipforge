@@ -118,11 +118,15 @@ class DrawMixin:
             half = STAMP_SIZE / 2
             item.set_scene_rect(QRectF(origin.x() - half, origin.y() - half, STAMP_SIZE, STAMP_SIZE))
         if isinstance(item, MagnifyItem):
+            visible = self._crop_rect  # place the lens where you can see it
             source = item.source()
-            if source.width() < MIN_SOURCE or source.height() < MIN_SOURCE:  # a click magnifies around it
-                source = default_source(origin, self._image_rect)
-                item.set_source(source)
-            item.set_scene_rect(place_lens(source, self._image_rect))
+            if source.width() < MIN_SOURCE and source.height() < MIN_SOURCE:  # a click magnifies around it
+                source = default_source(origin, visible)
+            elif source.width() < MIN_SOURCE or source.height() < MIN_SOURCE:  # a thin drag: as thin as allowed
+                grow_w, grow_h = max(0.0, MIN_SOURCE - source.width()), max(0.0, MIN_SOURCE - source.height())
+                source = source.adjusted(-grow_w / 2, -grow_h / 2, grow_w / 2, grow_h / 2)
+            item.set_source(source)
+            item.set_scene_rect(place_lens(source, visible))
         if isinstance(item, CalloutItem) and item.is_degenerate():  # a click drops a default callout
             w, h = DEFAULT_CALLOUT
             item.set_scene_rect(QRectF(origin.x(), origin.y() - h, w, h))
