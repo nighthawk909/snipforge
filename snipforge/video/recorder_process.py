@@ -205,6 +205,9 @@ class RecorderChild(QObject):
     # --- to SnipForge ----------------------------------------------------------------------------
 
     def _finished(self, result) -> None:
+        from .recordings import write_details
+
+        write_details(result.path, result.duration, self.recorder.settings.output_size)  # the Library lists it
         try:
             self.channel.send("finished", path=str(result.path), duration=result.duration, stats=result.stats,
                               ended_by=self.ended_by)

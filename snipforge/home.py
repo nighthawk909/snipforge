@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QLocale, Qt, QTimer, QUrl
+from PySide6.QtCore import QLocale, QMimeData, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -212,7 +212,8 @@ class HomeWindow(QMainWindow):
             old = known.get(snap.entry.id)
             meta = self._meta_for(snap.entry, snap.meta_stamp, old.meta if old else None)
             created = old.created if old else snap.entry.created
-            items.append(Item(snap.entry, created, meta, snap.edited_at))
+            duration = old.duration if old else self._duration(snap.entry)
+            items.append(Item(snap.entry, created, meta, snap.edited_at, duration))
         self._items = items
         self._after_change()
 
@@ -224,7 +225,7 @@ class HomeWindow(QMainWindow):
         if entry is not None:
             meta = self._meta_for(entry, _stamp(entry.path / META, ns=True), old.meta if old else None)
             rest.append(Item(entry, old.created if old else entry.created, meta,
-                             _stamp(entry.path / DOCUMENT, ns=False)))
+                             _stamp(entry.path / DOCUMENT, ns=False), self._duration(entry)))
             rest.sort(key=lambda i: i.entry.id, reverse=True)
         self._items = rest
         self._after_change()
@@ -244,6 +245,10 @@ class HomeWindow(QMainWindow):
                 return previous or EntryMeta()
         self._meta_cache[entry.id] = (stamp, meta)
         return meta
+
+    def _duration(self, entry) -> float | None:
+        """A recording's length (read once: a finished recording doesn't change); None for a snip."""
+        return self._library.recording_details(entry).duration if entry.is_recording else None
 
     def _meta(self, entry):
         return self._meta_for(entry, _stamp(entry.path / META, ns=True), None)
@@ -456,6 +461,11 @@ class HomeWindow(QMainWindow):
     def _copy(self, entry_id: str) -> None:
         entry = self._library.get(entry_id)
         if entry is None:
+            return
+        if entry.is_recording:  # the video file, to paste into an email, a chat or a folder
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(str(entry.recording_path))])
+            QGuiApplication.clipboard().setMimeData(mime)
             return
         image = QImage(str(entry.rendered_path))
         if image.isNull():

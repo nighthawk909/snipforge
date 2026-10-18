@@ -2,6 +2,7 @@
 process, here played inside the test (a RecorderChild on a real channel, with a fake Recorder), so
 everything said between SnipForge and the recorder is checked. The desktop suite runs the real
 process."""
+import json
 import os
 import subprocess
 import sys
@@ -521,3 +522,15 @@ def test_hiding_the_bubble_hides_the_camera_in_the_recording(tmp_path, qapp):
     remote.move_bubble(None, "circle")
 
     assert wait_for(lambda: process.children[0].bubble.snapshot() is None)
+
+
+def test_a_finished_library_recording_is_marked_finished_for_the_library(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path, name="recording")  # recording.mp4, as the Library names it
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+
+    remote.stop()
+
+    assert wait_for(lambda: seen["results"])
+    details = json.loads((Path(tmp_path).resolve() / "recording.json").read_text(encoding="utf-8"))
+    assert details["duration"] == 1.25

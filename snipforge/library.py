@@ -7,6 +7,14 @@ Layout on disk (one folder per snip):
     Pictures/SnipForge/Library/<id>/preview.png    small thumbnail
     Pictures/SnipForge/Library/<id>/meta.json      source app and window title, favorite, tags, and the
                                                    words recognized in the snip (for search)
+
+A screen recording has a folder of its own too (snipforge/video/recordings.py):
+    Pictures/SnipForge/Library/<id>/recording.mp4   the video
+    Pictures/SnipForge/Library/<id>/recording.json  its length and size, written once it's finished
+    Pictures/SnipForge/Library/<id>/preview.png     a frame from it, made the first time it's shown
+    Pictures/SnipForge/Library/<id>/meta.json       favorite and tags, as for a snip
+It's listed only once recording.json is there, so never while it's still being recorded. It has no
+original.png, so older SnipForge versions sharing the folder (OneDrive, say) simply don't list it.
 All writes go to a temp file first and are renamed into place, so a crash never
 leaves a half-written file behind.
 """
@@ -29,6 +37,7 @@ log = logging.getLogger(__name__)
 DEFAULT_ROOT = Path.home() / "Pictures" / "SnipForge" / "Library"
 ORIGINAL, DOCUMENT, RENDERED, PREVIEW = "original.png", "document.json", "rendered.png", "preview.png"
 META = "meta.json"
+RECORDING, RECORDING_DETAILS = "recording.mp4", "recording.json"
 THUMB_MAX = 480
 MAX_TITLE, MAX_APP, MAX_TEXT = 200, 40, 20_000
 MAX_TAGS, MAX_TAG = 10, 32
@@ -93,9 +102,24 @@ class DocumentUnreadable(OSError):
 
 
 @dataclass(frozen=True)
+class RecordingDetails:
+    duration: float | None = None  # seconds
+    size: tuple[int, int] | None = None  # pixels
+
+
+@dataclass(frozen=True)
 class Entry:
     id: str
     path: Path
+    kind: str = "snip"  # or "recording"
+
+    @property
+    def is_recording(self) -> bool:
+        return self.kind == "recording"
+
+    @property
+    def recording_path(self) -> Path:
+        return self.path / RECORDING
 
     @property
     def created(self) -> dt.datetime:
@@ -121,6 +145,10 @@ class Entry:
 
     @property
     def preview_path(self) -> Path:
+        """The card's picture. A recording's is made from the video the first time it's shown, so
+        until then this names a file that isn't there yet."""
+        if self.is_recording:
+            return self.path / PREVIEW
         return self._first_existing(PREVIEW, RENDERED, ORIGINAL)
 
 
@@ -166,6 +194,15 @@ def _save_image_atomic(image: QImage, target: Path) -> None:
         tmp.unlink(missing_ok=True)
         raise OSError(f"Could not write {target}")
     _replace(tmp, target)
+
+
+def _kind(files: dict) -> str | None:
+    """What a folder holds, from its file names: a snip, a finished recording, or neither."""
+    if ORIGINAL in files:
+        return "snip"
+    if RECORDING in files and RECORDING_DETAILS in files:
+        return "recording"
+    return None
 
 
 class Library:
@@ -247,15 +284,16 @@ class Library:
                 files = {f.name: f for f in os.scandir(folder.path)}
             except OSError:
                 continue
-            if ORIGINAL not in files:
+            kind = _kind(files)
+            if kind is None:
                 continue
-
-            found.append(Snapshot(Entry(folder.name, Path(folder.path)), _mtime(files.get(META), ns=True),
+            found.append(Snapshot(Entry(folder.name, Path(folder.path), kind), _mtime(files.get(META), ns=True),
                                   _mtime(files.get(DOCUMENT), ns=False), PREVIEW in files))
         found.sort(key=lambda s: s.entry.id, reverse=True)
         return found
 
     def entries(self, limit: int | None = None) -> list[Entry]:
+        """Snips only (not recordings), newest first: what callers that open images expect."""
         if not self.root.exists():
             return []
         found = [Entry(p.name, p) for p in self.root.iterdir() if (p / ORIGINAL).exists()]
@@ -263,10 +301,30 @@ class Library:
         return found[:limit] if limit else found
 
     def get(self, entry_id: str) -> Entry | None:
+        """A snip or a finished recording; None if there's neither."""
         path = self.root / entry_id
-        return Entry(entry_id, path) if (path / ORIGINAL).exists() else None
+        if (path / ORIGINAL).exists():
+            return Entry(entry_id, path)
+        if (path / RECORDING).exists() and (path / RECORDING_DETAILS).exists():
+            return Entry(entry_id, path, "recording")
+        return None
+
+    def recording_details(self, entry: Entry) -> RecordingDetails:
+        """A recording's length and size; unknown (None) if recording.json can't be read."""
+        try:
+            data = json.loads((entry.path / RECORDING_DETAILS).read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError):
+            return RecordingDetails()
+        if not isinstance(data, dict):
+            return RecordingDetails()
+        duration, width, height = data.get("duration"), data.get("width"), data.get("height")
+        duration = float(duration) if isinstance(duration, (int, float)) and 0 <= duration < 10**7 else None
+        size = (width, height) if all(isinstance(v, int) and 0 < v <= 100_000 for v in (width, height)) else None
+        return RecordingDetails(duration, size)
 
     def load_image(self, entry: Entry) -> QImage:
+        if entry.is_recording:
+            raise OSError(f"{entry.id} is a recording, not an image")
         image = QImage(str(entry.original_path))
         if image.isNull():
             raise OSError(f"Could not read {entry.original_path}")

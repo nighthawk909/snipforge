@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
@@ -229,9 +230,23 @@ class SnipForgeApp:
         self.stop_recording()
 
     def _open_video(self, path) -> None:
+        """A finished recording: shown in the video editor, and in the Library if it's open."""
         from .video import editor_window
 
         self._track(editor_window.open_video(path))
+        if self._home is not None and self._home.isVisible():
+            self._home.update_entry(Path(path).parent.name)
+
+    def _open_recording(self, path) -> None:
+        """From the Library: the video editor already showing it, or a new one."""
+        for window in self._windows:
+            if Path(getattr(window, "path", "")) == Path(path):
+                self._bring_to_front(window)
+                return
+        try:
+            self._open_video(path)
+        except Exception as exc:  # FFmpegError: a file that can't be read
+            QMessageBox.warning(None, "SnipForge", f"Couldn't open that recording: {exc}")
 
     def repeat_last(self) -> None:
         """Repeat last snip: the same area of the same monitor again, straight away (after the
@@ -300,6 +315,9 @@ class SnipForgeApp:
         entry = self.library.get(entry_id)
         if entry is None:
             QMessageBox.information(None, "SnipForge", "That snip is no longer in the library.")
+            return
+        if entry.is_recording:
+            self._open_recording(entry.recording_path)
             return
         try:
             image = self.library.load_image(entry)
