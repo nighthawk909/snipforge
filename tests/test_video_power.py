@@ -33,8 +33,27 @@ def test_the_screen_and_the_lock_mean_what_windows_says(message, wparam, display
 def setting(guid, value, length=4):
     import ctypes
 
+    if isinstance(guid, bytes):
+        guid = power.GUID.from_buffer_copy(guid)
     data = power.POWERBROADCAST_SETTING(guid, length, value)
     return data, ctypes.addressof(data)  # kept alive with its address
+
+
+def test_the_structures_are_laid_out_as_windows_has_them():
+    import ctypes
+    import uuid
+
+    assert ctypes.sizeof(power.GUID) == 16 and ctypes.sizeof(power.POWERBROADCAST_SETTING) == 24
+    assert power.POWERBROADCAST_SETTING.DataLength.offset == 16 and power.POWERBROADCAST_SETTING.Data.offset == 20
+    assert power.CONSOLE_DISPLAY_STATE == uuid.UUID("6FE69556-704A-47A0-8F24-C28D936FDA47").bytes_le
+
+
+def test_a_bogus_pointer_from_some_other_program_cant_crash_the_recorder():
+    import sys
+
+    if sys.platform != "win32":
+        pytest.skip("only Windows sends these messages")
+    assert power.display_state(1) is None and power.display_state(-5) is None
 
 
 def test_the_screens_state_is_read_from_windows_setting_change():
@@ -45,7 +64,8 @@ def test_the_screens_state_is_read_from_windows_setting_change():
 
 
 def test_other_power_settings_arent_taken_for_the_screen():
-    other = power.GUID(0x245D8541, 0x3943, 0x4422, power.CONSOLE_DISPLAY_STATE.Data4)  # a different setting
+    other = power.GUID.from_buffer_copy(power.CONSOLE_DISPLAY_STATE)
+    other.Data1 = 0x245D8541  # a different setting
     data, address = setting(other, 0)
     assert power.display_state(address) is None
     short, address = setting(power.CONSOLE_DISPLAY_STATE, 0, length=1)

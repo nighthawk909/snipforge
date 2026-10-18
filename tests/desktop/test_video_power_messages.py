@@ -65,13 +65,16 @@ def test_the_screen_and_the_lock_are_signalled_and_windows_agreed_to_tell(qapp):
         getattr(watch, name).connect(lambda name=name: heard.append(name))
     try:
         assert watch._display_note and watch._session_note  # Windows will send these for real
-        off = power.POWERBROADCAST_SETTING(power.CONSOLE_DISPLAY_STATE, 4, 0)
-        on = power.POWERBROADCAST_SETTING(power.CONSOLE_DISPLAY_STATE, 4, 1)
+        screen = power.GUID.from_buffer_copy(power.CONSOLE_DISPLAY_STATE)
+        off = power.POWERBROADCAST_SETTING(screen, 4, 0)
+        on = power.POWERBROADCAST_SETTING(screen, 4, 1)
 
         send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_POWERSETTINGCHANGE, ctypes.addressof(off))
         send(watch.window_id, power.WM_WTSSESSION_CHANGE, power.WTS_SESSION_LOCK)
         send(watch.window_id, power.WM_WTSSESSION_CHANGE, power.WTS_SESSION_UNLOCK)
         send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_POWERSETTINGCHANGE, ctypes.addressof(on))
+
+        send(watch.window_id, power.WM_POWERBROADCAST, power.PBT_POWERSETTINGCHANGE, 1)  # bogus: no crash
 
         assert heard[-4:] == ["display_off", "locked", "unlocked", "display_on"]
     finally:

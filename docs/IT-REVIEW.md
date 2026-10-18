@@ -58,13 +58,17 @@ area. Before recording starts, the panel beside the area opens the microphone an
 sound only to show their levels; they're let go when Record or Cancel is clicked. While recording,
 the recorder process has them open (Windows shows its microphone-in-use icon), and SnipForge's
 control bar (pause, stop, discard) stays on screen, kept out of the recording itself. Nothing is sent anywhere:
-the recording is saved in the Library folder (see Data on the PC). While it records, the recorder
-process asks Windows not to sleep or turn the screen off for inactivity (`SetThreadExecutionState`,
-the request video players and calls make), so like a video call it can keep the screen from locking
-for inactivity until the recording ends; the request ends with the recording (or the process).
-Sleep the user asks for (closing the lid, Start > Sleep) still happens, once the file is finished.
-Locking Windows pauses the recording: the locked screen can't be recorded, and the microphone
-shouldn't go on recording an empty desk. It's resumed from the control bar.
+the recording is saved in the Library folder (see Data on the PC). While it records (not while it's
+paused), the recorder process asks Windows not to sleep or turn the screen off for inactivity
+(`SetThreadExecutionState`, the request video players and calls make), so, like a video call, it
+can keep the screen saver and the screen's inactivity timeout from starting until the recording
+ends or is paused; the request ends with the recording (or the process). SnipForge doesn't change
+any power or lock setting, and locking (Win+L, or a policy lock) still happens. Sleep the user asks
+for (closing the lid, Start > Sleep) still happens: the recorder first tries to finish the file
+(it has about 1.5 s; if that isn't enough, it finishes on waking). Locking Windows pauses the
+recording: the locked screen can't be recorded, and while paused nothing from the microphone is
+written to the file (the devices stay open, so Windows' microphone-in-use icon stays on). It's
+resumed from the control bar.
 
 **Webcam** (optional, off until the user switches Camera on when getting ready to record). The
 camera is opened only while that switch is on, for the bubble that shows it and for the recording;
@@ -95,7 +99,9 @@ local named pipe, `\\.\pipe\SnipForge-recorder-<random>` (no user name in it: an
 pipe names), that only the signed-in user can open, and only about the recording (its settings,
 pause/stop, how it went). It listens for Windows' sleep, shutdown and sign-out notices to finish the
 video file first (that takes well under a second); if Windows ever has to wait on it, the reason it
-can show is "Saving your screen recording". The packaged self-test starts one and has it answer.
+can show is "Saving your screen recording". It also asks to be told when the screen turns off or on
+(`RegisterPowerSettingNotification`, `GUID_CONSOLE_DISPLAY_STATE`) and when Windows is locked or
+unlocked (`WTSRegisterSessionNotification`, this session only), to pause or warn as above. The packaged self-test starts one and has it answer.
 
 **Explorer right-click commands** (`snipforge/share.py`). The Share menu invokes the same
 right-click commands a user would click by hand (OneDrive "Copy link"/"Share", Windows "Share") on

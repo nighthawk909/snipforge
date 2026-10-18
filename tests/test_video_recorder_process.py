@@ -301,6 +301,82 @@ def test_windows_stays_awake_while_recording_and_may_rest_after(tmp_path, qapp):
     assert wait_for(lambda: process.exits == [0]) and process.awake == [True, False]
 
 
+def test_windows_may_rest_while_a_recording_is_paused(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+
+    remote.pause()
+    assert wait_for(lambda: remote.state == "paused") and process.awake == [True, False]
+    remote.resume()
+
+    assert wait_for(lambda: remote.state == "recording") and process.awake == [True, False, True]
+
+
+@pytest.mark.parametrize("ending", ["cancel", "failure", "SnipForge gone", "unexpected"])
+def test_windows_may_rest_however_the_recording_ends(tmp_path, qapp, ending):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+    child = process.children[0]
+
+    if ending == "cancel":
+        remote.cancel()
+    elif ending == "failure":
+        child.recorder._set("failed")
+        child.recorder.failed.emit("The encoder stopped")
+    elif ending == "SnipForge gone":
+        remote.channel.close()
+    else:
+        child.unexpected(RuntimeError, RuntimeError("boom"), None)
+
+    assert wait_for(lambda: process.exits) and process.awake[-1] is False
+
+
+def test_a_refused_request_to_stay_awake_isnt_taken_as_granted(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    child_awake = []
+
+    def refusing(on):
+        child_awake.append(on)
+        return False
+
+    remote.start()
+    assert wait_for(lambda: process.children)
+    child = process.children[0]
+    child._keep_awake, child._awake = refusing, False
+    child._follow_state("recording")
+
+    assert child_awake == [True] and child._awake is False  # it may ask again at the next change
+
+
+def test_locked_in_the_countdown_the_recording_is_paused_as_it_begins(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start(hold=True)
+    assert wait_for(lambda: process.children and process.recorder and process.recorder.state == "starting")
+
+    process.watch.locked.emit()  # before the countdown ends
+    assert process.recorder.state == "starting"
+    remote.go()
+
+    assert wait_for(lambda: remote.state == "paused")
+    assert wait_for(lambda: any("locked" in w for w in seen["warnings"]))
+    assert process.awake[-1] is False  # paused: Windows may rest
+
+
+def test_unlocked_before_the_countdown_ends_records_as_usual(tmp_path, qapp):
+    remote, process, seen = remote_for(tmp_path)
+    remote.start(hold=True)
+    assert wait_for(lambda: process.children and process.recorder and process.recorder.state == "starting")
+
+    process.watch.locked.emit()
+    process.watch.unlocked.emit()
+    remote.go()
+
+    assert wait_for(lambda: remote.state == "recording")
+    assert not any("locked" in w for w in seen["warnings"])
+
+
 def test_a_recorder_that_cant_start_doesnt_keep_windows_awake(tmp_path, qapp):
     remote, process, seen = remote_for(tmp_path, name="refuse")
     remote.start()
@@ -319,6 +395,7 @@ def test_locking_windows_pauses_the_recording_and_says_so(tmp_path, qapp):
     assert wait_for(lambda: any("locked" in w for w in seen["warnings"]))
     process.watch.unlocked.emit()  # stays paused until resumed: the person may not be back yet
     process.watch.locked.emit()  # already paused: nothing more said
+    process.watch.unlocked.emit()
     remote.resume()
     assert wait_for(lambda: remote.state == "recording")
     assert sum("locked" in w for w in seen["warnings"]) == 1

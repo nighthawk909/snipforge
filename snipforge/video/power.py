@@ -20,6 +20,7 @@ import ctypes
 import logging
 import sys
 from ctypes import wintypes
+from types import MappingProxyType
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject, Signal
 from PySide6.QtGui import QWindow
@@ -34,34 +35,53 @@ PBT_APMSUSPEND = 0x0004
 PBT_POWERSETTINGCHANGE = 0x8013
 WTS_SESSION_LOCK, WTS_SESSION_UNLOCK = 0x7, 0x8
 WATCHED = (WM_QUERYENDSESSION, WM_ENDSESSION, WM_POWERBROADCAST, WM_WTSSESSION_CHANGE)
-DISPLAY_STATES = {0: "display off", 1: "display on", 2: "display dimmed"}
+DISPLAY_STATES = MappingProxyType({0: "display off", 1: "display on", 2: "display dimmed"})
 ES_CONTINUOUS, ES_SYSTEM_REQUIRED, ES_DISPLAY_REQUIRED = 0x80000000, 0x00000001, 0x00000002
 
 
-class GUID(ctypes.Structure):
-    _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
+class GUID(ctypes.Structure):  # fixed sizes (not wintypes'), so the layout is Windows' everywhere
+    _fields_ = [("Data1", ctypes.c_uint32), ("Data2", ctypes.c_uint16), ("Data3", ctypes.c_uint16),
                 ("Data4", ctypes.c_ubyte * 8)]
 
 
 class POWERBROADCAST_SETTING(ctypes.Structure):  # noqa: N801 - the Windows name
     # Data is UCHAR[DataLength]; for the display's state it's one DWORD
-    _fields_ = [("PowerSetting", GUID), ("DataLength", wintypes.DWORD), ("Data", wintypes.DWORD)]
+    _fields_ = [("PowerSetting", GUID), ("DataLength", ctypes.c_uint32), ("Data", ctypes.c_uint32)]
 
 
-# GUID_CONSOLE_DISPLAY_STATE {6FE69556-704A-47A0-8F24-C28D936FDA47}: off, on or dimmed
-CONSOLE_DISPLAY_STATE = GUID(0x6FE69556, 0x704A, 0x47A0, (ctypes.c_ubyte * 8)(0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F,
-                                                                              0xDA, 0x47))
+# GUID_CONSOLE_DISPLAY_STATE {6FE69556-704A-47A0-8F24-C28D936FDA47}: off, on or dimmed (as laid out in memory)
+CONSOLE_DISPLAY_STATE = bytes(GUID(0x6FE69556, 0x704A, 0x47A0,
+                                   (ctypes.c_ubyte * 8)(0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47)))
 
 
 def display_state(lparam: int) -> int | None:
     """The screen's state (0 off, 1 on, 2 dimmed) from a PBT_POWERSETTINGCHANGE's lParam, or None
-    if it's about some other power setting."""
-    if not lparam:
+    if it's about some other power setting, or lParam doesn't point at anything readable (any
+    program of the user's could send the message: it mustn't be able to crash a recording)."""
+    raw = _read(lparam, ctypes.sizeof(POWERBROADCAST_SETTING)) if lparam > 0 else None
+    if raw is None:
         return None
-    setting = POWERBROADCAST_SETTING.from_address(lparam)
-    if bytes(setting.PowerSetting) != bytes(CONSOLE_DISPLAY_STATE) or setting.DataLength < 4:
+    setting = POWERBROADCAST_SETTING.from_buffer_copy(raw)
+    if bytes(setting.PowerSetting) != CONSOLE_DISPLAY_STATE or setting.DataLength < 4:
         return None
     return int(setting.Data)
+
+
+def _read(address: int, size: int) -> bytes | None:
+    """`size` bytes of this process's memory at `address`, or None where they can't be read, which
+    reading them directly would crash on. (Elsewhere than Windows no such message ever comes.)"""
+    if sys.platform != "win32":
+        return ctypes.string_at(address, size)
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.ReadProcessMemory.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+                                           ctypes.POINTER(ctypes.c_size_t)]
+    kernel32.ReadProcessMemory.restype = wintypes.BOOL
+    buffer, done = ctypes.create_string_buffer(size), ctypes.c_size_t(0)
+    if not kernel32.ReadProcessMemory(kernel32.GetCurrentProcess(), address, buffer, size, ctypes.byref(done)) \
+            or done.value != size:
+        return None
+    return buffer.raw
 
 
 def classify(message: int, wparam: int, display: int | None = None) -> str | None:
@@ -168,29 +188,45 @@ class SessionWatch(QObject):
 def _listen(window: int) -> tuple:
     """Have Windows tell `window` about the screen turning off and on, and about locking and
     unlocking. Either may be refused (an old or locked-down Windows): the recording goes on without."""
-    user32, wtsapi32 = ctypes.WinDLL("user32", use_last_error=True), ctypes.WinDLL("wtsapi32", use_last_error=True)
-    user32.RegisterPowerSettingNotification.argtypes = [wintypes.HANDLE, ctypes.POINTER(GUID), wintypes.DWORD]
-    user32.RegisterPowerSettingNotification.restype = wintypes.HANDLE
-    wtsapi32.WTSRegisterSessionNotification.argtypes = [wintypes.HWND, wintypes.DWORD]
-    wtsapi32.WTSRegisterSessionNotification.restype = wintypes.BOOL
-    display = user32.RegisterPowerSettingNotification(window, ctypes.byref(CONSOLE_DISPLAY_STATE), 0)  # to a window
-    if not display:
-        log.info("Windows won't say when the screen turns off (error %d)", ctypes.get_last_error())
-    session = bool(wtsapi32.WTSRegisterSessionNotification(window, 0))  # NOTIFY_FOR_THIS_SESSION
-    if not session:
-        log.info("Windows won't say when it's locked (error %d)", ctypes.get_last_error())
-    return display or None, session
+    display, session = None, False
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.RegisterPowerSettingNotification.argtypes = [wintypes.HANDLE, ctypes.POINTER(GUID), wintypes.DWORD]
+        user32.RegisterPowerSettingNotification.restype = wintypes.HANDLE
+        guid = GUID.from_buffer_copy(CONSOLE_DISPLAY_STATE)
+        display = user32.RegisterPowerSettingNotification(window, ctypes.byref(guid), 0) or None  # to a window
+        if display is None:
+            log.info("Windows won't say when the screen turns off (error %d)", ctypes.get_last_error())
+    except (OSError, AttributeError) as exc:
+        log.info("Windows can't say when the screen turns off: %s", exc)
+    try:
+        wtsapi32 = ctypes.WinDLL("wtsapi32", use_last_error=True)
+        wtsapi32.WTSRegisterSessionNotification.argtypes = [wintypes.HWND, wintypes.DWORD]
+        wtsapi32.WTSRegisterSessionNotification.restype = wintypes.BOOL
+        session = bool(wtsapi32.WTSRegisterSessionNotification(window, 0))  # NOTIFY_FOR_THIS_SESSION
+        if not session:
+            log.info("Windows won't say when it's locked (error %d)", ctypes.get_last_error())
+    except (OSError, AttributeError) as exc:
+        log.info("Windows can't say when it's locked: %s", exc)
+    return display, session
 
 
 def _stop_listening(window: int, display, session: bool) -> None:
-    if display:
-        user32 = ctypes.WinDLL("user32")
-        user32.UnregisterPowerSettingNotification.argtypes = [wintypes.HANDLE]
-        user32.UnregisterPowerSettingNotification(display)
-    if session:
-        wtsapi32 = ctypes.WinDLL("wtsapi32")
-        wtsapi32.WTSUnRegisterSessionNotification.argtypes = [wintypes.HWND]
-        wtsapi32.WTSUnRegisterSessionNotification(window)
+    try:
+        if display:
+            user32 = ctypes.WinDLL("user32")
+            user32.UnregisterPowerSettingNotification.argtypes = [wintypes.HANDLE]
+            user32.UnregisterPowerSettingNotification.restype = wintypes.BOOL
+            if not user32.UnregisterPowerSettingNotification(display):
+                log.info("Windows wouldn't stop saying when the screen turns off")
+        if session:
+            wtsapi32 = ctypes.WinDLL("wtsapi32")
+            wtsapi32.WTSUnRegisterSessionNotification.argtypes = [wintypes.HWND]
+            wtsapi32.WTSUnRegisterSessionNotification.restype = wintypes.BOOL
+            if not wtsapi32.WTSUnRegisterSessionNotification(window):
+                log.info("Windows wouldn't stop saying when it's locked")
+    except (OSError, AttributeError) as exc:  # Windows lets go of both when the window goes anyway
+        log.info("Stopping Windows' notices: %s", exc)
 
 
 def stay_awake(on: bool) -> bool:

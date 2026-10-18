@@ -355,11 +355,12 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    recording stops and is kept, since a full drive can't finish the file), Windows "N" editions
    (`support.py`: the recorder and the self-test say to add the Media Feature Pack), a sound device
    unplugged (a warning, step 5), the screen lost (kept, step 5), sleep, shutdown and sign-out
-   (the file is finished first, step 5b). Staying awake: while recording, Windows isn't to sleep
-   or turn the screen off for inactivity (`power.stay_awake`, `SetThreadExecutionState` on the
-   recorder process's main thread, given back when it ends). Lock: Windows locked (Win+L, or by
-   policy) pauses the recording with a note; it's resumed from the control bar (`power.py` listens
-   with `WTSRegisterSessionNotification`). The screen turning off anyway (a closed lid set to do
+   (the file is finished first, step 5b). Staying awake: while recording (or starting, or
+   finishing; not while paused), Windows isn't to sleep or turn the screen off for inactivity
+   (`power.stay_awake`, `SetThreadExecutionState` on the recorder process's main thread, following
+   the recorder's state). Lock: Windows locked (Win+L, or by policy) pauses the recording with a
+   note, also when it was locked in the countdown, before recording began; it's resumed from the
+   control bar (`power.py` listens with `WTSRegisterSessionNotification`). The screen turning off anyway (a closed lid set to do
    nothing, say) is mentioned: the video shows the last picture until it's back
    (`RegisterPowerSettingNotification`, `GUID_CONSOLE_DISPLAY_STATE`).
 
