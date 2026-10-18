@@ -65,6 +65,8 @@ def _save_formats() -> str:
         path = folder / f"snip.{fmt}"
         if not save_image(image, path) or path.stat().st_size == 0:
             raise RuntimeError(f"couldn't save a {fmt.upper()}")
+        if fmt == "pdf" and not path.read_bytes().startswith(b"%PDF"):
+            raise RuntimeError("a saved PDF isn't a PDF")
         if fmt != "pdf" and QImage(str(path)).size() != image.size():
             raise RuntimeError(f"a saved {fmt.upper()} doesn't read back")
     return ", ".join(f.upper() for f in FORMATS) + " saved"

@@ -53,6 +53,8 @@ SECTIONS = {
 }
 THEME_CHOICES = (("system", "Match Windows"), ("light", "Light"), ("dark", "Dark"))
 
+FORMAT_LABELS = {"webp": "WebP"}  # how Settings names a save format (the rest in capitals)
+
 
 class ThemeTile(QAbstractButton):
     """A small preview of a theme: half light, half dark for 'Match Windows'."""
@@ -433,7 +435,7 @@ class SettingsWindow(QMainWindow):
         brow.addWidget(change)
         self.folder_row = SettingRow("Save folder", str(prefs.export_dir()), buttons)
         self._reset_folder.setVisible(prefs.export_dir() != prefs.DEFAULT_EXPORT_DIR)
-        self.format = Segmented([("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("pdf", "PDF")],
+        self.format = Segmented([(fmt, FORMAT_LABELS.get(fmt, fmt.upper())) for fmt in prefs.FORMATS],
                                 value=prefs.export_format())
         self.format.changed.connect(prefs.set_export_format)
         self.beautify = ToggleSwitch("Beautify when copying, saving or dragging")
