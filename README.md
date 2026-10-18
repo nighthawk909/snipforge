@@ -52,6 +52,7 @@ the snip, with a magnified view of the pixels under the pointer. Everything you 
 | Step number | N | 1, 2, 3… badges for how-to guides |
 | Pen, highlighter | P, H | |
 | Blur, pixelate | B, X | hide sensitive details |
+| Smart erase | W | remove something: the area is filled in from what's around it |
 | Spotlight | S | dim everything except one area |
 | Magnify | M | a circle or box lens showing part of the snip enlarged; move and resize the lens and what it shows |
 | Crop | C | drag edges in to cut, back out to restore; Enter applies |

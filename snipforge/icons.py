@@ -219,6 +219,7 @@ _PATHS = {
 }
 
 _PATHS["magnify"] = _PATHS["zoom_in"]  # the Magnify tool
+_PATHS["erase"] = _PATHS["eraser"]  # the Smart erase tool
 
 
 def _svg(name: str, color: str) -> bytes:
