@@ -15,6 +15,7 @@ be checked in the source code; file references are given where useful.
 | Telemetry | None. No accounts, analytics or crash reporting. A log and crash details stay on the PC, for the user to look at and attach to a bug report if they choose (Report a problem) |
 | Updates | Three modes: Automatic, Ask before installing (default) and Manual. Per-user installs download the new installer, verify its SHA-256 (against the release's `SHA256SUMS.txt`, or the feed's `releases.json`) and install silently. All-users installs only point to the download page. Policy can force the mode, channel and source (details below) |
 | Elevation | The app never runs elevated; only an all-users install needs admin |
+| Accessibility | Works from the keyboard alone, every control is named for screen readers (UI Automation), and it follows Windows contrast themes ([ACCESSIBILITY.md](ACCESSIBILITY.md)) |
 
 ## Data on the PC
 

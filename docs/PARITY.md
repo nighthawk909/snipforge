@@ -25,6 +25,7 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | Start when I sign in | ✅ | ❌ explains it isn't available | Phase 6: `SMAppService` |
 | | Settings, themes, accents | ✅ | 🟡 Match macOS; no Windows key switches | |
 | | Report a problem (logs, versions, displays, last crash) | ✅ | 🟡 logs in `~/Library/Logs/SnipForge`, macOS version from `platform.mac_ver()` | |
+| | Keyboard use, screen-reader names, high contrast | ✅ | 🟡 same code; Increase contrast gives black and white (no system contrast colors to read); VoiceOver not yet tried | A tester confirms |
 | **Capture** | The snip key (Win+Shift+S, Print Screen) | ✅ | ❌ | Phase 3: `RegisterEventHotKey` (e.g. ⌘⇧2) |
 | | Shortcuts of your own | ✅ | ❌ hidden | Phase 3: same API |
 | | Capture presets (toolbar, menu bar, Settings; effects; editor, copy or folder) | ✅ | 🟡 same code; a preset's own shortcut is hidden with the other shortcuts | Phase 3: shortcuts |

@@ -83,6 +83,8 @@ class InputMixin:
                 self.setFocus()
                 selected[0].start_text_editing()
                 return
+            if key != Qt.Key_F2 and self.place_from_keyboard():  # canvas_keys.py
+                return
         if key == Qt.Key_Escape:
             if self._drag is not None:
                 self._cancel_drag()
@@ -97,7 +99,10 @@ class InputMixin:
         if key in NUDGE_KEYS and self.selected_annotations():
             step = 10 if mods & Qt.ShiftModifier else 1
             dx, dy = NUDGE_KEYS[key]
-            self.nudge(dx * step, dy * step)
+            if mods & Qt.ControlModifier:
+                self.resize_selection(dx * step, dy * step)  # canvas_keys.py
+            else:
+                self.nudge(dx * step, dy * step)
             return
         tool = TOOL_KEYS.get(key)
         if tool and not mods & (Qt.ControlModifier | Qt.AltModifier):

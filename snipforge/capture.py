@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from . import pointer, prefs, presets, scroll_input, theme
 from .capture_area import RepeatArea, area_on, on_screen, screen_for, source_for, span  # noqa: F401
+from .capture_keys import WindowKeys
 from .capture_paint import paint_hint, paint_magnifier, paint_size_label
 from .capture_presets import PresetChoices
 from .capture_toolbar import MODES, CaptureToolbar
@@ -48,7 +49,7 @@ def _pointer_unavailable_reason() -> str:
     return "Including the pointer isn't available on this computer yet"
 
 
-class _ScreenOverlay(QWidget):
+class _ScreenOverlay(WindowKeys, QWidget):
     selected = Signal(QImage)
     cancelled = Signal()
     mode_changed = Signal(str)  # the user picked another mode here (toolbar or letter key)
@@ -128,7 +129,7 @@ class _ScreenOverlay(QWidget):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setAccessibleName("Choose what to snip")
         self.setAccessibleDescription(
-            "A to drag an area, W for a window, F for the full screen, "
+            "A to drag an area, W for a window (arrow keys go from window to window), F for the full screen, "
             "X for a fixed size frame (arrow keys move it, Enter snips it, X again picks its size), "
             + ("S to scroll a long page or list, " if self._scrolling else "")
             + "Enter for the whole monitor, D for a delay, P to include the pointer, "

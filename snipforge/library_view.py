@@ -24,6 +24,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QContextMenuEvent,
     QFont,
     QFontMetrics,
     QImage,
@@ -459,6 +460,7 @@ class SnipGrid(QListView):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("SnipGrid")
+        self.setAccessibleName("Snips")
         self.setViewMode(QListView.ListMode)
         self.setFlow(QListView.LeftToRight)
         self.setWrapping(True)
@@ -499,3 +501,13 @@ class SnipGrid(QListView):
     def current_id(self) -> str | None:
         row = self.currentIndex().data(ROW_ROLE)
         return row.item.entry.id if row is not None and not row.is_header else None
+
+    def viewportEvent(self, event) -> bool:  # noqa: N802 - Qt API
+        """The menu key (or Shift+F10) opens the menu for the snip the keyboard is on, beside it, not
+        for whatever happens to be in the middle of the grid."""
+        if event.type() == QEvent.ContextMenu and event.reason() == QContextMenuEvent.Keyboard:
+            if self.current_id() is not None:
+                self.scrollTo(self.currentIndex())
+                self.customContextMenuRequested.emit(self.visualRect(self.currentIndex()).center())
+            return True
+        return super().viewportEvent(event)

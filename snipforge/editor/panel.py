@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from .. import theme
 from ..icons import icon
-from ..widgets import Segmented, ToggleSwitch
+from ..widgets import Segmented, ToggleSwitch, screen_reader_name
 from ..wording import keys
 from .edge_controls import CutoutControls, EdgeControls
 from .fill_controls import FillControls
@@ -315,7 +315,7 @@ class PropertiesPanel(QScrollArea):
         row.addStretch(1)
         self._font = QSpinBox()
         self._font.setRange(8, 96)
-        self._font.setAccessibleName("Font size")
+        screen_reader_name(self._font, "Font size")
         self._font.valueChanged.connect(lambda v: self._emit(font_size=int(v)))
         row.addWidget(self._font)
         col.addLayout(row)

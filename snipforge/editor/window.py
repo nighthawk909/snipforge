@@ -32,7 +32,7 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from ..wording import keys
-from . import beautify
+from . import beautify, regions
 from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
@@ -185,6 +185,10 @@ class EditorWindow(QMainWindow):
         theme.on_change(self._retheme)
 
     # ------------------------------------------------------------------ layout
+    def region_of(self, widget) -> str | None:
+        """Which part of the editor `widget` is in ("canvas", "panel", "commands" or "tools")."""
+        return regions.region_of(self, widget)
+
     def _build_tool_rail(self) -> ToolRail:
         group = QActionGroup(self)
         groups: list[list[tuple[str, QAction]]] = [[]]
@@ -200,7 +204,9 @@ class EditorWindow(QMainWindow):
             groups[-1].append((name, act))
             self._tool_actions[name] = act
         self._tool_actions["select"].setChecked(True)
-        return ToolRail(groups)
+        rail = ToolRail(groups)
+        rail.picked.connect(lambda: self.canvas.setFocus(Qt.OtherFocusReason))
+        return rail
 
     def _wire_commands(self) -> None:
         bar = self.commands
@@ -236,6 +242,8 @@ class EditorWindow(QMainWindow):
             act.triggered.connect(slot)
             self.addAction(act)
 
+        add("F6", lambda: regions.move(self, forward=True))
+        add("Shift+F6", lambda: regions.move(self, forward=False))
         add("Ctrl+C", self.copy_to_clipboard)
         add("Ctrl+Shift+E", self.edit_text)
         add("Ctrl+G", self.combine)

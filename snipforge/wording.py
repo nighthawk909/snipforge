@@ -51,6 +51,11 @@ def file_manager() -> str:
     return "Finder" if on_mac() else "File Explorer"
 
 
+def contrast_setting() -> str:
+    """The system setting that asks apps for more contrast."""
+    return "macOS's Increase contrast" if on_mac() else "A Windows contrast theme"
+
+
 def redo_keys() -> str:
     """The redo shortcut people expect: Ctrl+Y on Windows, ⇧⌘Z on a Mac (the editor takes both)."""
     return keys("Ctrl+Shift+Z") if on_mac() else "Ctrl+Y"

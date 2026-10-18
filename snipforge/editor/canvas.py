@@ -10,12 +10,14 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QUndoStack
 from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
 from .. import theme
+from ..wording import keys
 from .beautify import BeautifyStyle
 from .canvas_choose import ChooseMixin
 from .canvas_clipboard import ClipboardMixin
 from .canvas_draw import DrawMixin
 from .canvas_image import ImageMixin
 from .canvas_input import InputMixin
+from .canvas_keys import KeyboardMixin
 from .canvas_pick import PickMixin
 from .canvas_view import MAX_ZOOM as MAX_ZOOM  # re-exported: the window's zoom buttons use these
 from .canvas_view import MIN_ZOOM as MIN_ZOOM
@@ -57,7 +59,8 @@ def _shows_snip(item) -> bool:
     return getattr(item, "hides_content", False) or getattr(item, "is_snip", False)
 
 
-class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, ImageMixin, ViewMixin, QGraphicsView):
+class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, ImageMixin, ViewMixin,
+             QGraphicsView):
     tool_changed = Signal(str)
     selection_changed = Signal()
     zoom_changed = Signal(float)
@@ -134,6 +137,12 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, Imag
             bar.valueChanged.connect(self._refresh_loupe)
         self.zoom_changed.connect(self._refresh_loupe)
         self._apply_drag_mode()
+        self.setAccessibleName("Snip")
+        self.setAccessibleDescription(
+            "The snip and its markup. Tab and Shift+Tab select the markup one at a time; the arrow keys "
+            f"move it, {keys('Ctrl')}+arrow keys size it, Delete removes it and Enter edits its text. With a "
+            "drawing tool, Enter adds its markup in the middle. F6 goes to the tools, the panel and the "
+            "command bar.")
 
     # ------------------------------------------------------------------ queries
     def annotations(self) -> list[Annotation]:
