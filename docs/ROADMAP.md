@@ -52,6 +52,22 @@ aren't on the Mac yet step aside there ([CROSS-PLATFORM.md](CROSS-PLATFORM.md),
   timing tests (#79), what's left for a person to check (#88)
 - [ ] Checked by hand on real hardware (the list in [VIDEO-PLAN.md](VIDEO-PLAN.md))
 
+### Phase 5: ready for the office
+What IT asks about (speed, accessibility, a way to report problems, packaging for Intune and
+Software Center) and the SnagIt features people miss most. Built in this order:
+- [ ] Report a problem: a diagnostics bundle to attach to a bug report, shown before it's saved,
+  with no snips, titles or personal paths, and nothing sent anywhere
+- [ ] Capture presets: saved mode, delay, pointer, size, effects and destination, each with an
+  optional shortcut of its own
+- [ ] Speed and footprint: startup, snip-to-editor, idle memory, a big Library and installer size
+  measured, the worst fixed, and budgets checked in CI so they can't creep back
+- [ ] Combine images: side by side, a grid, or numbered steps with captions
+- [ ] Edit text in a screenshot, and Smart Move (drag part of a snip somewhere else)
+- [ ] Accessibility: full keyboard use, screen-reader names, Windows high-contrast mode
+- [ ] Video editor, part two: cut out the middle, add a title or caption
+- [ ] Enterprise packaging: an MSI or MSIX for Intune and Software Center, and an ADMX policy
+  template for the IT settings
+
 ### Across the app
 - [x] Privacy: private-window titles never kept, in many browsers and languages (#65, #70, #77)
 - [x] Windows and Mac parity rules, tracker and skill (#75)

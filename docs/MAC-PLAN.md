@@ -140,11 +140,11 @@ Gatekeeper, but on a work Mac that goes around IT's controls: only with IT's OK.
 
 ## Test plan for a coworker with a Mac
 
-Getting the build: open the latest successful [macOS build](../.github/workflows/mac.yml) run in the
-repository's Actions tab, download the `snipforge-macos` artifact (GitHub asks you to sign in for
-artifacts) and unzip it. It holds `SnipForge-<version>.dmg`, `SHA256SUMS.txt` and the CI's
-`selftest.json`. Until the .dmg is attached to releases and previews, a tester without a GitHub
-account gets the .dmg from someone who has one.
+Getting the build: every release has `SnipForge-<version>.dmg` and `SHA256SUMS.txt` on its GitHub
+release page (no account needed), and the download page offers it as Download for Mac. For a
+build of a change that isn't released yet, open its [macOS build](../.github/workflows/mac.yml) run
+in the repository's Actions tab and download the `snipforge-macos` artifact (GitHub asks you to
+sign in for artifacts); it also holds the CI's `selftest.json`.
 
 Write down as you go: the Mac model and chip (Apple menu > About This Mac), the macOS version,
 whether it's managed (above), and a screenshot of anything unexpected. To capture SnipForge's log,
@@ -214,7 +214,7 @@ Mac-only code that needs a real Mac to prove it gets a manual check from the tes
    `~/Library/Caches` (`bundle.py`); the system font and Menlo (`fonts.py`). The packaged self-test
    requires the Screen Recording call, the files in `Contents/Resources` and a fixed-width font on a
    Mac. Still open: Dock icon or menu bar only, decided after the first tester. Attaching the .dmg
-   to releases and previews is the release work (separate PR).
+   to releases and previews came with the release work (#80).
 2. **Window picking** with `CGWindowListCopyWindowInfo` (`_winrects_mac.py`), so clicking a window
    snips it and the Library shows where each snip came from.
 3. **Keyboard shortcut** with `RegisterEventHotKey` (`_hotkey_mac.py`), with the Mac shortcuts in

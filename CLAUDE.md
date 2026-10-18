@@ -36,7 +36,8 @@ agent-driven changes safe to ship.
 - Never edit version numbers or `CHANGELOG.md` by hand; release-please does both in its release PR.
 - Merging the release PR creates the tag and a draft release; the Release workflow builds, attaches
   the installer and only then publishes it. Check the Release workflow run and confirm the release
-  is published with its assets (setup.exe, portable zip, SHA256SUMS.txt, sbom.cdx.json). If the
+  is published with its assets (setup.exe, portable zip, the Mac .dmg and SnipForge.dmg,
+  SHA256SUMS.txt, sbom.cdx.json). If the
   run fails the release stays a draft and the previous one stays "Latest": use "Re-run failed jobs"
   on that run (reuses a finished build), or run the Release workflow by hand with the tag.
 - Keep `draft` and `force-tag-creation` together in `release-please-config.json`. GitHub only
