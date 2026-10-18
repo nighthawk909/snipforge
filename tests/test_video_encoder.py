@@ -127,6 +127,29 @@ def test_the_encoder_says_when_it_is_ready_for_frames(tmp_path, qapp, audio):
         encoder.close()
 
 
+def test_an_encoder_owns_its_qt_parts_so_they_go_together_in_a_safe_order(tmp_path, qapp):
+    # Left to Python, a finished encoder's session, inputs and recorder could be freed in any order
+    # by the cycle collector: an access violation in CI. As Qt children they go in a safe order.
+    import gc
+
+    encoder = record(tmp_path / "owned.mp4", 5)
+    parts = [encoder.session, encoder.video, encoder.sound, encoder.recorder]
+    assert all(part.parent() is encoder for part in parts)
+
+    encoder.cycle = encoder  # garbage only the cycle collector frees, as in a test's closure
+    del encoder, parts
+    gc.collect()
+
+
+def test_ffmpeg_says_nothing_while_recording(tmp_path, qapp):
+    # Its log lines could go into the recording itself ("[h264_mf @ ..." where the MP4 should start).
+    encoder = Encoder(tmp_path / "quiet.mp4", (320, 240), (320, 240), FPS, audio=False)
+    try:
+        assert ffmpeg.log_level() == ffmpeg.AV_LOG_QUIET
+    finally:
+        encoder.close()
+
+
 def test_a_closed_encoder_can_discard_its_file(tmp_path, qapp):
     path = tmp_path / "unwanted.mp4"
     encoder = Encoder(path, (320, 240), (320, 240), FPS, audio=False)

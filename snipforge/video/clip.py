@@ -143,6 +143,9 @@ class _ClipRecording:
         self.sound_format = audio_format()
         self.sound = M.QAudioBufferInput(self.sound_format)
         self.recorder = M.QMediaRecorder()
+        from . import ffmpeg
+
+        ffmpeg.quiet_logs()  # as the encoder does: FFmpeg's log lines could land in the clip
         self.session.setVideoFrameInput(self.video)
         self.session.setAudioBufferInput(self.sound)
         self.session.setRecorder(self.recorder)

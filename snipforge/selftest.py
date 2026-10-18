@@ -201,8 +201,11 @@ def _share() -> str:
 def _video() -> str:
     """Screen recording's encoder made it into the build: Qt Multimedia and its FFmpeg encode a second
     of frames and sound the way recordings are (H.264 + AAC in MP4), and FFmpeg reads the file back."""
-    from .video import clip, ffmpeg
+    from .video import clip, ffmpeg, support
 
+    reason = support.unsupported_reason()  # a Windows "N" edition: say what to add
+    if reason:
+        raise RuntimeError(reason)
     folder = Path(tempfile.mkdtemp(prefix="snipforge-selftest-"))
     info = ffmpeg.probe(clip.make_test_clip(folder / "selftest.mp4", seconds=1.0))
     video, audio = info.first("video"), info.first("audio")

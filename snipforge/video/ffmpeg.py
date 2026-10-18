@@ -170,6 +170,7 @@ def _libs() -> dict[str, ctypes.CDLL]:
         getattr(lib, f"{name}_version").restype = c_uint
     check_versions({name: getattr(lib, f"{name}_version")() >> 16 for name, lib in libs.items()})
     _declare(libs)
+    libs["avutil"].av_log_set_level(AV_LOG_QUIET)  # see quiet_logs()
     return libs
 
 
@@ -211,6 +212,8 @@ def _declare(libs: dict[str, ctypes.CDLL]) -> None:
         (util, "av_frame_free", None, [POINTER(frame_p)]),
         (util, "av_frame_unref", None, [frame_p]),
         (util, "av_get_pix_fmt", c_int, [c_char_p]),
+        (util, "av_log_set_level", None, [c_int]),
+        (util, "av_log_get_level", c_int, []),
         (sws, "sws_getContext", c_void_p, [c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_void_p, c_void_p,
                                            c_void_p]),
         (sws, "sws_scale", c_int, [c_void_p, c_void_p, c_void_p, c_int, c_int, c_void_p, c_void_p]),
@@ -218,6 +221,27 @@ def _declare(libs: dict[str, ctypes.CDLL]) -> None:
     ]:
         fn = getattr(lib, name)
         fn.restype, fn.argtypes = restype, argtypes
+
+
+AV_LOG_QUIET = -8
+
+
+def quiet_logs() -> None:
+    """Stop FFmpeg logging. Qt's FFmpeg carries its own C runtime, whose "stderr" is whatever its
+    file table's slot 2 holds: in a process without a console, and now and then in the test runner,
+    that's a file FFmpeg itself opened, so its log lines went into recordings ("[h264_mf @ ...]"
+    where the MP4 should start; FFmpeg then reads the file as lyrics, "lrc"). Qt's own FFmpeg is the
+    same library, so this quiets it too; call it after Qt Multimedia has loaded its plugin, which
+    sets the level when it starts. Harmless if the libraries can't be loaded."""
+    try:
+        util = _libs()["avutil"]
+    except FFmpegUnavailable:
+        return
+    util.av_log_set_level(AV_LOG_QUIET)
+
+
+def log_level() -> int:
+    return _libs()["avutil"].av_log_get_level()
 
 
 def available() -> bool:
