@@ -51,6 +51,7 @@ class ScreenFrames:
         self._first_image = first_image or gdi.grab_area
         self.frames: queue.Queue = queue.Queue(maxsize=queue_size)
         self.made = self.late_skipped = self.queue_dropped = self.screen_updates = self.reopens = 0
+        self.slowest_gap = self.slowest_draw = 0.0  # seconds: where a starved frame thread's time went
         self.protected_content = False
         self.error: Exception | None = None
         self.overlay_error: Exception | None = None  # drawing the pointer failed: frames go on without it
@@ -142,8 +143,10 @@ class ScreenFrames:
 
     def _make_frames(self) -> None:
         index, period = 0, 1 / self.fps
+        last = self.now()
         while not self._stop.is_set() and self.error is None:
             now = self.now()
+            self.slowest_gap, last = max(self.slowest_gap, now - last), now
             media = self.clock.media_time(now)
             if media is None or media < index * period:  # paused, or not due yet
                 time.sleep(min(NAP, period / 2 if media is None else index * period - media))
@@ -155,6 +158,7 @@ class ScreenFrames:
             with self._lock:
                 frame = self._latest.copy()
             self._draw_pointer(frame, now)
+            self.slowest_draw = max(self.slowest_draw, self.now() - now)
             try:
                 self.frames.put_nowait((index, frame))
                 self.made += 1

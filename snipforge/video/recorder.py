@@ -387,7 +387,7 @@ class Recorder(QObject):
             log.exception("Checking the recording failed")
             problem, warnings = f"The recording couldn't be checked: {exc}", []
         if problem:
-            self._fail(problem)
+            self._fail(f"{problem} ({_frame_summary(stats)})")
             return
         for message in warnings:
             self.warning.emit(message)
@@ -434,8 +434,18 @@ class Recorder(QObject):
                 "frames_dropped_encoder": encoder.frames_dropped if encoder else 0,
                 "frames_sent": encoder.frames_sent if encoder else 0,
                 "screen_reopens": frames.reopens if frames else 0,
+                "screen_updates": frames.screen_updates if frames else 0,
+                "slowest_frame_gap_ms": round(frames.slowest_gap * 1000) if frames else 0,
+                "slowest_frame_draw_ms": round(frames.slowest_draw * 1000) if frames else 0,
                 "protected_content": frames.protected_content if frames else False,
                 "sound": sources}
+
+
+def _frame_summary(stats: dict) -> str:
+    """The frame counts, for a failure message: enough to tell a starved recording from a broken file."""
+    return (f"frames made {stats['frames_made']}, sent {stats['frames_sent']}, late {stats['frames_skipped_late']}, "
+            f"dropped {stats['frames_dropped_queue'] + stats['frames_dropped_encoder']}; slowest gap "
+            f"{stats['slowest_frame_gap_ms']} ms, slowest draw {stats['slowest_frame_draw_ms']} ms")
 
 
 def _real_screen_frames(area, fps, clock, overlay):
