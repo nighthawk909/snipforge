@@ -17,7 +17,7 @@ CAPTURE_MODES = ("area", "window", "screen", "fixed", "scroll")  # the capture t
 DELAYS = (0, 3, 5, 10)  # seconds the capture toolbar's Delay menu offers
 DEFAULT_FIXED_SIZE = (800, 600)  # Fixed size mode's frame, in screen pixels
 MIN_FIXED, MAX_FIXED = 16, 10000  # the smallest and largest side it can have
-SHORTCUT_ACTIONS = ("snip", "repeat", "library")  # what a shortcut of your own can do (snipforge.shortcuts)
+SHORTCUT_ACTIONS = ("snip", "repeat", "library", "record")  # what a shortcut of your own can do (snipforge.shortcuts)
 KEYS = {
     "copy_on_capture": "capture/copy_to_clipboard",
     "hotkey_win_shift_s": "capture/hotkey_win_shift_s",
@@ -31,6 +31,7 @@ KEYS = {
     "shortcut_snip": "shortcuts/snip",
     "shortcut_repeat": "shortcuts/repeat",
     "shortcut_library": "shortcuts/library",
+    "shortcut_record": "shortcuts/record",
     "export_dir": "output/folder",
     "export_format": "output/format",
 }

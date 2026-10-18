@@ -1,4 +1,5 @@
-"""The countdown before a delayed snip: "Snipping in 3 seconds", with Snip now and Cancel.
+"""The countdown before a delayed snip: "Snipping in 3 seconds", with Snip now and Cancel (or before
+a recording: "Recording in 3 seconds", with Record now).
 
 It floats at the top of the monitor the pointer is on and never takes focus, so a menu or tooltip
 you open during the countdown stays open. When time is up it hides, waits a moment for Windows to
@@ -25,14 +26,15 @@ class Countdown(QWidget):
     finished = Signal()  # time is up and the countdown is off the screen
     cancelled = Signal()
 
-    def __init__(self, seconds: int, screen, settle_ms: int | None = None) -> None:
+    def __init__(self, seconds: int, screen, settle_ms: int | None = None, *, recording: bool = False) -> None:
         if not 1 <= seconds <= MAX_SECONDS:
             raise ValueError(f"the delay must be 1 to {MAX_SECONDS} seconds")
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
                          | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAccessibleName("Snip countdown")
+        self._recording = recording
+        self.setAccessibleName("Recording countdown" if recording else "Snip countdown")
         self._left = seconds
         self._screen = screen
         self._settle_ms = SETTLE_MS if settle_ms is None else settle_ms
@@ -54,8 +56,8 @@ class Countdown(QWidget):
         self._label = QLabel(card)
         self._label.setObjectName("CountdownText")
         row.addWidget(self._label)
-        self.now_button = self._button(card, "Snip now")
-        self.now_button.setToolTip("Snip now (or press the snip key again)")
+        self.now_button = self._button(card, "Record now" if recording else "Snip now")
+        self.now_button.setToolTip("Start recording now" if recording else "Snip now (or press the snip key again)")
         self.now_button.clicked.connect(self.snip_now)
         row.addWidget(self.now_button)
         self.cancel_button = self._button(card, "Cancel")
@@ -76,7 +78,7 @@ class Countdown(QWidget):
 
     def _update_label(self) -> None:
         unit = "second" if self._left == 1 else "seconds"
-        text = f"Snipping in {self._left} {unit}"
+        text = f"{'Recording' if self._recording else 'Snipping'} in {self._left} {unit}"
         self._label.setText(text)
         self._label.setAccessibleName(text)  # screen readers hear each change
 

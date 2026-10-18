@@ -179,3 +179,19 @@ def test_stopping_ends_the_thread_and_closes_the_screen():
 
     assert screen.closed
     assert not any(t.name == "screen-frames" and t.is_alive() for t in threading.enumerate())
+
+
+def test_a_screen_that_answers_slowly_doesnt_hold_up_the_frames():
+    # A software graphics driver (GitHub's runners) or a busy GPU: each wait for the screen took ~1 s,
+    # and a frame thread that also waited on the screen made 3 frames in 3 s.
+    class Slow(FakeScreen):
+        def grab(self, timeout_ms):
+            time.sleep(1.0)  # far past its timeout
+            return None
+
+    frames, taken, _screen = run(1.0, screen=Slow())
+
+    numbers = [index for index, _image in taken]
+    assert numbers[0] == 0 and numbers == sorted(set(numbers))
+    assert len(numbers) >= 0.8 * FPS  # made on time anyway, from the screen's last image
+    assert frames.late_skipped <= 5

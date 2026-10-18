@@ -46,7 +46,7 @@ Windows itself took to play the test beep (details below).
  │                                                                                               ├─► QMediaRecorder ─► .mp4
  │ WASAPI microphone ──┐                                                                         │   H.264: Windows' encoder (h264_mf)
  │ WASAPI loopback ────┴─ mixer: places audio by its timestamps ─► QAudioBufferInput ────────────┘   AAC: Qt's FFmpeg
- │ floating control bar: time, levels, pause, stop (hidden from the recording)            │
+ │ no windows: the control bar is SnipForge's, fed by progress (time, levels)            │
  └────────────────────────────────────────────────────────────────────────────────────────┘
    │ stop → Library item
    ▼
@@ -259,7 +259,7 @@ encoding, or a Windows-only ffmpeg.exe, would each be a second encoder to write 
 
 | Risk | What the plan does |
 |---|---|
-| **Python stalls starve the capture threads** (a slow UI update in the prototype froze the main thread for up to 1.2 s and cost 2.6 s of audio) | Record in a separate process, so the editor, Library indexing and OCR can't stall it; keep its UI work tiny (update the control bar ten times a second, only what changed); 1 s WASAPI buffers instead of 0.2 s; register the audio threads with Windows' multimedia scheduler (MMCSS) and raise the recorder's priority; keep per-frame Python work small (the slowest frame took 4-17 ms to make, against 33 ms available). A desktop test fails if a 10 s recording drops more than 3% of frames. |
+| **Python stalls starve the capture threads** (a slow UI update in the prototype froze the main thread for up to 1.2 s and cost 2.6 s of audio) | Record in a separate process, so the editor, Library indexing and OCR can't stall it; keep its UI work tiny (update the control bar ten times a second, only what changed); 1 s WASAPI buffers instead of 0.2 s; register the audio threads with Windows' multimedia scheduler (MMCSS) and raise the recorder's priority; keep per-frame Python work small (the slowest frame took 4-17 ms to make, against 33 ms available). A desktop test fails if a 10 s recording drops more than 3% of frames. **Found in step 6:** a styled control bar drawn in the recorder process stalled its frame thread for 260 ms here and starved it almost completely on GitHub's runners, so the recorder process shows no windows at all (the bar is SnipForge's), and screen watching and frame making run on separate threads. |
 | CPU on older laptops (Windows' software H.264 encoder) | Default output capped at 1080p / 30 fps; frames dropped, never queued, so the file stays in sync; the control bar warns when frames are being dropped. If field testing shows trouble, add the Media Foundation hardware encoder behind the encoder interface. |
 | Crash or power loss mid-recording | **Decided in the recorder step: MP4 written directly.** Tested the alternative, AVI (H.264, written as it goes): Qt flushes it 256 KB at a time, so a recording killed at 4 s was unreadable and one killed at 9 s lost its first frame and its last second, and still screens compress so well that 256 KB can be 10-20 s; its timestamps also need repairing. Instead the recorder runs in its own process (a crash in the rest of SnipForge can't touch it) and finishes the file when Windows announces sleep, shutdown or sign-out, which covers a laptop battery running out. A hard power cut or the recorder itself crashing still loses the recording. |
 | Qt's recorder and player now and then misbehaved in the test runner: Qt's player sometimes loaded a fresh clip with no tracks or stalled before its first frame, and in about 1 run in 65 a clip read back as a different format | Files are checked with FFmpeg directly, not Qt's player (the editor step must test the player the same way). After recorders were made to always shut down and let go of their file, the stress test (`pytest -m stress`: 200 recordings, every file checked) passed four times in a row, 800 recordings, none bad; the recorder also checks every real recording before reporting it finished. |
@@ -317,6 +317,21 @@ recording UI appears in step 6; before that the pieces are tested on their own.
 6. **Recording UI**. Snip / Record switch on the capture toolbar, `selected_rect`, the ready panel
    (sources, levels, webcam on/off), the countdown (reusing the snip delay's), the control bar,
    the stop hotkey, "Record video" in the tray menu.
+   Built: Record on the capture toolbar (or R) hands the chosen area, in physical desktop pixels,
+   to `record_flow.py`; the ready panel (`ready_panel.py`: microphone with its device, computer
+   sound, live meters from `levels.py`, pointer effects, countdown; remembered in `video_prefs.py`)
+   and a dashed outline (`area_frame.py`); the recorder process starts held while the countdown
+   runs and begins as it ends (`Recorder.start(hold=True)`, `go()`), so the start isn't late by the
+   process's own start-up; the control bar (`control_bar.py`) is SnipForge's, fed by the recorder's
+   progress (time and levels, 4 a second): the recorder process shows nothing, because a styled
+   window drawing there held Python's lock long enough to starve the frame thread (a 260 ms stall
+   here, near-total on GitHub's runners). If SnipForge goes away, the recorder finishes and keeps
+   the file. Watching the screen and making frames run on threads of their own, so a slow screen
+   (a software graphics driver, a busy GPU) only makes the picture lag. "Record video" / "Stop
+   recording" in the tray, and a "Record video, or stop recording" shortcut of your own (no
+   combination until one is chosen); a finished recording opens in the video editor. Recordings are
+   saved in the Library folder, one folder each (`recordings.py`); the Library lists them later.
+   The webcam's switch comes with step 7.
 7. **Webcam**. Device choice, the movable bubble (shape and size), hidden from the recording, drawn
    into each frame.
 8. **Video editor and Library**. Recordings in the Library with a thumbnail and length; a player

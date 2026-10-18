@@ -38,16 +38,30 @@ class FakeRecorder(QObject):
 
     def __init__(self, settings):
         super().__init__()
-        self.settings, self.state, self.calls = settings, "idle", []
+        self.settings, self.state, self.calls, self.loud = settings, "idle", [], {}
 
-    def start(self):
-        self.calls.append("start")
+    def media_time(self):
+        return 1.5 if self.state in ("recording", "paused") else 0.0
+
+    def levels(self):
+        return dict(self.loud)
+
+    def start(self, hold=False):
+        self.calls.append("start held" if hold else "start")
+        self.held = hold
         if self.settings.output.stem == "refuse":
             raise RecordingError("No screen to record")
         if self.settings.output.stem == "slow":
             return  # opening the devices takes a while: nothing said yet
         self._set("starting")
-        QTimer.singleShot(0, self, lambda: (self._set("recording"), self.warning.emit("No microphone here")))
+        if not hold:
+            QTimer.singleShot(0, self, lambda: (self._set("recording"), self.warning.emit("No microphone here")))
+
+    def go(self):
+        self.calls.append("go")
+        if self.state == "starting" and self.held:
+            self.held = False
+            self._set("recording")
 
     def pause(self):
         self.calls.append("pause")
@@ -407,3 +421,53 @@ def test_a_process_that_has_exited_isnt_alive():
 
     assert remote_recorder.process_alive(os.getpid())
     assert not remote_recorder.process_alive(gone.pid)
+
+
+def test_a_held_recording_begins_when_snipforge_says_go(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
+    remote.start(hold=True)
+    assert wait_for(lambda: remote.state == "starting")
+    wait_for(lambda: False, 0.2)
+    assert remote.state == "starting"  # held: devices open, nothing recorded
+
+    remote.go()
+
+    assert wait_for(lambda: remote.state == "recording")
+    assert process.recorder.calls == ["start held", "go"]
+
+
+def test_go_before_the_recorder_has_called_back_still_counts(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
+    remote.start(hold=True)
+
+    remote.go()  # the countdown ended before the recorder process was up
+
+    assert wait_for(lambda: remote.state == "recording")
+    assert process.recorder.calls == ["start"]
+
+
+
+def test_snipforge_hears_the_time_and_levels_four_times_a_second(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+    process.recorder.loud = {"microphone": 0.4}
+
+    assert wait_for(lambda: remote.media_time() >= 1.5)  # the recorder said 1.5 s; it moves on from there
+    heard = []  # levels() hands each reading over once: keep them all
+    assert wait_for(lambda: heard.append(remote.levels()) or {"microphone": 0.4} in heard)
+
+
+def test_progress_that_makes_no_sense_is_ignored(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+    process.children[0]._progress.stop()  # only what this test sends
+    wait_for(lambda: False, 0.3)
+    before = remote.media_time()
+
+    process.children[0].channel.send("progress", time=float("nan"), levels={"microphone": "loud", "x": 0.5})
+    process.children[0].channel.send("progress", time=-4, levels=[1, 2])
+    wait_for(lambda: False, 0.2)
+
+    assert remote.media_time() >= before and remote.levels() == {}

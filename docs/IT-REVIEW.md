@@ -24,6 +24,8 @@ be checked in the source code; file references are given where useful.
 | Settings: tool styles, Beautify on/off, theme (light/dark/match Windows) and accent, recent Teams recipients' email addresses, update choices (mode, channel, pinned or skipped version, the waiting download), capture choices (mode, delay, pointer, Fixed size), shortcuts of your own, and the last snip's area for Repeat last snip (the monitor's name, position, size and scale, and a rectangle on it; no image) | `HKCU\Software\SnipForge\SnipForge` | Yes |
 | Small theme images (check mark, arrows) regenerated at start | `%LOCALAPPDATA%\SnipForge\cache` | Yes |
 | Per snip in the library: `meta.json` with the app name and window title it came from, favorite, tags, and the words Windows OCR read in the finished snip (for Library search; read offline, cleared and re-read after each edit, so blurred or cropped text doesn't stay searchable) | `%USERPROFILE%\Pictures\SnipForge\Library\<snip>` | No (it's the user's work) |
+| Screen recordings: `recording.mp4` in a folder of its own per recording (H.264 video, AAC sound) | `%USERPROFILE%\Pictures\SnipForge\Library\<recording>` | No (it's the user's work) |
+| Recording choices: microphone and computer sound on or off, the microphone's device ID, pointer effects, countdown | `HKCU\Software\SnipForge\SnipForge\video` | Yes |
 | Theme packs (optional, read-only JSON colors; see [THEMES.md](THEMES.md)) | `themes\` next to `SnipForge.exe`, and `%LOCALAPPDATA%\SnipForge\themes` | Install folder: yes. User folder: no |
 | Temporary copies for drag-out and sharing (auto-deleted after 24 hours) and downloaded updates (`updates` subfolder, removed once installed) | `%TEMP%\SnipForge` | Yes |
 | Startup entry (if enabled) | `HKCU` or, for all-users installs, `HKLM\...\CurrentVersion\Run` | Yes |
@@ -49,6 +51,14 @@ pressed and never shows it any other keystroke. Each needs Ctrl, Alt or the Wind
 combination another app already registered is refused. None are set by default.
 
 **Screen capture.** The screen is read only when the user asks for a snip: the hotkey, New snip, Repeat last snip, or one of their own shortcuts. Repeat last snip reads the same area again straight away, without the chooser. A second `SnipForge.exe --snip` or `--repeat` started by the same user is passed to the running copy over a local per-user pipe, which is how the Start menu and taskbar entries reach it.
+
+**Screen recording.** The screen is recorded only after the user chooses Record video (the tray,
+the Record switch on the capture toolbar, or a shortcut they set) and then an area, and only that
+area. Before recording starts, the panel beside the area opens the microphone and the computer's
+sound only to show their levels; they're let go when Record or Cancel is clicked. While recording,
+the recorder process has them open (Windows shows its microphone-in-use icon), and SnipForge's
+control bar (pause, stop, discard) stays on screen, kept out of the recording itself. Nothing is sent anywhere:
+the recording is saved in the Library folder (see Data on the PC).
 
 **Startup entry** (optional). Written to the `Run` key so the hotkey works after sign-in.
 

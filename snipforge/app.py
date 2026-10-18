@@ -1,4 +1,4 @@
-"""Tray application: owns the hotkey, capture flow, library and open windows."""
+"""Tray application: owns the hotkey, capture flow, recording, library and open windows."""
 from __future__ import annotations
 
 import ctypes
@@ -55,6 +55,7 @@ class SnipForgeApp:
         self.library = library or Library()
         self.indexer = TextIndexer(self.library)  # reads the words in snips so Library search finds them
         self._session: CaptureSession | None = None
+        self._recording = None  # snipforge.video.record_flow.RecordFlow, while one is under way
         self._windows: list = []  # editors and pins kept alive until closed
         self._home: HomeWindow | None = None
         self._settings: SettingsWindow | None = None
@@ -81,6 +82,7 @@ class SnipForgeApp:
         app.aboutToQuit.connect(self._hotkey.stop)
         app.aboutToQuit.connect(self._shortcuts.close)
         app.aboutToQuit.connect(self.indexer.close)
+        app.aboutToQuit.connect(self._stop_recording_on_quit)
 
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
@@ -94,6 +96,9 @@ class SnipForgeApp:
         self._repeat_action.setEnabled(prefs.last_area() is not None)  # after the first snip
         self._cancel_snip_action = menu.addAction("Cancel snip", self.cancel_snip)
         self._cancel_snip_action.setVisible(False)  # only while a snip is under way
+        self._record_action = menu.addAction("Record video", self.record)
+        self._stop_record_action = menu.addAction("Stop recording", self.stop_recording)
+        self._stop_record_action.setVisible(False)  # only while a recording is under way
         menu.addAction("Library", self.show_home)
         menu.addAction("Settings…", self.show_settings)
         menu.addSeparator()
@@ -180,7 +185,53 @@ class SnipForgeApp:
         if self._session is not None:
             self._session.snip_now()  # pressed again during a countdown: don't wait
             return
-        self._start(CaptureSession(self._on_captured))
+        # R switches a snip to recording, unless one is under way already
+        on_area = self._record_area if self._recording is None else None
+        self._start(CaptureSession(self._on_captured, on_area=on_area))
+
+    def record(self) -> None:
+        """Record video (the tray, or its shortcut): choose an area to record. Pressed again while
+        recording, it stops the recording."""
+        if self._recording is not None:
+            self.stop_recording()
+        elif self._session is None:
+            self._start(CaptureSession(self._on_captured, on_area=self._record_area, record=True))
+
+    def stop_recording(self) -> None:
+        if self._recording is not None:
+            self._recording.stop()
+
+    def _record_area(self, area, screen) -> None:
+        """The area chosen to record (physical desktop pixels): the recording takes it from here."""
+        from .video import record_flow
+
+        if self._recording is not None:
+            self._note("A recording is already under way: stop it first.")
+            return
+        self._recording = record_flow.RecordFlow(area, screen, self.library.root, notify=self._note,
+                                                 open_video=self._open_video)
+        self._recording.ended.connect(self._recording_ended)
+        self._record_action.setVisible(False)
+        self._stop_record_action.setVisible(True)
+        try:
+            self._recording.start()
+        except Exception as exc:  # never leave a recording that blocks every later one
+            log.exception("The recording couldn't start")
+            self._recording._end(f"The recording couldn't start: {exc}")
+
+    def _recording_ended(self) -> None:
+        self._recording = None
+        self._record_action.setVisible(True)
+        self._stop_record_action.setVisible(False)
+
+    def _stop_recording_on_quit(self) -> None:
+        """Quitting SnipForge stops a recording; the recorder finishes and keeps the file."""
+        self.stop_recording()
+
+    def _open_video(self, path) -> None:
+        from .video import editor_window
+
+        self._track(editor_window.open_video(path))
 
     def repeat_last(self) -> None:
         """Repeat last snip: the same area of the same monitor again, straight away (after the
@@ -205,7 +256,7 @@ class SnipForgeApp:
         QTimer.singleShot(CAPTURE_DELAY_MS, session.start)
 
     def _on_shortcut(self, action: str) -> None:
-        {"snip": self.capture, "repeat": self.repeat_last, "library": self.show_home}[action]()
+        {"snip": self.capture, "repeat": self.repeat_last, "library": self.show_home, "record": self.record}[action]()
 
     def cancel_snip(self) -> None:
         """From the tray: stop a snip in progress, e.g. during a countdown, which has no keyboard."""
