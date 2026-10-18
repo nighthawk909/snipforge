@@ -6,7 +6,7 @@ leaving the field halfway through, puts back what was there. Esc cancels, Backsp
 clears."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QKeyCombination, Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QHBoxLayout, QKeySequenceEdit, QLineEdit, QToolButton, QWidget
 
@@ -24,6 +24,13 @@ class _Recorder(QKeySequenceEdit):
     def keyPressEvent(self, e) -> None:  # noqa: N802 - Qt API
         if e.key() == Qt.Key_Backtab or (e.key() == Qt.Key_Tab and e.modifiers() == Qt.ShiftModifier):
             self.focusPreviousChild()  # Qt would record Shift+Tab as a shortcut and keep the keyboard
+            return
+        keypad_digit = bool(e.modifiers() & Qt.KeypadModifier) and Qt.Key_0 <= e.key() <= Qt.Key_9
+        if keypad_digit and e.modifiers() & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier):
+            # Qt forgets it was the number pad's key when Win is held; keep it, or the shortcut
+            # would be the top row's digit and never fire from the number pad.
+            self.setKeySequence(QKeySequence(QKeyCombination(e.modifiers(), Qt.Key(e.key()))))
+            self.editingFinished.emit()
             return
         if e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier):
             if e.key() == Qt.Key_Escape:
