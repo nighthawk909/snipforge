@@ -46,3 +46,11 @@ jobs:
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
+
+  # The Mac version is kept at parity (docs/CROSS-PLATFORM.md): every change is tested, built into
+  # a .dmg, installed and started on macOS too.
+  mac:
+    name: macOS
+    uses: ./.github/workflows/mac.yml
+    permissions:
+      contents: read
