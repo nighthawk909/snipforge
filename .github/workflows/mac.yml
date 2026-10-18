@@ -21,6 +21,11 @@ on:
         type: string
         required: false
         default: ""
+      run_tests:
+        description: "Run the test suite first. CI does; releases don't, since CI tested the commit"
+        type: boolean
+        required: false
+        default: true
   workflow_dispatch:
     inputs:
       version:
@@ -64,6 +69,7 @@ jobs:
         run: python -m ruff check .
       # Tests marked `windows` (registry, Explorer, Win32) are skipped here; see tests/conftest.py.
       - name: Test
+        if: ${{ inputs.run_tests != false }}
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q -rfs

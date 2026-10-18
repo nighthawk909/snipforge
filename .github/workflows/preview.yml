@@ -121,6 +121,7 @@ jobs:
     with:
       ref: ${{ needs.prepare.outputs.sha }}
       version: ${{ inputs.version }}
+      run_tests: false
 
   publish:
     name: Publish prerelease

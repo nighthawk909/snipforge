@@ -118,6 +118,7 @@ jobs:
       contents: read
     with:
       ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
+      run_tests: false  # CI tested the commit; the release proves the build, install and start
 
   publish:
     needs: [release-please, build, mac]

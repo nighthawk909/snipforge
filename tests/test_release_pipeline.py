@@ -278,3 +278,15 @@ def test_previews_carry_the_mac_version():
     publish = preview[preview.index("\n  publish:"):]
     assert "needs.mac.result == 'success'" in publish
     assert "dist/SnipForge-*.dmg" in publish
+
+
+def test_releases_build_the_mac_version_without_rerunning_the_tests():
+    """CI tested the commit; a flaky test mustn't hold a release back. The build, install,
+    self-test and start still run."""
+    mac = (ROOT / ".github" / "workflows" / "mac.yml").read_text(encoding="utf-8")
+    test_step = mac[mac.index("- name: Test\n"):mac.index("- name: Build SnipForge.app")]
+    assert "if: ${{ inputs.run_tests != false }}" in test_step
+    for workflow in ("release.yml", "preview.yml"):
+        text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+        mac_job = text[text.index("\n  mac:"):text.index("\n  publish:")]
+        assert "run_tests: false" in mac_job
