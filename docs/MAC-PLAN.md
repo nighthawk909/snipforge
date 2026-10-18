@@ -1,5 +1,9 @@
 # SnipForge for Mac: the plan
 
+The Mac version is kept at parity with Windows. The working rules are in
+[CROSS-PLATFORM.md](CROSS-PLATFORM.md), and where each feature stands on each platform is in
+[PARITY.md](PARITY.md). This page holds the macOS APIs, permissions and the order of the work.
+
 Coworkers on work Macs have asked for SnipForge. This is what it takes to give them a real Mac
 version, using only free tools: no Apple Developer Program ($99 a year), so no Developer ID
 signature and no notarization. Macs only (not iPhone or iPad).
@@ -196,7 +200,11 @@ Mac-only code that needs a real Mac to prove it gets a manual check from the tes
    managed preferences for policy, and a "Download for Mac" button on the download page. The update
    tests marked `windows` today assume `.exe` installers and registry policy; this phase makes them
    pass the platform explicitly so both platforms run them.
-9. **Optional, needs the maintainer:** a stable signing identity (self-signed certificate as a secret) so
+9. **Recording:** the screen and system sound with ScreenCaptureKit (`SCStream`, macOS 13+), the
+   microphone with AVFoundation, the webcam through Qt's camera, pointer effects from `NSEvent`,
+   keep-awake with an `IOPMAssertion`; the video editor and recordings in the Library on top.
+   Recording needs the Screen Recording permission (and Microphone, Camera).
+10. **Optional, needs the maintainer:** a stable signing identity (self-signed certificate as a secret) so
    permissions survive updates.
 
 ## Building it

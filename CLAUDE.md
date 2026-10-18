@@ -1,7 +1,8 @@
 # SnipForge: working agreement for AI coding agents
 
-SnipForge is a Python/PySide6 screenshot and markup tool for Windows, released through GitHub
-Releases as a per-user installer. These rules make agent-driven changes safe to ship.
+SnipForge is a Python/PySide6 screenshot, markup and recording tool for Windows and macOS, released
+through GitHub Releases (a per-user installer for Windows, a .dmg for Mac). These rules make
+agent-driven changes safe to ship.
 
 ## Every change
 
@@ -23,6 +24,11 @@ Releases as a per-user installer. These rules make agent-driven changes safe to 
    green before merge.
 6. After a feature lands, have the change reviewed (code-reviewer agent) and fix high/medium
    findings in the same PR.
+7. **Both platforms.** The Mac version is kept at parity with Windows. Before touching anything
+   that talks to the OS, or adding a feature, read `docs/CROSS-PLATFORM.md` (the rules, the code
+   layout and the macOS gotchas; the `cross-platform` skill in `.claude/skills` sums it up). A
+   feature ships on both platforms in the same release, or steps aside cleanly on the one that's
+   behind and gets a row in `docs/PARITY.md`. Tests must pass on Windows and macOS.
 
 ## Releases
 
