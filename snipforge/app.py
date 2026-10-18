@@ -5,13 +5,14 @@ import ctypes
 import logging
 import sys
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import __version__, prefs, project, theme
+from . import __version__, logs, prefs, project, theme
 from .capture import CaptureSession, on_screen
 from .editor.window import EditorWindow
 from .home import HomeWindow
@@ -33,6 +34,7 @@ log = logging.getLogger(__name__)
 CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing the screen
 REHOOK_MS = 5 * 60 * 1000  # reinstall the keyboard hook in case Windows dropped it
 PRIVACY_POLL_MS = 500  # how often the GUI thread looks for the private-title sweep's result
+CRASH_NOTICE_MS = 10_000  # how long the "closed unexpectedly" notice is up, and clicking it opens the report
 APP_ID = "SnipForge.SnipForge"
 
 
@@ -63,6 +65,7 @@ class SnipForgeApp:
         self._windows: list = []  # editors and pins kept alive until closed
         self._home: HomeWindow | None = None
         self._settings: SettingsWindow | None = None
+        self._crash_notice_until = 0.0  # clicking the tray's notice before then opens Report a problem
         self._icon = build_icon()
         app.setWindowIcon(self._icon)
         app.setQuitOnLastWindowClosed(False)
@@ -140,10 +143,12 @@ class SnipForgeApp:
         menu.addAction("Settings…", self.show_settings)
         menu.addSeparator()
         menu.addAction("Check for updates…", self.check_updates)
+        menu.addAction("Report a problem…", self.report_problem)
         menu.addAction("About SnipForge", self.about)
         menu.addAction("Quit", self._app.quit)
         self._menu = menu
         self._tray.setContextMenu(menu)
+        self._tray.messageClicked.connect(self._message_clicked)
         if sys.platform != "darwin":  # a Mac menu bar icon opens its menu on click, and New snip is in it
             self._tray.activated.connect(
                 lambda reason: self.capture() if reason == QSystemTrayIcon.Trigger else None)
@@ -190,13 +195,37 @@ class SnipForgeApp:
         self._bring_to_front(self._settings)
 
     def about(self) -> None:
-        QMessageBox.about(
-            None, "About SnipForge",
-            f"<b>SnipForge {__version__}</b><br>Open-source screenshot and markup tool for Windows."
-            f"<br><br>Built with Python, Qt and PySide6 (LGPL-3.0). License texts are in the install folder."
-            f"<br><br>MIT License. Your snips stay on this PC. SnipForge only goes online to check for "
-            f"updates (choose how in Settings) or when you use Share."
-            f"<br><br><a href='{project.REPO_URL}'>{project.REPO_URL.removeprefix('https://')}</a>")
+        box = QMessageBox(QMessageBox.NoIcon, "About SnipForge",
+                          f"<b>SnipForge {__version__}</b><br>Open-source screenshot and markup tool for Windows."
+                          f"<br><br>Built with Python, Qt and PySide6 (LGPL-3.0). License texts are in the install "
+                          f"folder.<br><br>MIT License. Your snips stay on this PC. SnipForge only goes online to "
+                          f"check for updates (choose how in Settings) or when you use Share."
+                          f"<br><br><a href='{project.REPO_URL}'>{project.REPO_URL.removeprefix('https://')}</a>")
+        box.setTextFormat(Qt.RichText)
+        box.setIconPixmap(self._icon.pixmap(64, 64))
+        report = box.addButton("Report a problem…", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Ok)
+        box.exec()
+        if box.clickedButton() is report:
+            self.report_problem()
+
+    def report_problem(self) -> None:
+        """Report a problem: the details for a bug report, shown before they're saved anywhere."""
+        from . import report_dialog
+
+        self._crash_notice_until = 0.0
+        report_dialog.open_report(library_root=self.library.root)
+
+    def notice_crash(self) -> None:
+        """The last run ended in a crash: say so, and offer the report that has its details."""
+        self._crash_notice_until = time.monotonic() + CRASH_NOTICE_MS / 1000
+        self._tray.showMessage("SnipForge", "SnipForge closed unexpectedly last time. Click here to save the "
+                               "details for a bug report (or choose Report a problem in this menu later).",
+                               QSystemTrayIcon.Warning, CRASH_NOTICE_MS)
+
+    def _message_clicked(self) -> None:
+        if time.monotonic() < self._crash_notice_until:
+            self.report_problem()
 
     def handle_command(self, command: str) -> None:
         if command == "snip":
@@ -446,9 +475,15 @@ def main() -> int:
     server = InstanceServer()
     if not server.listening and send_to_running(command):
         return 0  # lost a start-up race with another launch; let that one handle it
+    logging_session = logs.setup()  # only the copy that keeps running writes the log
+    if logging_session is not None:
+        app.aboutToQuit.connect(logging_session.close)
+        app.commitDataRequest.connect(lambda _manager: logging_session.ending())  # signing out, shutting down
     theme.install(app)
     forge = SnipForgeApp(app)
     server.command.connect(forge.handle_command)
+    if logging_session is not None and logging_session.crashed_last_time:
+        QTimer.singleShot(0, forge.notice_crash)
     if command != "background":
         QTimer.singleShot(0, lambda: forge.handle_command(command))
     return app.exec()

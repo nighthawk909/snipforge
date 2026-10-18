@@ -29,7 +29,7 @@ import sys
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer
 
-from .. import __version__
+from .. import __version__, logs
 from .channel import Channel, connect, is_name, settings_from_message
 from .power import SessionWatch, stay_awake
 from .recorder import ACTIVE, Recorder, RecordingError
@@ -57,14 +57,23 @@ def channel_name(argv: list[str]) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from PySide6.QtWidgets import QApplication
-
     argv = sys.argv if argv is None else argv
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     name = channel_name(argv)
     if name is None:
         log.error("SnipForge's recorder needs the channel to SnipForge: --record <name>")
         return 2
+    logging_session = logs.setup("recorder")  # for Report a problem (snipforge.diagnostics)
+    try:
+        return _record(argv, name)
+    finally:
+        if logging_session is not None:
+            logging_session.close()
+
+
+def _record(argv: list[str], name: str) -> int:
+    from PySide6.QtWidgets import QApplication
+
     app = QApplication(argv)
     app.setQuitOnLastWindowClosed(False)
     try:

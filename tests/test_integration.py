@@ -190,7 +190,7 @@ def test_pin_home_commands_and_about(forge, white_image, no_dialogs, monkeypatch
     forge.handle_command("snip")
     assert calls == ["snip"]
     forge.about()
-    assert [k for k, _ in no_dialogs] == ["about"]
+    assert len(no_dialogs) == 1 and "SnipForge" in no_dialogs[0][1]  # shown; closed without a button
 
 
 def test_capture_runs_one_session_at_a_time(forge, monkeypatch):
