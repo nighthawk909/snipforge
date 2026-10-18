@@ -5,6 +5,8 @@ the rest. Every read falls back to a safe default when the stored value is missi
 """
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from .settings import app_settings
@@ -15,6 +17,7 @@ CAPTURE_MODES = ("area", "window", "screen", "fixed", "scroll")  # the capture t
 DELAYS = (0, 3, 5, 10)  # seconds the capture toolbar's Delay menu offers
 DEFAULT_FIXED_SIZE = (800, 600)  # Fixed size mode's frame, in screen pixels
 MIN_FIXED, MAX_FIXED = 16, 10000  # the smallest and largest side it can have
+SHORTCUT_ACTIONS = ("snip", "repeat", "library")  # what a shortcut of your own can do (snipforge.shortcuts)
 KEYS = {
     "copy_on_capture": "capture/copy_to_clipboard",
     "hotkey_win_shift_s": "capture/hotkey_win_shift_s",
@@ -24,6 +27,10 @@ KEYS = {
     "capture_delay": "capture/delay",
     "capture_pointer": "capture/pointer",
     "capture_fixed_size": "capture/fixed_size",
+    "capture_last_area": "capture/last_area",
+    "shortcut_snip": "shortcuts/snip",
+    "shortcut_repeat": "shortcuts/repeat",
+    "shortcut_library": "shortcuts/library",
     "export_dir": "output/folder",
     "export_format": "output/format",
 }
@@ -122,6 +129,55 @@ def set_capture_fixed_size(width: int, height: int) -> None:
     if not (MIN_FIXED <= width <= MAX_FIXED and MIN_FIXED <= height <= MAX_FIXED):
         raise ValueError(f"each side must be {MIN_FIXED} to {MAX_FIXED} pixels, got {width} x {height}")
     _set("capture_fixed_size", f"{int(width)}x{int(height)}")
+
+
+@dataclass(frozen=True)
+class LastArea:
+    """The last snip's area, for Repeat last snip. The monitor is known by its name, `geometry`
+    (where it sits and its size, in Windows' scaled pixels) and `scale`, all as they were; `rect`
+    is the area in that monitor's screen pixels."""
+    screen: str
+    geometry: tuple[int, int, int, int]
+    scale: float
+    rect: tuple[int, int, int, int]
+
+    def valid(self) -> bool:
+        ints = (*self.geometry, *self.rect)
+        return (isinstance(self.screen, str) and len(self.geometry) == len(self.rect) == 4
+                and all(type(n) is int and abs(n) < 2**31 for n in ints)
+                and self.geometry[2] > 0 and self.geometry[3] > 0 and self.rect[2] > 0 and self.rect[3] > 0
+                and isinstance(self.scale, (int, float)) and 0.5 <= self.scale <= 8)
+
+
+def last_area() -> LastArea | None:
+    """The last snip's area, or None before the first snip (or if what's stored is unusable)."""
+    try:
+        value = json.loads(str(app_settings().value(KEYS["capture_last_area"], "")))
+        area = LastArea(value["screen"], tuple(value["geometry"]), value["scale"], tuple(value["rect"]))
+    except (ValueError, TypeError, KeyError):
+        return None
+    return area if area.valid() else None
+
+
+def set_last_area(area: LastArea) -> None:
+    if not area.valid():
+        raise ValueError(f"not a usable area: {area!r}")
+    _set("capture_last_area", json.dumps({"screen": area.screen, "geometry": list(area.geometry),
+                                          "scale": area.scale, "rect": list(area.rect)}))
+
+
+def shortcut(action: str) -> str:
+    """The shortcut of your own for `action` (Qt's portable text, e.g. "Ctrl+Shift+X"), or "" for none."""
+    if action not in SHORTCUT_ACTIONS:
+        raise ValueError(f"unknown shortcut action {action!r}")
+    value = app_settings().value(KEYS[f"shortcut_{action}"], "")
+    return value if isinstance(value, str) else ""
+
+
+def set_shortcut(action: str, text: str) -> None:
+    if action not in SHORTCUT_ACTIONS:
+        raise ValueError(f"unknown shortcut action {action!r}")
+    _set(f"shortcut_{action}", str(text))
 
 
 def export_dir() -> Path:

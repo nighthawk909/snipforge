@@ -212,12 +212,18 @@ def capture_shot(theme_manager) -> None:
 
 
 def settings_shots(theme_manager) -> None:
+    from snipforge import prefs
     from snipforge.settings_window import SettingsWindow
+    from snipforge.shortcuts import GlobalShortcuts
     from snipforge.update_controller import UpdateState
     from tests.test_settings_window import FakeController, release
+    from tests.test_shortcuts import FakeApi
 
     controller = FakeController()
-    window = SettingsWindow(theme_manager=theme_manager, update_controller=controller,
+    shortcuts = GlobalShortcuts(api=FakeApi())  # nothing is really registered for a screenshot
+    shortcuts.set("repeat", "Ctrl+Shift+R")
+    prefs.set_shortcut("repeat", "Ctrl+Shift+R")
+    window = SettingsWindow(theme_manager=theme_manager, update_controller=controller, shortcuts=shortcuts,
                             library_root=Path.home() / "Pictures" / "SnipForge" / "Library")
     window.resize(WIDTH, 1040)
     window.updates_page._current = "0.7.0"
@@ -237,7 +243,7 @@ def settings_shots(theme_manager) -> None:
         if section == "appearance":  # a short page: leave out the empty space below it
             shot = shot.copy(0, 0, shot.width(), 400)
         elif section == "capture":
-            shot = shot.copy(0, 0, shot.width(), 560)
+            shot = shot.copy(0, 0, shot.width(), 800)
         shot.save(str(OUT / f"settings-{section}.png"))
     window.close()
 
