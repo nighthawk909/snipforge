@@ -133,7 +133,7 @@ def test_a_file_that_was_already_there_is_never_deleted(tmp_path, qapp):
         return ScreenFrames(area, fps, clock, overlay, open_screen=no, first_image=grey)
 
     recorder = Recorder(Settings(AREA, existing, fps=FPS), screen_frames=refuse, capture=sound_maker(),
-                        overlay=lambda s: None)
+                        overlay=lambda s: None, free_space=lambda folder: 10**12)
     with pytest.raises(RecordingError):
         recorder.start()
     loop = QEventLoop()

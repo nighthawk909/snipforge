@@ -18,12 +18,11 @@ starting and finishing each have a time limit.
 
 Before starting, the recorder checks the computer can record (support.py) and that the drive has
 room; while recording it warns when the drive runs low, and stops (keeping the recording) before
-it's full, since a recording that fills the drive can't be finished.
+it's full, since a recording that fills the drive can't be finished (disk_space.py).
 """
 from __future__ import annotations
 
 import logging
-import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -34,6 +33,7 @@ from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal
 from . import support
 from .clock import Clock
 from .cursor import PointerEffects
+from .disk_space import LOW_SPACE, MB, MIN_FREE_TO_GO_ON, MIN_FREE_TO_START, SpaceWatch, free_bytes
 from .encoder import Encoder, EncoderError, fit
 from .mixer import HOLD_BACK, Mixer
 from .recording_check import check_file
@@ -47,10 +47,6 @@ FINISH_TIMEOUT = 30.0  # seconds from stop() to a finished file; it normally tak
 DEFAULT_MAX_SIZE = (1920, 1080)  # the plan's default: recordings at most 1080p
 MIN_SIDE = 48  # pixels; Windows' H.264 encoder refuses pictures much smaller than this
 MAX_FPS = 60
-MB = 1024 * 1024
-MIN_FREE_TO_START = 500 * MB  # a 1080p recording takes very roughly 50-100 MB a minute
-LOW_SPACE = 1024 * MB  # warn once below this
-MIN_FREE_TO_GO_ON = 200 * MB  # stop below this: room left to finish the file
 DISK_CHECK_SECONDS = 5.0
 ACTIVE = ("starting", "recording", "paused")
 OVER = ("finished", "failed", "cancelled")
@@ -130,8 +126,8 @@ class Recorder(QObject):
         self._make_capture = capture or _real_capture
         self._make_overlay = overlay or _real_overlay
         self._make_encoder = encoder or Encoder
-        self.free_space = free_space or _free_space  # bytes free in a folder
-        self._next_space_check = 0.0
+        self.free_space = free_space or free_bytes  # bytes free in a folder
+        self._space: SpaceWatch | None = None
         self._space_warned = False
         self._captures: list = []
         self._frames = None
@@ -146,9 +142,9 @@ class Recorder(QObject):
     # --- control ---------------------------------------------------------------------------------
 
     def start(self) -> None:
-        """Open everything; raises RecordingError if the screen or the encoder can't be used (sound
-        sources that can't be opened only warn). Recording begins ("recording") once the encoder is
-        ready, or fails if it never is."""
+        """Open everything; raises RecordingError if this computer can't record, the drive has no
+        room, or the screen or the encoder can't be used (sound sources that can't be opened only
+        warn). Recording begins ("recording") once the encoder is ready, or fails if it never is."""
         if self.state != "idle":
             raise RecordingError("This recording has already started")
         self._check_can_record()
@@ -160,6 +156,8 @@ class Recorder(QObject):
                 log.exception("Starting the recording failed")
             self._close(discard=True)
             raise RecordingError(f"The recording couldn't start: {exc}") from exc
+        self._space = SpaceWatch(self.settings.output.parent, self.free_space, DISK_CHECK_SECONDS)
+        self._space.start()
         self._set_state("starting")
         self._pump.start(PUMP_MS)  # also notices a screen lost while the encoder warms up
         QTimer.singleShot(int(ENCODER_START_TIMEOUT * 1000), self, self._check_started)
@@ -235,11 +233,15 @@ class Recorder(QObject):
         folder = self.settings.output.parent
         try:
             free = self.free_space(folder)
-        except OSError as exc:
+        except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
             raise RecordingError(f"Recordings can't be saved in {folder}: {exc}") from exc
+        except OSError as exc:  # some network drives can't say: record, and let Qt report real trouble
+            log.warning("Can't read the free space in %s: %s", folder, exc)
+            return
         if free < MIN_FREE_TO_START:
             raise RecordingError(f"There isn't room on the drive to record: {free // MB} MB free, and a "
-                                 f"recording needs at least {MIN_FREE_TO_START // MB} MB")
+                                 f"recording needs at least {MIN_FREE_TO_START // MB} MB. Free up some "
+                                 "space, or record to another folder.")
 
     def _open(self) -> None:
         s = self.settings
@@ -313,21 +315,21 @@ class Recorder(QObject):
                 encoder.add_audio(*block)
 
     def _out_of_space(self) -> bool:
-        """Every DISK_CHECK_SECONDS: warn once when the drive runs low; stop when it's nearly full."""
-        now = self.now()
-        if now < self._next_space_check:
+        """From the latest reading: warn once when the drive runs low; stop when it's nearly full.
+        A drive that can't be read is unknown, not full."""
+        free = self._space.latest if self._space is not None else None
+        if free is None:
             return False
-        self._next_space_check = now + DISK_CHECK_SECONDS
-        free = self.free_space(self.settings.output.parent)
         if free < MIN_FREE_TO_GO_ON:
-            message = f"The drive is almost full ({free // MB} MB left), so the recording was stopped there"
+            message = f"The drive is almost full ({free // MB} MB left), so the recording was stopped and saved"
             log.warning(message)
             self.warning.emit(message)
             self.stop()
             return True
         if free < LOW_SPACE and not self._space_warned:
             self._space_warned = True
-            self.warning.emit(f"The drive is running out of space: {free // MB} MB left")
+            self.warning.emit(f"The drive is running out of space: {free // MB} MB left. The recording stops "
+                              f"by itself, and is saved, if it gets below {MIN_FREE_TO_GO_ON // MB} MB.")
         return False
 
     def _screen_lost(self, error) -> None:
@@ -396,6 +398,8 @@ class Recorder(QObject):
 
     def _close(self, discard: bool = False) -> None:
         """Stop everything (again is fine); `discard` deletes the file once the encoder lets go."""
+        if self._space is not None:
+            self._space.stop()
         if self._frames is not None:
             self._frames.stop()
             self._frames.take()  # let go of frames still queued
@@ -422,10 +426,6 @@ class Recorder(QObject):
                 "screen_reopens": frames.reopens if frames else 0,
                 "protected_content": frames.protected_content if frames else False,
                 "sound": sources}
-
-
-def _free_space(folder: Path) -> int:
-    return shutil.disk_usage(folder).free
 
 
 def _real_screen_frames(area, fps, clock, overlay):

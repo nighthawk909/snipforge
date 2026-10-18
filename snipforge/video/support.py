@@ -7,18 +7,21 @@ Pack instead of failing with an encoder error.
 from __future__ import annotations
 
 import ctypes
+import functools
 import sys
 
 MEDIA_FEATURE_PACK = (
-    'This edition of Windows (an "N" edition) comes without Windows\' media features, which '
-    "recording needs to make video. Microsoft's free Media Feature Pack adds them: Settings › Apps › "
-    "Optional features › View features › Media Feature Pack."
+    "This copy of Windows has no media features (Media Foundation), which recording needs to make "
+    'video. "N" editions of Windows come without them: Microsoft\'s free Media Feature Pack adds '
+    'them. Search Start for "Optional features", add "Media Feature Pack", and restart.'
 )
+LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x800  # only Windows' own copy, never one next to SnipForge
 
 
+@functools.cache
 def _loads(name: str) -> bool:
     try:
-        ctypes.WinDLL(name)
+        ctypes.WinDLL(name, winmode=LOAD_LIBRARY_SEARCH_SYSTEM32)
     except OSError:
         return False
     return True

@@ -21,6 +21,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available
                                 reason="Qt's FFmpeg isn't usable here (ffmpeg.unavailable_reason() says why)")
 FPS = 30
 AREA = (0, 0, 320, 240)
+ROOMY = 10**12  # bytes free: the tests' drives never run low unless a test says so
 # How far a frame's picture may be from its place on average, in frames. GitHub's macOS runners wake
 # the frame thread ~20 ms late every time, so there each frame shows the next one's number; on
 # Windows they're on time. (Recording itself is Windows-only for now: docs/VIDEO-PLAN.md.)
@@ -138,7 +139,7 @@ def record(tmp_path, steps, *, sound=None, encoder=None, screen_frames=None, pre
     tests compare with these rather than with the times asked for)."""
     recorder = Recorder(Settings(AREA, tmp_path / "rec.mp4", fps=FPS, **settings),
                         screen_frames=screen_frames or fake_screen_frames, capture=sound or sound_maker(),
-                        overlay=lambda s: None, encoder=encoder)
+                        overlay=lambda s: None, encoder=encoder, free_space=lambda folder: ROOMY)
     if prepare:
         prepare(recorder)
     outcome, warnings = {"at": {}, "states": []}, []
@@ -278,7 +279,7 @@ def test_a_screen_that_cant_be_recorded_stops_it_starting(tmp_path, qapp):
         return ScreenFrames(area, fps, clock, overlay, open_screen=refuse, first_image=grey)
 
     recorder = Recorder(Settings(AREA, tmp_path / "rec.mp4", fps=FPS), screen_frames=no_screen,
-                        capture=sound_maker(), overlay=lambda s: None)
+                        capture=sound_maker(), overlay=lambda s: None, free_space=lambda folder: ROOMY)
 
     with pytest.raises(RecordingError, match="won't share the screen"):
         recorder.start()
@@ -290,7 +291,7 @@ def test_big_areas_are_recorded_at_most_1080p(tmp_path, qapp):
                         screen_frames=lambda area, fps, clock, _o: ScreenFrames(
                             area, fps, clock, Stamper(clock), open_screen=lambda a: StillScreen(),
                             first_image=lambda a: QImage(2560, 1600, QImage.Format.Format_RGB32)),
-                        overlay=lambda s: None)
+                        overlay=lambda s: None, free_space=lambda folder: ROOMY)
     loop = QEventLoop()
     recorder.finished.connect(lambda r: loop.quit())
     recorder.failed.connect(lambda m: loop.quit())
