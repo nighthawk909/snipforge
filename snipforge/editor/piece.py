@@ -8,32 +8,50 @@ from __future__ import annotations
 import base64
 import math
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF
-from PySide6.QtGui import QImage, QPainter, QTransform
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, Qt
+from PySide6.QtGui import QImage, QImageReader, QPainter, QTransform
 
+from . import cutout
 from .items import BoxItem
 from .style import Style
 
 MAX_PIECE_PIXELS = 4_000_000  # a piece bigger than this is kept at this size (it's drawn stretched)
 
 
+MAX_ENCODED = 40_000_000  # characters of base64: far more than a MAX_PIECE_PIXELS PNG ever takes
+
+
 def encode(image: QImage) -> str:
+    """The picture as base64 PNG; ValueError if it can't be (out of memory, say)."""
     data = QByteArray()
     buffer = QBuffer(data)
     buffer.open(QIODevice.WriteOnly)
-    image.save(buffer, "PNG")
+    saved = image.save(buffer, "PNG")
     buffer.close()
+    if not saved or data.isEmpty():
+        raise ValueError("couldn't keep the moved piece's picture")
     return base64.b64encode(bytes(data)).decode("ascii")
 
 
 def decode(text) -> QImage:
-    """The piece's picture; ValueError if it isn't one (the document keeps such a state unread)."""
+    """The piece's picture; ValueError if it isn't one, or is bigger than a piece ever is (the
+    document keeps such a state unread, and a paste of it is refused)."""
     if not isinstance(text, str) or not text:
         raise ValueError("a moved piece without its picture")
+    if len(text) > MAX_ENCODED:
+        raise ValueError("a moved piece's picture is too big")
     try:
-        image = QImage.fromData(base64.b64decode(text, validate=True), "PNG")
+        data = QByteArray(base64.b64decode(text, validate=True))
     except (ValueError, TypeError) as exc:
         raise ValueError(f"a moved piece's picture is damaged: {exc}") from exc
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.ReadOnly)
+    reader = QImageReader(buffer, b"PNG")
+    size = reader.size()  # from the header, before anything is unpacked
+    if not size.isValid() or size.width() * size.height() > MAX_PIECE_PIXELS:
+        raise ValueError("a moved piece's picture is damaged or too big")
+    image = reader.read()
+    buffer.close()
     if image.isNull():
         raise ValueError("a moved piece's picture is damaged")
     return image
@@ -44,13 +62,15 @@ def _within_limit(image: QImage) -> QImage:
     if pixels <= MAX_PIECE_PIXELS:
         return image
     k = math.sqrt(MAX_PIECE_PIXELS / pixels)
-    return image.scaled(max(1, int(image.width() * k)), max(1, int(image.height() * k)))
+    return image.scaled(max(1, int(image.width() * k)), max(1, int(image.height() * k)),
+                        Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
 
 
 class PieceItem(BoxItem):
     """A moved part of the snip: move it, resize it (the picture stretches) or delete it."""
 
     kind = "piece"
+    is_snip = True  # part of how the snip looks: Grab text and Edit text read it, Smart Move picks it up
     supports_shadow = False
     keep_square_with_shift = False
 
@@ -98,9 +118,25 @@ def turned(text: str, transform: QTransform) -> str:
     return encode(image.transformed(linear))
 
 
-def picked_up(source: QImage, area: QRectF) -> QImage:
-    """The part of `source` (the snip as shown, hidden parts hidden) under `area`."""
-    return source.copy(area.toAlignedRect().intersected(source.rect()))
+def cut_out(text: str, rect: QRectF, cut: cutout.Cut) -> str:
+    """A piece's picture once `cut` (snip pixels) takes its strip out of the snip: the part of the
+    piece over the strip goes too. Nothing left: a transparent picture (the piece is then tiny)."""
+    image = decode(text)
+    horizontal = cut.axis == "x"
+    low, length = (rect.left(), rect.width()) if horizontal else (rect.top(), rect.height())
+    pixels = image.width() if horizontal else image.height()
+    if length <= 0:
+        return text
+    start = max(0.0, cut.start - low) * pixels / length
+    end = min(length, cut.end - low) * pixels / length
+    first, last = max(0, round(start)), min(pixels, round(end))
+    if last <= first:
+        return text  # the strip misses the piece
+    if last - first >= pixels:
+        empty = QImage(1, 1, QImage.Format_ARGB32_Premultiplied)
+        empty.fill(Qt.transparent)
+        return encode(empty)
+    return encode(cutout.apply(image, cutout.Cut(cut.axis, first, last)))
 
 
 def default_style() -> Style:

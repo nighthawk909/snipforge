@@ -19,12 +19,16 @@ class ChooseMixin:
 
     def start_choosing(self, rects: list[QRectF], on_chosen) -> None:
         """Offer `rects` (snip pixels); `on_chosen(index)` is called with the one clicked."""
+        self.stop_picking()
         self.commit_text()
         self._cancel_drag()
+        if self.tool == "crop":
+            self.set_tool("select")  # leaving Crop applies it, so the lines are on what you keep
         self._choices = [QRectF(r) for r in rects]
         self._on_chosen = on_chosen
         self._scene.clearSelection()
         self.viewport().setCursor(Qt.PointingHandCursor)
+        self.choosing_changed.emit(True)
 
     def stop_choosing(self) -> None:
         if self._choices is None:
@@ -33,6 +37,7 @@ class ChooseMixin:
         self._on_chosen = None
         self._overlay.set_band(None)
         self.viewport().setCursor(Qt.ArrowCursor if self.tool == "select" else Qt.CrossCursor)
+        self.choosing_changed.emit(False)
 
     def choice_at(self, pos: QPointF) -> int | None:
         """The line under `pos`, or the nearest within PICK_SLOP of it."""

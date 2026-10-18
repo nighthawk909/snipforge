@@ -213,9 +213,13 @@ class DrawMixin:
         area = erase.scene_rect().toAlignedRect().intersected(self._image_rect.toAlignedRect())
         if area.isEmpty():
             return
-        piece = PieceItem(default_style(), self.shown_pixels(area))
+        try:
+            piece = PieceItem(default_style(), self.shown_pixels(area))
+        except ValueError:  # no memory for its picture
+            self.notice.emit("Couldn't pick that up: there isn't the memory for it.")
+            return
         piece.set_scene_rect(QRectF(area))
-        piece.setZValue(self._next_z())
+        piece.setZValue(erase.zValue() + 1)  # over its erase (they'd tie: neither is in the scene yet)
         self.undo_stack.push(AddItemsCommand(self._scene, [erase, piece], "Smart Move"))
         self.set_tool("select")
         self._select([piece])

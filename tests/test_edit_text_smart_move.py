@@ -2,7 +2,7 @@
 over it, matched in size and colour) and Smart Move (drag out part of the snip, put it anywhere;
 Smart erase fills in where it was)."""
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QInputDialog
@@ -116,10 +116,37 @@ def test_colours_come_from_the_line_and_its_background(page):
     assert abs(ink.blue() - 0x8a) < 40 and ink.red() < 80  # dark blue, near enough
 
 
-def test_the_new_text_is_as_tall_as_the_old(qapp):
-    size = edit_text.fitted_size("Total due 120", 17.0)
-    height = QFontMetricsF(edit_text._font(size)).tightBoundingRect("Total due 120").height()
-    assert 14 <= height <= 17
+def tight(text, size):
+    return QFontMetricsF(edit_text._font(size)).tightBoundingRect(text)
+
+
+def test_the_new_text_is_as_wide_as_the_old_unless_that_makes_it_far_taller(qapp):
+    old = tight("Total due 120", 20)  # how the line looks at 20 px, in the font the editor uses
+    assert edit_text.fitted_size("Total due 120", old.width() + 0.5, old.height()) == 20
+    squeezed = edit_text.fitted_size("Total due 120", old.width() / 3, old.height())  # recognition's width is off
+    assert abs(tight("Total due 120", squeezed).height() - old.height()) <= 0.25 * old.height()
+
+
+def test_the_letters_are_found_even_when_recognition_puts_the_line_a_little_off(qapp):
+    img = QImage(300, 80, QImage.Format_ARGB32)
+    img.fill(QColor("#ffffff"))
+    font = QFont("Segoe UI")
+    font.setPixelSize(13)
+    p = QPainter(img)
+    p.setFont(font)
+    p.setPen(QColor("#222222"))
+    p.drawText(QPointF(20, 50), "Total due by Friday")
+    p.end()
+    ink = inked(img, img.rect())
+    # Windows' recognition put 13 px Segoe UI's box 9.4 px above its letters at the top, 7 at the bottom
+    recognized = ink.adjusted(0, -0.72 * ink.height(), 0, -0.54 * ink.height())
+    found = edit_text.ink_box(img, recognized, QColor("#ffffff"))
+    assert abs(found.top() - ink.top()) <= 1 and abs(found.bottom() - ink.bottom()) <= 1
+    swap = edit_text.replacement(img, QPointF(0, 0), recognized, "Total due by Friday", QRectF(img.rect()))
+    assert swap.erase.contains(ink)  # all of the old letters go
+    blank = QImage(40, 40, QImage.Format_ARGB32)
+    blank.fill(QColor("#ffffff"))
+    assert edit_text.ink_box(blank, QRectF(5, 5, 20, 10), QColor("#ffffff")) == QRectF(5, 5, 20, 10)
 
 
 def test_edit_text_retypes_a_line_in_the_editor(qapp, page, tmp_path, monkeypatch):
@@ -144,10 +171,25 @@ def test_edit_text_retypes_a_line_in_the_editor(qapp, page, tmp_path, monkeypatc
     text = next(i for i in canvas.annotations() if isinstance(i, TextItem))
     assert text.toPlainText() == "Total due 95" and text.isSelected()
     assert not text.style.bold and not text.style.fill and abs(QColor(text.style.color).blue() - 0x8a) < 40
-    assert 14 <= text.style.font_size <= 24
+    around = QRect(30, 140, 360, 60)
+    old, new = inked(page, around), inked(canvas.render_image(), around)
+    assert abs(new.height() - old.height()) <= 0.25 * old.height()  # as tall as the old letters
+    assert abs(new.left() - old.left()) <= 2 and abs(new.bottom() - old.bottom()) <= 2  # where they were
+    assert not editor.statusBar().currentMessage().startswith("Click the line")
     canvas.undo_stack.undo()
     assert kinds(canvas) == []  # one step
     editor.close()
+
+
+def inked(image, area):
+    """The pixels in `area` that aren't (nearly) white, as drawn."""
+    xs, ys = [], []
+    for y in range(area.top(), area.bottom() + 1):
+        for x in range(area.left(), area.right() + 1):
+            if sum(QColor(image.pixel(x, y)).getRgb()[:3]) < 3 * 255 - edit_text.INK_DIFFERENCE:
+                xs.append(x)
+                ys.append(y)
+    return QRectF(min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
 
 
 def test_edit_text_with_nothing_typed_just_removes_the_line(page):
@@ -186,3 +228,142 @@ def test_text_can_be_regular_weight(qapp):
     regular = TextItem(Style(bold=False), "Hi")
     assert regular.font().weight() == QFont.Normal and TextItem(Style(), "Hi").font().weight() == QFont.Bold
     assert Style.from_dict({"bold": False}).bold is False and Style.from_dict({}).bold is True
+
+
+# --- What the review found ---------------------------------------------------------------------
+def test_the_new_text_and_a_moved_piece_stay_over_their_erase_after_a_reload(page):
+    canvas = make_canvas(page)
+    canvas.edit_line(QRectF(41, 162, 150, 22), "Total due 120", "Total due 95")
+    canvas.set_tool("move")
+    gesture(canvas, (35, 35), (105, 85))
+    gesture(canvas, (70, 60), (270, 60))
+    before = canvas.render_image()
+    again = make_canvas(page)
+    again.load_document(canvas.to_document())
+    assert again.render_image() == before
+
+
+def test_a_moved_piece_is_part_of_what_grab_text_reads(page):
+    canvas = make_canvas(page)
+    canvas.set_tool("move")
+    gesture(canvas, (35, 35), (105, 85))
+    gesture(canvas, (70, 60), (270, 60))
+    drag(canvas, "rect", (300, 150), (380, 220))  # other markup isn't
+    content = canvas.content_image()
+    assert content.pixelColor(270, 60).name() == "#e11d48" and content.pixelColor(70, 60).name() != "#e11d48"
+    assert content.pixelColor(300, 185).name() == "#ffffff"
+    assert make_canvas(page).content_image() is not None
+
+
+def test_a_piece_too_big_to_be_one_is_refused(qapp):
+    big = QImage(2100, 2000, QImage.Format_ARGB32)  # over MAX_PIECE_PIXELS
+    big.fill(QColor("#000000"))
+    with pytest.raises(ValueError):
+        piece.decode(piece.encode(big))
+    kept = PieceItem(piece.default_style(), big)
+    assert kept.image().width() * kept.image().height() <= piece.MAX_PIECE_PIXELS
+
+
+def test_pasting_pieces_is_checked_like_other_pictures():
+    from PySide6.QtCore import QSizeF
+
+    from snipforge.editor import paste_checks
+    one = {"kind": "piece", "pos": [0, 0], "size": [10, 10], "style": {}, "image": "x"}
+    assert paste_checks.problem([one], QSizeF(100, 100)) is None
+    assert paste_checks.problem([one] * (paste_checks.MAX_HEAVY + 1), QSizeF(100, 100))
+    huge = {**one, "image": "x" * (paste_checks.MAX_PICTURES + 1)}
+    assert paste_checks.problem([huge], QSizeF(100, 100))
+
+
+def test_cutting_out_through_a_piece_cuts_its_picture_too(page):
+    canvas = make_canvas(page)
+    canvas.set_tool("move")
+    gesture(canvas, (35, 35), (105, 85))  # a piece 70 px wide, at x 35 to 105
+    canvas.cut_out("x", 50, 70)
+    moved = next(i for i in canvas.annotations() if isinstance(i, PieceItem))
+    assert moved.scene_rect().width() == 50 and moved.image().width() == 50
+    canvas.cut_out("y", 30, 90)  # all of it
+    moved = next(i for i in canvas.annotations() if isinstance(i, PieceItem))
+    assert moved.image().pixelColor(0, 0).alpha() == 0
+    canvas.undo_stack.undo()
+    canvas.undo_stack.undo()
+    moved = next(i for i in canvas.annotations() if isinstance(i, PieceItem))
+    assert moved.image().width() == 70
+
+
+def test_pieces_need_a_newer_document_than_plain_markup(page):
+    from snipforge.editor.canvas import DOCUMENT_VERSION, UnsupportedDocument
+    canvas = make_canvas(page)
+    drag(canvas, "rect", (10, 10), (60, 60))
+    assert canvas.to_document()["version"] == 1  # older versions still edit everything else
+    canvas.set_tool("move")
+    gesture(canvas, (35, 35), (105, 85))
+    document = canvas.to_document()
+    assert document["version"] == 2 == DOCUMENT_VERSION  # older ones open it read-only, as it looks
+    make_canvas(page).load_document(document)
+    with pytest.raises(UnsupportedDocument):
+        make_canvas(page).load_document({**document, "version": 3})
+
+
+def test_smart_move_says_so_when_it_cant_keep_the_picture(page, monkeypatch):
+    canvas = make_canvas(page)
+    said = []
+    canvas.notice.connect(said.append)
+
+    def fail(_image):
+        raise ValueError("no memory")
+    monkeypatch.setattr(piece, "encode", fail)
+    canvas.set_tool("move")
+    gesture(canvas, (35, 35), (105, 85))
+    assert kinds(canvas) == [] and said and "memory" in said[-1]
+
+
+def test_choosing_ends_when_the_snip_changes_or_the_eyedropper_starts(page):
+    canvas = make_canvas(page)
+    drag(canvas, "rect", (300, 150), (380, 220))
+    canvas.start_choosing([QRectF(41, 162, 150, 22)], lambda n: None)
+    canvas.undo_stack.undo()
+    assert not canvas.choosing()
+    canvas.start_choosing([QRectF(41, 162, 150, 22)], lambda n: None)
+    canvas.rotate_image(clockwise=True)
+    assert not canvas.choosing()
+    canvas.start_choosing([QRectF(41, 162, 150, 22)], lambda n: None)
+    canvas.start_picking()
+    assert not canvas.choosing() and canvas.picking()
+    canvas.start_choosing([QRectF(41, 162, 150, 22)], lambda n: None)
+    assert canvas.choosing() and not canvas.picking()
+
+
+def test_choosing_while_cropping_applies_the_crop_and_space_still_pans(page):
+    canvas = make_canvas(page)
+    canvas.set_tool("crop")
+    canvas.start_choosing([QRectF(41, 162, 150, 22)], lambda n: None)
+    assert canvas.tool == "select" and canvas.choosing()
+    QTest.keyPress(canvas, Qt.Key_Space)
+    assert canvas._panning and canvas.choosing()
+    QTest.keyRelease(canvas, Qt.Key_Space)
+    assert not canvas._panning and canvas.choosing()
+
+
+def test_esc_clears_the_hint_to_click_a_line(qapp, page, tmp_path, monkeypatch):
+    from snipforge.editor.window import CHOOSE_HINT, EditorWindow
+    from snipforge.library import Library
+
+    library = Library(tmp_path)
+    editor = EditorWindow(page, library, library.create(page))
+    found = ocr.OcrResult((line("Total due 120", QRectF(41, 162, 150, 22)),))
+    monkeypatch.setattr(ocr, "recognize", lambda image: found)
+    editor.edit_text()
+    assert editor.statusBar().currentMessage() == CHOOSE_HINT
+    QTest.keyClick(editor.canvas, Qt.Key_Escape)
+    assert editor.statusBar().currentMessage() == ""
+    editor.close()
+
+
+def test_moving_a_piece_keeps_what_was_selected_selected(page):
+    canvas = make_canvas(page)
+    drag(canvas, "rect", (300, 150), (380, 220))
+    box = next(i for i in canvas.annotations() if i.kind == "rect")
+    assert box.isSelected()
+    canvas.shown_pixels()
+    assert box.isSelected() and box.opacity() == 1.0

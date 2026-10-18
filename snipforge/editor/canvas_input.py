@@ -52,8 +52,8 @@ class InputMixin:
         if self.picking() and e.key() == Qt.Key_Escape:
             self.stop_picking()
             return
-        if self.choosing():  # Edit text: Esc stops choosing; other keys wait for the choice
-            if e.key() == Qt.Key_Escape:
+        if self.choosing() and e.key() != Qt.Key_Space:  # Edit text: Esc stops choosing, Space pans,
+            if e.key() == Qt.Key_Escape:  # and other keys wait for the choice
                 self.stop_choosing()
             return
         if self.picking() and self._pick_key(e):

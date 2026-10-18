@@ -11,7 +11,7 @@ import logging
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
+from PySide6.QtCore import QEvent, QPointF, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -70,6 +70,7 @@ AUTOSAVE_MS = 700
 META_TRIES, META_RETRY_S = 4, 0.05  # reading a snip's details: tries, and the first wait between them
 PICK_HINT = ("Click anywhere on the snip to pick its color, or move with the arrow keys and press Enter. "
              "Esc cancels.")
+CHOOSE_HINT = "Click the line of text to change. Esc cancels."
 
 
 def load_tool_styles(settings: QSettings) -> dict[str, Style]:
@@ -152,6 +153,7 @@ class EditorWindow(QMainWindow):
         self.panel.style_saved.connect(
             lambda kind: self.statusBar().showMessage(f"Saved as a quick style for {TOOL_NAMES.get(kind, kind)}", 3000))
         self.canvas.picking_changed.connect(self._show_picking)
+        self.canvas.choosing_changed.connect(self._show_choosing)
         self.canvas.color_picked.connect(
             lambda color: self.statusBar().showMessage(f"Picked {color.upper()}", 3000))
         self.panel.editing_done.connect(self.canvas.setFocus)
@@ -332,6 +334,10 @@ class EditorWindow(QMainWindow):
     def _show_picking(self, on: bool) -> None:
         self.panel.set_picking(on)
         if not on and self.statusBar().currentMessage() == PICK_HINT:
+            self.statusBar().clearMessage()
+
+    def _show_choosing(self, on: bool) -> None:
+        if not on and self.statusBar().currentMessage() == CHOOSE_HINT:
             self.statusBar().clearMessage()
 
     def add_source_stamp(self) -> None:
@@ -518,15 +524,13 @@ class EditorWindow(QMainWindow):
             self._on_pin(self.final_image())
 
     # ------------------------------------------------------------------ OCR
-    def _ocr_source(self) -> tuple[QImage, float, float]:
+    def _run_ocr(self) -> tuple[ocr.OcrResult | None, QPointF]:
+        """The text in what's kept of the snip, and where that part starts on the snip (OCR's
+        rectangles are relative to it)."""
         crop = self.canvas.crop_rect().toAlignedRect()
-        return self.canvas.content_image().copy(crop), crop.x(), crop.y()
-
-    def _run_ocr(self):
-        image, _, _ = self._ocr_source()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            return ocr.recognize(image)
+            return ocr.recognize(self.canvas.content_image().copy(crop)), QPointF(crop.topLeft())
         except ocr.OcrUnavailable as exc:
             QMessageBox.information(self, "SnipForge", str(exc))
         except Exception as exc:  # WinRT raises plain OSError/RuntimeError variants
@@ -534,10 +538,10 @@ class EditorWindow(QMainWindow):
             QMessageBox.warning(self, "SnipForge", f"Text recognition failed: {exc}")
         finally:
             QApplication.restoreOverrideCursor()
-        return None
+        return None, QPointF()
 
     def grab_text(self) -> None:
-        result = self._run_ocr()
+        result, _ = self._run_ocr()
         if result is None:
             return
         if result.text:
@@ -549,21 +553,19 @@ class EditorWindow(QMainWindow):
         smart-erase it and write them over it in a matching size and colour."""
         from .edit_text import line_rect
 
-        result = self._run_ocr()
+        result, origin = self._run_ocr()
         if result is None:
             return
-        _, ox, oy = self._ocr_source()
         lines = [line for line in result.lines if line.words and line.text.strip()]
         if not lines:
             self.statusBar().showMessage("No text found in this snip", 3500)
             return
-        rects = [line_rect(line).translated(ox, oy) for line in lines]
-        self.statusBar().showMessage("Click the line of text to change. Esc cancels.", 0)
+        rects = [line_rect(line).translated(origin) for line in lines]
         self.canvas.setFocus()
         self.canvas.start_choosing(rects, lambda n: self._retype(rects[n], lines[n].text))
+        self.statusBar().showMessage(CHOOSE_HINT, 0)
 
     def _retype(self, rect, old: str) -> None:
-        self.statusBar().clearMessage()
         new, ok = QInputDialog.getText(self, "Edit text", "Change it to (leave it empty to remove the line):",
                                        QLineEdit.Normal, old)
         if not ok or new == old:
@@ -573,15 +575,14 @@ class EditorWindow(QMainWindow):
                                      f"{keys('Ctrl+Z')} undoes it.", 6000)
 
     def auto_redact(self) -> None:
-        result = self._run_ocr()
+        result, origin = self._run_ocr()
         if result is None:
             return
         findings = redact.find_sensitive(result.lines)
         if not findings:
             self.statusBar().showMessage("Nothing sensitive found", 3500)
             return
-        _, ox, oy = self._ocr_source()
-        count = self.canvas.add_redactions([f.rect.translated(ox, oy) for f in findings], mode="blur")
+        count = self.canvas.add_redactions([f.rect.translated(origin) for f in findings], mode="blur")
         self.statusBar().showMessage(f"Blurred {count}: {redact.summarize(findings)}. {keys('Ctrl+Z')} to undo.",
                                      6000)
 
