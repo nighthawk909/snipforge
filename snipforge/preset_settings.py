@@ -12,17 +12,19 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from . import prefs, presets, scroll_input
+from . import prefs, presets, scroll_input, wording
 from .presets import BEAUTIFY, BORDERS, MAX_NAME, MAX_PRESETS, MODE_NAMES, TORN, Preset
 from .shortcut_edit import ShortcutEdit
 from .shortcuts import label as shortcut_label
@@ -45,7 +47,7 @@ class PresetDialog(QDialog):
         self.setObjectName("PresetDialog")
         self.setMinimumWidth(640)
         col = QVBoxLayout(self)
-        col.setContentsMargins(20, 18, 20, 16)
+        col.setContentsMargins(0, 0, 0, 16)
         col.setSpacing(4)
         self.name = QLineEdit(preset.name)
         self.name.setPlaceholderText("For example: Docs screenshot")
@@ -103,7 +105,7 @@ class PresetDialog(QDialog):
         self.problem.setWordWrap(True)
         self.problem.setTextFormat(Qt.PlainText)
         self.problem.hide()
-        col.addWidget(stack(
+        rows = stack(
             SettingRow("Name", "", self.name),
             SettingRow("Capture mode", "Full screen snips the monitor you're on at once", self.mode),
             self.size_row,
@@ -114,9 +116,19 @@ class PresetDialog(QDialog):
             SettingRow("Torn edges", "", self.torn),
             SettingRow("After the snip", "Every snip is kept in the Library too", self.destination),
             self.folder_row,
-            shortcut_row))
+            shortcut_row)
+        rows.layout().setContentsMargins(20, 18, 20, 4)
+        scroll = QScrollArea()  # small screens and large scaling: the choices scroll, Save stays put
+        scroll.setObjectName("PresetScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(rows)
+        col.addWidget(scroll, 1)
+        self.problem.setContentsMargins(20, 0, 20, 0)
         col.addWidget(self.problem)
         buttons = QHBoxLayout()
+        buttons.setContentsMargins(20, 0, 20, 0)
         buttons.addStretch(1)
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
@@ -131,6 +143,8 @@ class PresetDialog(QDialog):
         self._show_size(self.mode.value)
         self._show_folder(self.destination.value)
         self.name.textChanged.connect(lambda _text: self.problem.hide())
+        screen = self.screen().availableGeometry() if self.screen() is not None else None
+        self.resize(700, min(820, screen.height() - 80) if screen is not None else 760)
 
     @staticmethod
     def _side(value: int, name: str) -> QSpinBox:
@@ -143,7 +157,6 @@ class PresetDialog(QDialog):
 
     def _show_size(self, mode: str) -> None:
         self.size_row.setVisible(mode == "fixed")
-        self.adjustSize()
 
     def _show_folder(self, destination: str) -> None:
         self.folder_row.setVisible(destination == "save")
@@ -153,8 +166,8 @@ class PresetDialog(QDialog):
         self._folder = folder
         shown = folder or f"The Save folder in Settings ({prefs.export_dir()})"
         self.folder_row.set_description(shown)
+        self.folder_row.description.setToolTip(shown)
         self.use_save_folder.setVisible(bool(folder))
-        self.adjustSize()
 
     def _choose_folder(self) -> None:
         start = self._folder or str(prefs.export_dir())
@@ -168,8 +181,11 @@ class PresetDialog(QDialog):
             return
         if on:
             self._shortcuts.suspend()
-        else:
-            self._shortcuts.resume()
+            return
+        taken = self._shortcuts.resume()  # another app may have taken one meanwhile
+        if taken:
+            self._say(" ".join(f"{self._shortcuts.title(action, capital=True)}: {problem}"
+                               for action, problem in taken.items()))
 
     def chosen(self) -> Preset:
         torn = presets.torn_sides(self.torn.value)
@@ -190,10 +206,12 @@ class PresetDialog(QDialog):
             return
         if self._shortcuts is not None and self._shortcuts.supported:
             problem = self._shortcuts.set(preset.action, preset.shortcut, title=preset.name)
-            if problem:
+            unchanged = preset.shortcut == self._original.shortcut and preset.action not in self._shortcuts.bindings()
+            if problem and not unchanged:
                 self._say(problem)
                 return
-            preset = replace(preset, shortcut=self._shortcuts.bindings().get(preset.action, ""))
+            if not problem:  # else: kept as it was saved; the list says it isn't working, and why
+                preset = replace(preset, shortcut=self._shortcuts.bindings().get(preset.action, ""))
         self.preset = preset
         self.accept()
 
@@ -216,7 +234,8 @@ class PresetList(QWidget):
         heading = QLabel("Capture presets")
         heading.setProperty("sfRole", "heading")
         about = QLabel("Saved ways to snip: a mode, a delay, the pointer, effects and where the snip goes. Pick one on "
-                       "the capture toolbar (or press 1 to 9 there), in the tray menu, or with its own shortcut.")
+                       "the capture toolbar (or press 1 to 9 there), in the menu of SnipForge's "
+                       f"{wording.tray_icon()}, or with its own shortcut.")
         about.setProperty("sfRole", "muted")
         about.setWordWrap(True)
         col.addWidget(heading)
@@ -274,7 +293,11 @@ class PresetList(QWidget):
 
     def _dialog(self, preset: Preset, new: bool) -> Preset | None:
         dialog = PresetDialog(preset, self._shortcuts, self.window(), new=new)
-        return dialog.preset if dialog.exec() == QDialog.Accepted else None
+        dialog.setWindowModality(Qt.WindowModal)  # Settings waits; a snip started meanwhile doesn't
+        try:
+            return dialog.preset if dialog.exec() == QDialog.Accepted else None
+        finally:
+            dialog.deleteLater()
 
     def add(self) -> None:
         saved = presets.load()
@@ -297,9 +320,11 @@ class PresetList(QWidget):
         current = presets.get(preset_id)
         if current is None:
             return
-        answer = QMessageBox.question(self.window(), "Delete preset", f"Delete the preset “{current.name}”?",
-                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if answer != QMessageBox.Yes:
+        box = QMessageBox(QMessageBox.Question, "Delete preset", f"Delete the preset “{current.name}”?",
+                          QMessageBox.Yes | QMessageBox.No, self.window())
+        box.setTextFormat(Qt.PlainText)  # a name like <b>Docs</b> stays as typed
+        box.setDefaultButton(QMessageBox.No)
+        if box.exec() != QMessageBox.Yes:
             return
         if self._shortcuts is not None:
             self._shortcuts.forget(current.action)

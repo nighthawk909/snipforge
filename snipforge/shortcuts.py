@@ -197,6 +197,7 @@ class GlobalShortcuts(QObject):
         self._suspended = False
         self._filter: _HotkeyFilter | None = None
         self._ids: dict[str, int] = {}  # presets' hotkey ids, given out as they're first used
+        self._next_id = FIRST_PRESET_ID  # never reused, so a late WM_HOTKEY can't reach another preset
         self._titles: dict[str, str] = {}  # presets' names, for messages
         self.problems: dict[str, str] = {}  # saved shortcuts that couldn't be set (for Settings)
 
@@ -211,7 +212,7 @@ class GlobalShortcuts(QObject):
         if action in ACTIONS:
             return FIRST_ID + list(ACTIONS).index(action)
         if action not in self._ids:
-            self._ids[action] = FIRST_PRESET_ID + len(self._ids)
+            self._ids[action], self._next_id = self._next_id, self._next_id + 1
         return self._ids[action]
 
     def title(self, action: str, capital: bool = False) -> str:
@@ -287,6 +288,7 @@ class GlobalShortcuts(QObject):
         self._bound.pop(action, None)
         self.problems.pop(action, None)
         self._titles.pop(action, None)
+        self._ids.pop(action, None)
 
     def suspend(self) -> None:
         """Let go of every combination for now (while one is being edited)."""

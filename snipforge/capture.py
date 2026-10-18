@@ -15,15 +15,15 @@ a video of: the session hands it, in physical desktop pixels, to `on_area` (snip
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import pointer, prefs, presets, scroll_input, theme
-from .capture_area import area_on, on_screen, screen_for, source_for, span  # noqa: F401
+from .capture_area import RepeatArea, area_on, on_screen, screen_for, source_for, span  # noqa: F401
 from .capture_paint import paint_hint, paint_magnifier, paint_size_label
+from .capture_presets import PresetChoices
 from .capture_toolbar import MODES, CaptureToolbar
 from .countdown import Countdown
 from .scrolling import ScrollCapture
@@ -131,7 +131,8 @@ class _ScreenOverlay(QWidget):
             "A to drag an area, W for a window, F for the full screen, "
             "X for a fixed size frame (arrow keys move it, Enter snips it, X again picks its size), "
             + ("S to scroll a long page or list, " if self._scrolling else "")
-            + "Enter for the whole monitor, D for a delay, P to include the pointer, Esc to cancel")
+            + "Enter for the whole monitor, D for a delay, P to include the pointer, "
+            + ("1 to 9 for a capture preset and 0 for your usual choices, " if presets else "") + "Esc to cancel")
 
     # ------------------------------------------------------------------ what's on screen
     def _pointer_shown(self) -> bool:
@@ -236,7 +237,8 @@ class _ScreenOverlay(QWidget):
         if self.record:
             return f"Choose what to record: {MODES[self._mode].hint}  •  {letters} modes  •  R to snip instead"
         record = "  •  R record" if self.recordable else ""
-        return f"{MODES[self._mode].hint}  •  {letters} modes  •  D delay  •  P pointer{record}"
+        chosen = "  •  1-9 presets" if self.toolbar is not None and self.toolbar.has_presets else ""
+        return f"{MODES[self._mode].hint}  •  {letters} modes  •  D delay  •  P pointer{record}{chosen}"
 
     def _refresh_hover(self) -> None:
         """Re-aim the highlight after the mode or the frame's size changed."""
@@ -572,7 +574,7 @@ def _nudge_step(modifiers) -> int:
     return FIXED_NUDGE_SHIFT if modifiers == Qt.ShiftModifier else 0
 
 
-class CaptureSession:
+class CaptureSession(PresetChoices, RepeatArea):
     """Owns the overlays for one capture; calls back with the image or None."""
 
     def __init__(self, on_done, repeat: prefs.LastArea | None = None, on_note=None, on_area=None,
@@ -584,7 +586,7 @@ class CaptureSession:
         capture preset's choices (a Full screen preset takes the monitor under the pointer straight
         away); `on_manage_presets()`: the toolbar's Manage presets was chosen (the snip is cancelled)."""
         self._on_done = on_done
-        self.preset = preset  # the capture preset in use: its choices, and what happens to the snip
+        self._use_preset(preset)  # the capture preset in use: its choices, and what happens to the snip
         self._on_manage_presets = on_manage_presets
         self._on_area = on_area
         self.record = record and on_area is not None
@@ -599,23 +601,6 @@ class CaptureSession:
         self.scrolling: ScrollCapture | None = None  # Scrolling mode, under way
         self.note: str | None = None  # why a scrolling capture ended early, for the person
         self.source = None  # the window the snip came from (winrects.WindowInfo), when known
-
-    # A preset's choices, or your usual ones (only your usual ones are remembered when changed).
-    def _delay(self) -> int:
-        return self.preset.delay if self.preset is not None else prefs.capture_delay()
-
-    def _pointer(self) -> bool:
-        return self.preset.pointer if self.preset is not None else prefs.capture_pointer()
-
-    def _fixed_size(self) -> tuple[int, int]:
-        return self.preset.fixed_size if self.preset is not None else prefs.capture_fixed_size()
-
-    def _start_mode(self) -> str:
-        if self.preset is not None:
-            mode = self.preset.mode
-            return "area" if mode == "scroll" and not scroll_input.available() else mode
-        mode = prefs.capture_mode()
-        return "area" if mode == "scroll" else mode  # remembered by an older version: never start in it
 
     def start(self) -> None:
         delay = 0 if self.record else self._delay()  # a recording counts down after the area
@@ -685,16 +670,15 @@ class CaptureSession:
         # Every monitor gets the toolbar; the keyboard goes to the one the pointer is on (the main
         # one if the pointer is somewhere Windows doesn't report, e.g. while a remote session reconnects).
         active = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-        if self.preset is not None and mode == "screen" and not self.record:
+        if self._snips_whole_screen():
             self._snip_screen(active, shot, windows, infos)  # a Full screen preset: nothing to choose
             return
-        offered = [(p.id, p.name) for p in presets.load()]
+        offered = self._offered()
         for screen in QGuiApplication.screens():
             overlay = _ScreenOverlay(screen, _grab_screen(screen), windows, infos, mode=mode, toolbar=True,
                                      delay=self._delay(), pointer_shot=shot, include_pointer=self._pointer(),
                                      scrolling=scroll_input.available(), fixed_size=self._fixed_size(),
-                                     record=self.record, recordable=self._on_area is not None,
-                                     presets=offered, preset=self.preset.id if self.preset is not None else "")
+                                     record=self.record, recordable=self._on_area is not None, **offered)
             overlay.selected.connect(lambda image, o=overlay: self._took(o, image))
             overlay.area_chosen.connect(lambda rect, o=overlay: self._chose_to_record(o, rect))
             overlay.record_changed.connect(self._set_record)
@@ -717,45 +701,6 @@ class CaptureSession:
             self.focus.activateWindow()
             self.focus.setFocus()
 
-    def _snip_screen(self, screen, shot, windows: list[QRect], infos: list) -> None:
-        """All of `screen`, straight away, through an overlay that's never shown (as Repeat last
-        snip does), so the pointer and the image come out as a chosen snip's would."""
-        overlay = _ScreenOverlay(screen, _grab_screen(screen), windows, infos, mode="screen", pointer_shot=shot,
-                                 include_pointer=self._pointer(), scrolling=False)
-        try:
-            overlay.selected.connect(lambda image: self._took(overlay, image))
-            overlay._emit(overlay.rect())
-        finally:
-            overlay.deleteLater()
-
-    def _set_preset(self, preset_id: str) -> None:
-        """A preset picked on the toolbar (or "" for your usual choices). Its choices apply to every
-        monitor straight away; its delay starts a countdown, as picking a delay does, and a Full
-        screen preset takes the monitor the pointer is on."""
-        if self._finished:
-            return
-        self.preset = presets.get(preset_id) if preset_id else None
-        self._mode = mode = self._start_mode()
-        delay = self._delay()
-        for overlay in self._overlays:
-            overlay.set_preset(self.preset.id if self.preset is not None else "")
-            overlay.set_mode(mode)
-            overlay.set_include_pointer(self._pointer())
-            overlay.set_fixed_size(*self._fixed_size())
-            overlay.set_delay(delay)
-        if delay:
-            self._mode = None if mode == "screen" else mode  # after the countdown: snipped at once
-            self._close_overlays()
-            self._count_down(delay)
-        elif self.preset is not None and mode == "screen" and not self.record and self.focus is not None:
-            self.focus._emit(self.focus.rect())
-
-    def _manage_presets(self) -> None:
-        """The toolbar's Manage presets: this snip is over, and Settings takes it from here."""
-        self._finish(None)
-        if self._on_manage_presets is not None:
-            self._on_manage_presets()
-
     def _set_record(self, on: bool) -> None:
         """Record switched on or off on one monitor applies to all of them."""
         self.record = on
@@ -772,6 +717,7 @@ class CaptureSession:
         """A mode picked on one monitor applies to all of them, and to the next snip, except
         Scrolling: it acts on whatever is under the pointer, so it's chosen afresh every time."""
         self._mode = mode
+        self._whole_screen = False  # chosen by hand: Full screen means clicking a monitor
         for overlay in self._overlays:
             overlay.set_mode(mode)
         if mode != "scroll" and self.preset is None:  # a preset's snip leaves your usual choices alone
@@ -780,10 +726,8 @@ class CaptureSession:
     def _set_delay(self, seconds: int) -> None:
         """Remembered for the next snip. A delay also starts now: the overlays step aside, the
         countdown runs, and the screen freezes again (with the menu you opened meanwhile)."""
-        if self.preset is None:
+        if not self._changed_by_hand(delay=seconds):
             prefs.set_capture_delay(seconds)
-        else:
-            self.preset = replace(self.preset, delay=seconds)  # for this snip only
         for overlay in self._overlays:
             overlay.set_delay(seconds)
         if seconds and not self._finished:
@@ -799,10 +743,8 @@ class CaptureSession:
 
     def _set_fixed_size(self, width: int, height: int) -> None:
         """A size picked on one monitor applies to all of them, and to the next snip."""
-        if self.preset is None:
+        if not self._changed_by_hand(fixed_size=(width, height)):
             prefs.set_capture_fixed_size(width, height)
-        else:
-            self.preset = replace(self.preset, fixed_size=(width, height))  # for this snip only
         for overlay in self._overlays:
             overlay.set_fixed_size(width, height)
 
@@ -827,45 +769,13 @@ class CaptureSession:
             self.area = area_on(overlay.capture_screen, overlay.last_rect)
         self._finish(image, overlay.last_source)
 
-    def _take_again(self) -> None:
-        """Repeat last snip: the same area of the same monitor, straight away. It goes through an
-        overlay that's never shown, so the pointer, the window it came from and the image come out
-        exactly as a chosen snip's would. An area that's no longer on screen gets a normal snip."""
-        area, self._repeat = self._repeat, None
-        rect = QRect(*area.rect)
-        screen = screen_for(area)
-        shot = pointer.grab() if screen is not None else None  # first, as for any snip
-        pixmap = _grab_screen(screen) if screen is not None else None
-        if pixmap is None or not QRect(QPoint(0, 0), pixmap.size()).contains(rect):
-            gone = "Your last snip's area isn't on screen any more, so choose what to snip."
-            if self._on_note is not None:
-                self._on_note(gone)  # now, while choosing, not after
-            else:
-                self.note = gone
-            self._show_overlays()
-            return
-        try:
-            from .winrects import window_infos
-            infos = window_infos()
-        except OSError:
-            infos = []
-        overlay = _ScreenOverlay(screen, pixmap, [info.rect for info in infos], infos, pointer_shot=shot,
-                                 include_pointer=self._pointer(), scrolling=False)
-        try:
-            overlay.selected.connect(lambda image: self._took(overlay, image))
-            overlay._emit_physical(rect, overlay._to_logical(rect))
-        finally:
-            overlay.deleteLater()
-
     def _scroll_done(self, image, source) -> None:
         self.note = getattr(self.scrolling, "note", None)
         self._finish(image, source)
 
     def _set_pointer(self, on: bool) -> None:
-        if self.preset is None:
+        if not self._changed_by_hand(pointer=on):
             prefs.set_capture_pointer(on)
-        else:
-            self.preset = replace(self.preset, pointer=on)  # for this snip only
         for overlay in self._overlays:
             overlay.set_include_pointer(on)
 

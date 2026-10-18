@@ -79,6 +79,11 @@ def delay_label(seconds: int) -> str:
     return "No delay" if seconds == 0 else f"{seconds} s delay"
 
 
+def _short(name: str, most: int = 18) -> str:
+    """A preset's name for its toolbar button (the menu shows it whole)."""
+    return name if len(name) <= most else name[:most - 1].rstrip() + "…"
+
+
 def size_label(width: int, height: int) -> str:
     return f"{width} × {height}"
 
@@ -326,6 +331,13 @@ class CaptureToolbar(QFrame):
         self.presets_menu.addAction("Manage presets…", self.manage_presets.emit)
         self.presets_button.setMenu(self.presets_menu)
         self._preset_ids = [pid for pid, _name in presets]
+        # As wide as its longest label, so picking a preset never moves the other buttons
+        widths = []
+        for label in ("Presets", *(_short(name) for _pid, name in presets)):
+            self.presets_button.setText(f" {label}")
+            widths.append(self.presets_button.sizeHint().width())
+        self._presets_width = max(widths)
+        self.presets_button.setFixedWidth(self._presets_width)
         return self.presets_button
 
     def preset_for_key(self, digit: int) -> str | None:
@@ -336,11 +348,9 @@ class CaptureToolbar(QFrame):
             return ""
         return self._preset_ids[digit - 1] if 0 < digit <= len(self._preset_ids) else None
 
-    def open_presets_menu(self) -> None:
-        current = next((a for a in self._preset_actions.values() if a.isChecked()), None)
-        self.presets_menu.popup(self.presets_button.mapToGlobal(QPoint(0, self.presets_button.height())), current)
-        if current is not None:
-            self.presets_menu.setActiveAction(current)
+    @property
+    def has_presets(self) -> bool:
+        return bool(self._preset_actions)
 
     def set_preset(self, preset_id: str) -> None:
         """Show which preset is in use ("" for none), without announcing it."""
@@ -350,7 +360,9 @@ class CaptureToolbar(QFrame):
         action.setChecked(True)
         name = self._preset_names.get(preset_id)
         self.presets_button.setChecked(name is not None)
-        self.presets_button.setText(f" {name}" if name else " Presets")
+        self.presets_button.setText(f" {_short(name)}" if name else " Presets")
+        self.presets_button.setToolTip(f"Snipping with the preset {name} (1 to 9 pick another, 0 none)" if name
+                                       else "Snip with a saved preset (1 to 9)")
         self.presets_button.setAccessibleName(f"Presets: {name}" if name else "Presets")
         self.adjustSize()
 
@@ -483,6 +495,11 @@ class CaptureToolbar(QFrame):
         style = Qt.ToolButtonIconOnly if compact else Qt.ToolButtonTextBesideIcon
         for button in (*self.buttons.values(), self.delay_button, self.record_button, self.presets_button):
             button.setToolButtonStyle(style)
+        if compact:
+            self.presets_button.setMinimumWidth(0)
+            self.presets_button.setMaximumWidth(16777215)
+        else:
+            self.presets_button.setFixedWidth(self._presets_width)
         self.adjustSize()
 
     def set_mode(self, mode: str) -> None:

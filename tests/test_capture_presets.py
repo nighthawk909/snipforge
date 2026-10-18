@@ -172,7 +172,8 @@ def session_with(monkeypatch, **kwargs):
     results = []
     monkeypatch.setattr(capture.pointer, "grab", lambda: None)
     managed = []
-    session = capture.CaptureSession(results.append, on_manage_presets=lambda: managed.append(True), **kwargs)
+    kwargs.setdefault("on_manage_presets", lambda: managed.append(True))
+    session = capture.CaptureSession(results.append, **kwargs)
     session.managed = managed
     return session, results
 
@@ -222,6 +223,67 @@ def test_picking_a_preset_on_the_toolbar_applies_it_and_your_usual_choices_come_
         assert prefs.capture_delay() == 0 and prefs.capture_mode() == "window"
     finally:
         session._finish(None)
+
+
+def test_picking_the_choice_in_use_changes_nothing(qapp, monkeypatch):
+    prefs.set_capture_delay(3)
+    presets.save([Preset("w1", "Menu", delay=5)])
+    session, _ = session_with(monkeypatch)
+    session.start()
+    session.snip_now()  # past your usual 3 s
+    QTest.qWait(20)
+    try:
+        overlays = list(session._overlays)
+        QApplication.sendEvent(overlays[0], QKeyEvent(QEvent.KeyPress, Qt.Key_0, Qt.NoModifier, "0"))
+        assert session._overlays == overlays and session.countdown is None  # no second countdown
+        QApplication.sendEvent(overlays[0], QKeyEvent(QEvent.KeyPress, Qt.Key_1, Qt.NoModifier, "1"))
+        assert session.countdown is not None  # Menu's 5 s
+        session.snip_now()
+        QTest.qWait(20)
+        again = list(session._overlays)
+        QApplication.sendEvent(again[0], QKeyEvent(QEvent.KeyPress, Qt.Key_1, Qt.NoModifier, "1"))
+        assert session._overlays == again and session.countdown is None
+    finally:
+        session._finish(None)
+
+
+def test_full_screen_picked_by_hand_still_waits_for_a_click(qapp, monkeypatch):
+    session, results = session_with(monkeypatch, preset=Preset("a1", "Area"))
+    session.start()
+    try:
+        overlay = session._overlays[0]
+        QApplication.sendEvent(overlay, QKeyEvent(QEvent.KeyPress, Qt.Key_F, Qt.NoModifier, "f"))
+        overlay.toolbar.delay_menu.actions()[1].trigger()  # 3 seconds, for this snip
+        session.snip_now()
+        QTest.qWait(20)
+        assert results == [] and session._overlays and session._overlays[0].mode == "screen"
+    finally:
+        session._finish(None)
+
+
+def test_recording_from_a_full_screen_preset_still_asks_for_the_area(qapp, monkeypatch):
+    session, results = session_with(monkeypatch, preset=Preset("s1", "Screen", mode="screen"), record=True,
+                                    on_area=lambda *a: None)
+    session.start()
+    try:
+        assert results == [] and session._overlays
+        assert session._overlays[0].toolbar.presets_button.isHidden()
+    finally:
+        session._finish(None)
+
+
+def test_the_presets_button_keeps_its_width_and_the_hint_names_the_keys(qapp):
+    o = make_overlay(presets=[("a", "Docs"), ("b", "A really very long preset name indeed")], preset="")
+    button = o.toolbar.presets_button
+    width = button.width()
+    for pid in ("a", "b", ""):
+        o.set_preset(pid)
+        assert button.width() == width
+    o.set_preset("b")
+    assert button.text().strip() == "A really very lon…" and "long preset name indeed" in button.toolTip()
+    assert "1-9 presets" in o.hint() and "1 to 9 for a capture preset" in o.accessibleDescription()
+    assert "presets" not in make_overlay().hint()
+    o.close()
 
 
 def test_a_full_screen_preset_takes_the_monitor_at_once(qapp, monkeypatch):
@@ -349,6 +411,50 @@ def test_an_editor_preset_opens_with_its_edges_and_beautify(forge):
     assert editor.canvas.edges().border == 3 and editor.canvas.edges().torn == frozenset({"bottom"})
 
 
+def test_copy_on_capture_copies_what_a_save_preset_saved(forge, tmp_path):
+    prefs.set_copy_on_capture(True)
+    forge._session = Taken(replace(DOCS, destination="save", folder=str(tmp_path)))  # border and Beautify
+    forge._on_captured(snip())
+    pad = beautify.DEFAULT_STYLE.padding
+    assert QGuiApplication.clipboard().image().size().toTuple() == (200 + 2 * pad, 100 + 2 * pad)
+
+
+def test_notes_never_promise_a_library_copy_that_failed(forge, monkeypatch):
+    monkeypatch.setattr(forge.library, "create", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    forge._session = Taken(DOCS)
+    forge._on_captured(snip())
+    assert forge.notes == ["Copied (Docs)."]
+
+
+def test_a_preset_shortcut_that_cannot_be_set_is_named_at_start(qapp, tmp_path, monkeypatch):
+    presets.save([DOCS])
+    from snipforge import app as app_module
+    from snipforge.library import Library
+    monkeypatch.setattr(app_module.HotkeyListener, "start", lambda self: True)
+    monkeypatch.setattr(app_module.UpdateFlow, "start", lambda self: None)
+    monkeypatch.setattr(app_module, "GlobalShortcuts",
+                        lambda: shortcuts.GlobalShortcuts(FakeApi(taken={(MOD_CONTROL | MOD_SHIFT, 0x31)})))
+    shown = []
+    monkeypatch.setattr(app_module.QSystemTrayIcon, "showMessage", lambda self, *a: shown.append(a[1]))
+    f = app_module.SnipForgeApp(qapp, Library(tmp_path))
+    assert any("The preset Docs: Another app already uses Ctrl+Shift+1" in text for text in shown)
+    f.indexer.close()
+    f._shortcuts.close()
+
+
+def test_presets_added_and_removed_never_reuse_a_hotkey_id(qapp):
+    keys = shortcuts.GlobalShortcuts(FakeApi())
+    seen = set()
+    for n in range(5):
+        preset = Preset(f"p{n}", f"P{n}", shortcut="Ctrl+Shift+F1")
+        keys.apply_presets([preset])
+        seen.add(keys._id(preset.action))
+        keys.apply_presets([])
+        assert preset.action not in keys._ids
+    assert len(seen) == 5
+    keys.close()
+
+
 def test_the_raw_snip_is_not_copied_over_a_copy_preset(forge):
     prefs.set_copy_on_capture(True)
     forge._session = Taken(replace(DOCS, beautify="off", border=0, torn=frozenset()))
@@ -438,10 +544,48 @@ def test_change_and_delete_a_preset(settings_window, monkeypatch, tmp_path):
     settings_window.preset_list.change(DOCS.id)
     changed = presets.get(DOCS.id)
     assert changed.name == "Docs to a folder" and changed.destination == "save" and changed.folder == str(tmp_path)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    asked = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: asked.append(box.textFormat()) or QMessageBox.Yes)
     settings_window.preset_list.delete(DOCS.id)
+    assert asked == [Qt.PlainText]  # a name with <b> in it reads as typed
     assert presets.load() == [] and DOCS.action not in settings_window._shortcuts.bindings()
     assert settings_window.preset_list.rows == {}
+
+
+def test_the_preset_window_only_holds_up_settings(settings_window, monkeypatch):
+    from snipforge.preset_settings import PresetDialog
+    seen = []
+    monkeypatch.setattr(PresetDialog, "exec", lambda self: seen.append(self.windowModality()) or QDialog.Rejected)
+    settings_window.preset_list.add()
+    assert seen == [Qt.WindowModal]  # a snip started meanwhile gets the keyboard and mouse
+
+
+def test_typing_a_preset_shortcut_steps_the_others_aside(settings_window):
+    from snipforge.preset_settings import PresetDialog
+    from tests.test_shortcuts import _focus, _key
+    keys = settings_window._shortcuts
+    keys.set("snip", "Ctrl+Shift+X")
+    dialog = PresetDialog(Preset("n1", "New"), keys)
+    _focus(dialog.shortcut.edit, True)
+    assert keys._api.registered == {}  # pressing Ctrl+Shift+X now records it
+    _key(dialog.shortcut.edit, Qt.Key_4, Qt.ControlModifier | Qt.ShiftModifier, "4")
+    _focus(dialog.shortcut.edit, False)
+    assert len(keys._api.registered) == 1 and dialog.shortcut.text() == "Ctrl+Shift+4"
+    QTest.mouseClick(dialog.save_button, Qt.LeftButton)
+    assert dialog.preset.shortcut == "Ctrl+Shift+4" and len(keys._api.registered) == 2
+    dialog.close()
+
+
+def test_a_preset_whose_shortcut_was_taken_can_still_be_changed(settings_window):
+    from snipforge.preset_settings import PresetDialog
+    keys = settings_window._shortcuts
+    keys._api.taken.add((MOD_CONTROL | MOD_SHIFT, 0x31))  # another app has Ctrl+Shift+1 now
+    dialog = PresetDialog(DOCS, keys)
+    dialog.name.setText("Docs, renamed")
+    QTest.mouseClick(dialog.save_button, Qt.LeftButton)
+    assert dialog.preset is not None and dialog.preset.name == "Docs, renamed"
+    assert dialog.preset.shortcut == "Ctrl+Shift+1"  # kept; the list says it isn't working
+    dialog.close()
 
 
 def test_cancelling_the_dialog_changes_nothing(settings_window, monkeypatch):

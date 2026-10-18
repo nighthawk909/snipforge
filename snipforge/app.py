@@ -7,7 +7,7 @@ import sys
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -51,6 +51,18 @@ def build_icon(size: int = 256) -> QIcon:
         p.drawLine(x, y, x, y + 12 * dy)
     p.end()
     return QIcon(pix)
+
+
+class _Follower(QObject):
+    """Calls `react` for a signal of something that lives longer; ends with its parent."""
+
+    def __init__(self, parent: QObject, react) -> None:
+        super().__init__(parent)
+        self._react = react
+
+    @Slot()
+    def react(self) -> None:
+        self._react()
 
 
 class SnipForgeApp:
@@ -138,7 +150,9 @@ class SnipForgeApp:
         self._repeat_action.setEnabled(prefs.last_area() is not None)  # after the first snip
         self._presets_menu = menu.addMenu("Snip with a preset")
         self._show_presets()
-        presets.changes().changed.connect(self._presets_changed)
+        # Through an object that goes with the menu, so a menu that's gone stops listening
+        self._presets_follower = _Follower(menu, self._presets_changed)
+        presets.changes().changed.connect(self._presets_follower.react)
         self._cancel_snip_action = menu.addAction("Cancel snip", self.cancel_snip)
         self._cancel_snip_action.setVisible(False)  # only while a snip is under way
         self._record_action = menu.addAction("Record video", self.record)
@@ -382,8 +396,7 @@ class SnipForgeApp:
                 self._repeat_action.setEnabled(True)
             except ValueError as exc:
                 log.warning("Couldn't remember the snip's area for Repeat last snip: %s", exc)
-        copied = preset is not None and preset.destination == "copy"  # the preset's copy takes its place
-        if prefs.copy_on_capture() and not copied:  # like Win+Shift+S: the raw snip is on the clipboard too
+        if prefs.copy_on_capture() and preset is None:  # like Win+Shift+S: the raw snip is on the clipboard too
             QGuiApplication.clipboard().setImage(image)
         try:
             entry = self.library.create(image, source=source)
@@ -403,6 +416,10 @@ class SnipForgeApp:
         """A capture preset's snip: its edges and Beautify, then the editor, the clipboard or a folder.
         It's in the Library whatever happens, so a snip that couldn't be saved isn't lost."""
         document, rendered = preset_output.with_edges(image, preset)
+        kept = "" if entry is None else " It's in your Library too."
+        if prefs.copy_on_capture() and preset.destination != "copy":  # as Win+Shift+S, with its effects
+            copy = rendered if preset.destination == "editor" else preset_output.final_image(rendered, preset)
+            QGuiApplication.clipboard().setImage(copy)
         if document is not None and entry is not None:
             try:
                 self.library.save(entry, document, rendered)
@@ -417,7 +434,7 @@ class SnipForgeApp:
         final = preset_output.final_image(rendered, preset)
         if preset.destination == "copy":
             QGuiApplication.clipboard().setImage(final)
-            self._note(f"Copied ({preset.name}). It's in your Library too.")
+            self._note(f"Copied ({preset.name}).{kept}")
             return
         from .editor.export import ExportError, save_image
         try:
@@ -428,7 +445,8 @@ class SnipForgeApp:
             path, problem = None, str(exc)
         if problem:
             log.warning("A preset couldn't save its snip: %s", problem)
-            self._note(f"Couldn't save the snip ({preset.name}): {problem}. It's in your Library, opened here.")
+            self._note(f"Couldn't save the snip ({preset.name}): {problem.rstrip('.')}. "
+                       + ("It's in your Library, opened here." if entry is not None else "It's opened here."))
             self._open_editor(image, entry, document)
             return
         self._note(f"Saved to {path} ({preset.name}).")

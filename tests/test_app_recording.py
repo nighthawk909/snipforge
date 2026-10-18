@@ -14,7 +14,8 @@ from tests.test_repeat_snip import forge  # noqa: F401 - the app, as the repeat-
 class FakeSession:
     made: list = []
 
-    def __init__(self, on_done, repeat=None, on_note=None, on_area=None, record=False):
+    def __init__(self, on_done, repeat=None, on_note=None, on_area=None, record=False, preset=None,
+                 on_manage_presets=None):
         self.on_done, self.on_area, self.record = on_done, on_area, record
         FakeSession.made.append(self)
 

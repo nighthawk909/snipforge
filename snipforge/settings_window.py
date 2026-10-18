@@ -352,7 +352,7 @@ class SettingsWindow(QMainWindow):
         """Settings > Capture, scrolled to the capture presets (the toolbar's Manage presets)."""
         self.show_section("capture")
         self.preset_list.refresh()
-        QTimer.singleShot(0, self._scroll_to_presets)  # once the page is laid out
+        QTimer.singleShot(0, self, self._scroll_to_presets)  # once the page is laid out (if still open)
 
     def _scroll_to_presets(self) -> None:
         QApplication.sendPostedEvents(None, QEvent.LayoutRequest)  # the page's new size, so it can scroll
