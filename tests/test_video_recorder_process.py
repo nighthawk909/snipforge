@@ -38,7 +38,13 @@ class FakeRecorder(QObject):
 
     def __init__(self, settings):
         super().__init__()
-        self.settings, self.state, self.calls = settings, "idle", []
+        self.settings, self.state, self.calls, self.loud = settings, "idle", [], {}
+
+    def media_time(self):
+        return 1.5 if self.state in ("recording", "paused") else 0.0
+
+    def levels(self):
+        return dict(self.loud)
 
     def start(self, hold=False):
         self.calls.append("start held" if hold else "start")
@@ -440,56 +446,28 @@ def test_go_before_the_recorder_has_called_back_still_counts(tmp_path, qapp):
     assert process.recorder.calls == ["start"]
 
 
-class FakeBar:
-    def __init__(self, recorder, settings):
-        self.recorder, self.settings, self.shown, self.closed = recorder, settings, False, False
 
-    def show(self):
-        self.shown = True
-
-    def close(self):
-        self.closed = True
-
-
-def bar_process():
-    process = InProcess()
-    bars = []
-
-    def launch(args):
-        name = args[args.index("--record") + 1]
-
-        def begin():
-            channel = Channel(connect(name, 2000))
-            process.children.append(RecorderChild(channel, process.watch, make_recorder=FakeRecorder,
-                                                  quit=process.exits.append,
-                                                  make_bar=lambda r, s: bars.append(FakeBar(r, s)) or bars[-1]))
-        QTimer.singleShot(0, begin)
-        return True
-    return process, launch, bars
-
-
-def test_the_control_bar_appears_once_recording_begins(tmp_path, qapp):
-    process, launch, bars = bar_process()
-    remote = RemoteRecorder(settings(tmp_path), launch=launch)
-    remote.start(hold=True)
-    assert wait_for(lambda: remote.state == "starting")
-    assert len(bars) == 1 and not bars[0].shown  # built while held, not shown till recording begins
-
-    remote.go()
-
-    assert wait_for(lambda: bars and bars[0].shown)
-    assert bars[0].settings == remote.settings
-
-
-def test_with_its_control_bar_a_recording_outlives_snipforge(tmp_path, qapp):
-    process, launch, bars = bar_process()
-    remote = RemoteRecorder(settings(tmp_path), launch=launch)
+def test_snipforge_hears_the_time_and_levels_four_times_a_second(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
     remote.start()
-    assert wait_for(lambda: bars and remote.state == "recording")
+    assert wait_for(lambda: remote.state == "recording")
+    process.recorder.loud = {"microphone": 0.4}
 
-    remote.channel.close()  # SnipForge quit or crashed
+    assert wait_for(lambda: remote.media_time() >= 1.5)  # the recorder said 1.5 s; it moves on from there
+    heard = []  # levels() hands each reading over once: keep them all
+    assert wait_for(lambda: heard.append(remote.levels()) or {"microphone": 0.4} in heard)
+
+
+def test_progress_that_makes_no_sense_is_ignored(tmp_path, qapp):
+    remote, process, _seen = remote_for(tmp_path)
+    remote.start()
+    assert wait_for(lambda: remote.state == "recording")
+    process.children[0]._progress.stop()  # only what this test sends
+    wait_for(lambda: False, 0.3)
+    before = remote.media_time()
+
+    process.children[0].channel.send("progress", time=float("nan"), levels={"microphone": "loud", "x": 0.5})
+    process.children[0].channel.send("progress", time=-4, levels=[1, 2])
     wait_for(lambda: False, 0.2)
 
-    assert "stop" not in process.recorder.calls and process.exits == []  # recording on
-    process.recorder.stop()  # the bar's Stop
-    assert wait_for(lambda: process.exits == [0]) and bars[0].closed
+    assert remote.media_time() >= before and remote.levels() == {}

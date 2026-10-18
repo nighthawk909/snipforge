@@ -1,6 +1,7 @@
 """Desktop: the recording UI end to end, with the real recorder process. The ready panel's Record,
-the countdown, the control bar in the recorder process (kept out of captures, like the outline), and
-stop: a saved H.264 file, opened, and a recorder process that exits cleanly.
+the countdown, the control bar (kept out of captures, like the outline; the recorder process shows no
+windows at all), frames on time, and stop: a saved H.264 file, opened, and a recorder process that
+exits cleanly.
 
 Run with: QT_QPA_PLATFORM=windows python -m pytest -m desktop
 """
@@ -101,15 +102,19 @@ def test_record_from_the_ready_panel_to_the_saved_file(qapp, tmp_path, countdown
         flow.panel.record_button.click()
         assert wait_for(lambda: flow.recorder.state == "recording", 30), (flow.recorder.state, notes)
         recorder_process = Process(flow.recorder.pid)
-        assert wait_for(lambda: visible_windows_of(flow.recorder.pid), 5)  # its control bar
-        assert all(kept_out_of_captures(hwnd) for hwnd in visible_windows_of(flow.recorder.pid))
+        assert wait_for(lambda: flow.bar is not None and flow.bar.isVisible(), 5)
+        assert kept_out_of_captures(int(flow.bar.winId()))
         wait_for(lambda: False, 1.5)
+        assert flow.bar.time.text() == "0:01"  # the recorder's progress reached the bar
+        assert visible_windows_of(flow.recorder.pid) == []  # nothing on screen in the recorder process
 
         flow.stop()
 
         assert wait_for(lambda: ended, 30), notes
         assert notes and notes[-1].startswith("Recording saved"), notes
         assert ffmpeg.probe(opened[0]).first("video").codec == "h264"
+        stats = flow.recorder_stats if hasattr(flow, "recorder_stats") else None
+        assert stats is None or stats["frames_made"] > 0
         assert recorder_process.exit_code() == 0
     finally:
         if flow.state != "ended":

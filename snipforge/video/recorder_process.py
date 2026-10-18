@@ -3,9 +3,11 @@
 Recording in a process of its own means nothing else SnipForge does (an editor busy with a big
 image, a stall on its main thread) can hold up a recording. It connects back to SnipForge over the
 channel (channel.py), says hello, gets the recording's settings, records, reports how it's going,
-and exits once the recording has ended. The recording's control bar (control_bar.py) lives here too,
-so a recording carries on, and can be stopped, even if SnipForge goes away. Windows going to sleep
-or ending the session finishes the file there and then (power.py). Whatever makes this process quit,
+and exits once the recording has ended. It shows nothing: a window drawing here (the control bar,
+styled, once was) holds Python's lock while Qt lays it out, and the frame thread waits on that lock,
+so a slow machine starved the recording of frames. The control bar is SnipForge's, fed with progress
+(time and levels) four times a second. Windows going to sleep or ending the session finishes the
+file there and then (power.py), and so does SnipForge going away. Whatever makes this process quit,
 a recording in progress is finished first, so the file is kept.
 
     SnipForge                              recorder process
@@ -14,6 +16,7 @@ a recording in progress is finished first, so the file is kept.
       (countdown) ───────── go ──────────►  Recorder.go()
                 ◄───────── state, warning ─
       pause / resume / stop / cancel ────►
+                ◄───────── progress {time, levels} ─ (4 a second while recording)
                 ◄──────── finished {path, duration, stats, ended_by} | failed | cancelled
                                             exits
 """
@@ -39,6 +42,7 @@ SLEEP_FINISH_SECONDS = 1.5  # Windows allows about 2 s before it sleeps
 END_FINISH_SECONDS = 4.0  # and about 5 s before it offers to end an app that holds up shutdown
 EXIT_FINISH_SECONDS = 10.0  # quitting for any other reason: finish the file first
 COMMANDS = ("go", "pause", "resume", "stop", "cancel")
+PROGRESS_MS = 250
 
 
 def channel_name(argv: list[str]) -> str | None:
@@ -61,17 +65,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     app = QApplication(argv)
     app.setQuitOnLastWindowClosed(False)
-    from .. import theme
-    from .control_bar import ControlBar
-
-    theme.install(app)  # the control bar looks like the rest of SnipForge
     try:
         socket = connect(name, CONNECT_TIMEOUT_MS)
     except OSError as exc:
         log.error("%s", exc)
         return 3
     watch = SessionWatch()
-    child = RecorderChild(Channel(socket), watch, make_bar=ControlBar)
+    child = RecorderChild(Channel(socket), watch)
     sys.excepthook = child.unexpected  # an error in a slot ends the recording cleanly, not silently
     code = app.exec()
     watch.close()  # here, not while Windows is still telling its hidden window something
@@ -81,15 +81,14 @@ def main(argv: list[str] | None = None) -> int:
 class RecorderChild(QObject):
     """The recorder process's side of the channel: runs one Recorder as SnipForge says."""
 
-    def __init__(self, channel: Channel, watch, *, make_recorder=None, quit=None, make_bar=None) -> None:
-        """`make_bar(recorder, settings)` makes the control bar (none in tests that don't need one)."""
+    def __init__(self, channel: Channel, watch, *, make_recorder=None, quit=None) -> None:
         super().__init__()
         self.channel, self.watch = channel, watch
         self.recorder = None
         self.ended_by: str | None = None  # "sleep", "session end", "SnipForge closed"
         self._make_recorder = make_recorder or Recorder
-        self._make_bar = make_bar
-        self.bar = None
+        self._progress = QTimer(self, interval=PROGRESS_MS)
+        self._progress.timeout.connect(self._send_progress)
         self._quit = quit or QCoreApplication.exit
         self._done = False
         channel.message.connect(self._on_message)
@@ -135,7 +134,6 @@ class RecorderChild(QObject):
             return
         self.recorder = recorder = self._make_recorder(settings)
         recorder.state_changed.connect(lambda state: self.channel.send("state", state=state))
-        recorder.state_changed.connect(lambda state: self._show_bar() if state == "recording" else None)
         recorder.warning.connect(lambda text: self.channel.send("warning", message=text))
         recorder.finished.connect(self._finished)
         recorder.failed.connect(self._report_failure)
@@ -145,12 +143,13 @@ class RecorderChild(QObject):
         except RecordingError as exc:
             self._report_failure(str(exc))
             return
-        if self._make_bar is not None:  # built now, while the encoder warms up (and any countdown runs):
-            self.bar = self._make_bar(recorder, settings)  # building it once recording began stalled it
+        self._progress.start()
 
-    def _show_bar(self) -> None:
-        if self.bar is not None and not self._done:
-            self.bar.show()
+    def _send_progress(self) -> None:
+        """Time recorded and sound levels, for SnipForge's control bar."""
+        if self.recorder is not None and self.recorder.state in ("recording", "paused"):
+            levels = {kind: round(level, 3) for kind, level in self.recorder.levels().items()}
+            self.channel.send("progress", time=round(self.recorder.media_time(), 3), levels=levels)
 
     def _check_told(self) -> None:
         if self.recorder is None and not self._done:
@@ -162,8 +161,6 @@ class RecorderChild(QObject):
             return
         if self.recorder is None:
             self._finish(2)
-        elif self.bar is not None:
-            log.warning("SnipForge went away: the recording goes on, and its control bar stops it")
         elif self.recorder.state in ACTIVE:
             log.warning("SnipForge went away: finishing the recording")
             self.ended_by = "SnipForge closed"
@@ -220,8 +217,7 @@ class RecorderChild(QObject):
         if self._done:
             return
         self._done = True
-        if self.bar is not None:
-            self.bar.close()
+        self._progress.stop()
         if self.recorder is not None and self.recorder.state in (*ACTIVE, "finishing"):
             self.recorder.finish_now(EXIT_FINISH_SECONDS)  # reports "finished" on the way
         self.channel.close()

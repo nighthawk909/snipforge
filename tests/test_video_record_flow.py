@@ -54,6 +54,17 @@ class FakeRecorder(QObject):
         self.finished.emit(Result(self.settings.output, seconds, {}))
 
 
+class FakeBar:
+    def __init__(self, recorder, settings):
+        self.recorder, self.settings, self.shown, self.closed = recorder, settings, False, False
+
+    def show(self):
+        self.shown = True
+
+    def close(self):
+        self.closed = True
+
+
 class FakeCountdown(QObject):
     finished = Signal()
     cancelled = Signal()
@@ -70,7 +81,7 @@ class FakeCountdown(QObject):
 
 
 def make_flow(tmp_path, refuse=False):
-    made = {"recorders": [], "countdowns": []}
+    made = {"recorders": [], "countdowns": [], "bars": []}
     notes, opened, ended = [], [], []
 
     def recorder(settings):
@@ -85,7 +96,7 @@ def make_flow(tmp_path, refuse=False):
 
     flow = RecordFlow(AREA, QGuiApplication.primaryScreen(), tmp_path, notify=notes.append, open_video=opened.append,
                       make_recorder=recorder, make_countdown=countdown, levels=LevelPreview(fake_captures()),
-                      devices=lambda: [])
+                      devices=lambda: [], make_bar=lambda r, s: made["bars"].append(FakeBar(r, s)) or made["bars"][-1])
     flow.ended.connect(lambda: ended.append(True))
     flow.start()
     return flow, made, notes, opened, ended
@@ -240,3 +251,17 @@ def test_the_flow_ends_even_if_the_note_cant_be_shown(tmp_path, qapp):
         flow._failed("x")  # called directly: from a signal, PySide would only print the error
 
     assert ended == [True]
+
+
+def test_the_control_bar_shows_while_recording_and_goes_at_the_end(tmp_path, qapp):
+    flow, made, *_ = make_flow(tmp_path)
+    record_with(flow, RecordingChoices(countdown=0))
+    recorder = made["recorders"][0]
+    assert made["bars"] == []  # not before recording begins
+
+    recorder.state_changed.emit("recording")
+    bar = made["bars"][0]
+    assert bar.shown and bar.recorder is recorder and bar.settings == recorder.settings
+
+    recorder.finish(2)
+    assert bar.closed and flow.bar is None

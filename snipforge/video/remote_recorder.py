@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -89,6 +90,8 @@ class RemoteRecorder(QObject):
         self._launched_pid = 0
         self.channel: Channel | None = None
         self._hold = False
+        self._time = (0.0, 0.0)  # (recording time, when it was heard) from the latest progress
+        self._levels: dict[str, float] = {}
         self._alive_check = QTimer(self, interval=ALIVE_CHECK_MS)
         self._alive_check.timeout.connect(self._check_alive)
 
@@ -128,6 +131,18 @@ class RemoteRecorder(QObject):
         if self._hold:
             self._hold = False
             self._send("go")
+
+    def media_time(self) -> float:
+        """Seconds recorded so far, from the recorder's progress (moving on between messages)."""
+        recorded, heard = self._time
+        if self.state == "recording" and heard:
+            return recorded + max(0.0, time.monotonic() - heard)
+        return recorded
+
+    def levels(self) -> dict[str, float]:
+        """Each sound source's loudest moment in the latest progress (0-1), for level meters."""
+        levels, self._levels = self._levels, {}
+        return levels
 
     def pause(self) -> None:
         self._send("pause")
@@ -192,6 +207,8 @@ class RemoteRecorder(QObject):
             self._set_state(message["state"])
             if self.state == "finishing":
                 QTimer.singleShot(FINISH_DEADLINE_MS, self, self._check_finished)
+        elif kind == "progress":
+            self._on_progress(message)
         elif kind == "warning":
             self.warning.emit(str(message.get("message", "")))
         elif kind == "finished":
@@ -202,6 +219,15 @@ class RemoteRecorder(QObject):
         elif kind == "cancelled":
             self._end("cancelled")
             self.cancelled.emit()
+
+    def _on_progress(self, message: dict) -> None:
+        recorded, levels = message.get("time"), message.get("levels")
+        if isinstance(recorded, (int, float)) and math.isfinite(recorded) and recorded >= 0:
+            self._time = (float(recorded), time.monotonic())
+        if isinstance(levels, dict):
+            self._levels = {kind: min(1.0, max(0.0, float(level))) for kind, level in levels.items()
+                            if kind in ("microphone", "system") and isinstance(level, (int, float))
+                            and math.isfinite(level)}
 
     def _on_finished(self, message: dict) -> None:
         duration, stats = message.get("duration"), message.get("stats")

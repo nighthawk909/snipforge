@@ -1,4 +1,5 @@
-"""The recording's controls, shown beside the area while it's recorded, in the recorder process:
+"""The recording's controls, shown beside the area while it's recorded (in SnipForge: the recorder
+process shows nothing, so nothing on screen can hold up its frames):
 
     [● 0:42  🎤 ▮▮▯  🔊 ▮▯   ❚❚ Pause   ■ Stop   🗑]
 

@@ -2,7 +2,7 @@
 
     area chosen ─► outline + ready panel ─► Record ─► recorder process starts, held ─┐
                                                        countdown runs meanwhile ──────┴─► go
-    recording (the control bar is in the recorder process) ─► stop ─► "Recording saved" + editor
+    recording, with the control bar (fed by the recorder's progress) ─► stop ─► "Recording saved" + editor
 
 The recorder process opens its devices and warms up its encoder while the countdown runs, so the
 recording begins as the countdown ends. Stop (the tray, the shortcut) is passed on; quitting
@@ -37,15 +37,16 @@ class RecordFlow(QObject):
 
     def __init__(self, area: QRect, screen, folder: Path, *, notify: Callable[[str], None],
                  open_video: Callable[[Path], None], make_recorder=None, make_countdown=None,
-                 levels: LevelPreview | None = None, devices=None) -> None:
+                 make_bar=None, levels: LevelPreview | None = None, devices=None) -> None:
         super().__init__()
         self.area, self.screen, self.folder = QRect(area), screen, Path(folder)
         self._notify, self._open_video = notify, open_video
         self._make_recorder = make_recorder or _remote_recorder
         self._make_countdown = make_countdown or _countdown
+        self._make_bar = make_bar or _control_bar
         self._levels = levels or LevelPreview()
         self._devices = devices
-        self.panel = self.frame = self.recorder = self.countdown = None
+        self.panel = self.frame = self.recorder = self.countdown = self.bar = None
         self.state = "ready"  # then "counting down", "recording", "ended"
 
     @property
@@ -93,6 +94,7 @@ class RecordFlow(QObject):
             recorder.failed.connect(self._failed)
             recorder.cancelled.connect(lambda: self._end(None))
             recorder.warning.connect(self._notify)
+            recorder.state_changed.connect(lambda state: self._show_bar(settings) if state == "recording" else None)
             recorder.start(hold=choices.countdown > 0)
         except (OSError, ValueError, RecordingError) as exc:
             log.warning("The recording couldn't start: %s", exc)
@@ -113,6 +115,11 @@ class RecordFlow(QObject):
                         microphone=choices.microphone, microphone_id=choices.microphone_id,
                         system_audio=choices.system_audio,
                         effects=PointerEffects(choices.pointer, choices.highlight, choices.clicks))
+
+    def _show_bar(self, settings: Settings) -> None:
+        if self.bar is None and self.state != "ended":
+            self.bar = self._make_bar(self.recorder, settings)
+            self.bar.show()
 
     def _go(self) -> None:
         self._drop_countdown()
@@ -150,6 +157,9 @@ class RecordFlow(QObject):
         self.state = "ended"
         self._drop_countdown()
         self._levels.close()
+        if self.bar is not None:
+            self.bar.close()
+            self.bar = None
         if self.frame is not None:
             self.frame.close()
             self.frame = None
@@ -164,6 +174,12 @@ def _remote_recorder(settings: Settings):
     from .remote_recorder import RemoteRecorder
 
     return RemoteRecorder(settings)
+
+
+def _control_bar(recorder, settings: Settings):
+    from .control_bar import ControlBar
+
+    return ControlBar(recorder, settings)
 
 
 def _countdown(seconds: int, screen):
