@@ -36,6 +36,8 @@ CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing t
 REHOOK_MS = 5 * 60 * 1000  # reinstall the keyboard hook in case Windows dropped it
 PRIVACY_POLL_MS = 500  # how often the GUI thread looks for the private-title sweep's result
 CRASH_NOTICE_MS = 10_000  # how long the "closed unexpectedly" notice is up, and clicking it opens the report
+CRASH_NOTICE_DELAY_MS = 3_000  # after start, so the notification area is there (it isn't at once at sign-in)
+LOG_TICK_MS = 30_000  # how often the log session tidies up (snipforge.logs.LogSession.tick)
 APP_ID = "SnipForge.SnipForge"
 
 
@@ -216,14 +218,18 @@ class SnipForgeApp:
         report_dialog.open_report(library_root=self.library.root)
 
     def notice_crash(self) -> None:
-        """The last run ended in a crash: say so, and offer the report that has its details."""
+        """The last run ended in a crash: say so, and offer the report that has its details. Not
+        over the "SnipForge was updated" notice: a click on one would open both."""
+        if self._updates.showing_whats_new:
+            QTimer.singleShot(CRASH_NOTICE_MS + 1000, self.notice_crash)
+            return
         self._crash_notice_until = time.monotonic() + CRASH_NOTICE_MS / 1000
         self._tray.showMessage("SnipForge", "SnipForge closed unexpectedly last time. Click here to save the "
-                               "details for a bug report (or choose Report a problem in this menu later).",
+                               "details for a bug report (or choose Report a problem in SnipForge's menu later).",
                                QSystemTrayIcon.Warning, CRASH_NOTICE_MS)
 
     def _message_clicked(self) -> None:
-        if time.monotonic() < self._crash_notice_until:
+        if time.monotonic() < self._crash_notice_until and not self._updates.showing_whats_new:
             self.report_problem()
 
     def handle_command(self, command: str) -> None:
@@ -495,11 +501,14 @@ def main() -> int:
     if logging_session is not None:
         app.aboutToQuit.connect(logging_session.close)
         app.commitDataRequest.connect(lambda _manager: logging_session.ending())  # signing out, shutting down
+        tidy = QTimer(app, interval=LOG_TICK_MS)
+        tidy.timeout.connect(logging_session.tick)
+        tidy.start()
     theme.install(app)
     forge = SnipForgeApp(app)
     server.command.connect(forge.handle_command)
     if logging_session is not None and logging_session.crashed_last_time:
-        QTimer.singleShot(0, forge.notice_crash)
+        QTimer.singleShot(CRASH_NOTICE_DELAY_MS, forge.notice_crash)
     if command != "background":
         QTimer.singleShot(0, lambda: forge.handle_command(command))
     return app.exec()

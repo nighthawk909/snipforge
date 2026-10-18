@@ -16,6 +16,7 @@ import locale
 import os
 import platform
 import re
+import socket
 import struct
 import sys
 import tempfile
@@ -23,20 +24,23 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import __version__, logs, project, update_platform
 from .settings import app_settings
 
 LOG_TAIL_BYTES = 400_000  # the newest end of each process's logs
-PROCESSES = (("snipforge", "SnipForge"), ("recorder", "the recorder"))
 LEFT_OUT = "(set; left out of reports)"
 # Settings whose values are personal, or say where the person's files or screens are.
 PRIVATE_KEYS = frozenset({"teams_recent", "output/folder", "capture/last_area", "update_ready",
                           "video/microphone_id", "video/webcam_id"})
 SAFE_VALUE = re.compile(r"[\w.+\-# ]{0,40}")  # short codes, numbers, versions, shortcuts, colors
 KEEP_HOSTS = frozenset({"github.com", "api.github.com", *project.DOWNLOAD_HOSTS})
-NEVER_INCLUDED = ("your snips and recordings, window titles, your name, computer name or company in file "
-                  "paths, email addresses, or the names of your organization's servers")
+# Endings of server names taken out wherever they appear (logger names like snipforge.app never end so).
+HOST_ENDINGS = "com|net|org|local|lan|corp|internal|intranet|intra|biz|info|us|uk|de|fr|nl|ca|au|eu|ch|gov|edu|mil"
+GENERIC_LABELS = frozenset({"com", "net", "org", "local", "lan", "corp", "internal", "ad", "co", "www"})
+NEVER_INCLUDED = ("your snips and recordings, window titles, your name, your computer's name, email addresses, or "
+                  "the names of your organization's servers and network")
 
 
 @dataclass(frozen=True)
@@ -60,9 +64,13 @@ class Report:
 
 
 class Scrubber:
-    """Takes the person's name, computer, company and servers out of text."""
+    """Takes the person's name, computer, organization and servers out of text.
 
-    def __init__(self, environ: Mapping[str, str] | None = None, home: Path | None = None) -> None:
+    `hosts`: server names known to belong to the organization (the update feed's, from policy);
+    `hostnames`: this computer's names (by default what the operating system says)."""
+
+    def __init__(self, environ: Mapping[str, str] | None = None, home: Path | None = None,
+                 hosts: Sequence[str] = (), hostnames: Sequence[str] | None = None) -> None:
         env = os.environ if environ is None else environ
         home = Path.home() if home is None else Path(home)
         folders = [(env.get(var), "%OneDrive%") for var in ("OneDriveCommercial", "OneDriveConsumer", "OneDrive")]
@@ -71,18 +79,35 @@ class Scrubber:
         for path, replacement in sorted((f for f in folders if f[0]), key=lambda f: -len(f[0])):
             self._rules.append((_path_pattern(path), replacement))
         self._rules += [
+            (re.compile(r"(?i)(?<=[\\/])OneDrive - [^\\/\r\n\"'<>|:*?]+"), "OneDrive - <organization>"),
             (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
+            (re.compile(r"(?i)[\\/]{2,4}\?[\\/]+UNC[\\/]+[^\\/\s'\"<>|]+[\\/]+[^\\/\s'\"<>|]+"),
+             r"\\\\<server>\\<share>"),
+            # \\server\share however it's written (\\, // or doubled in Python's repr), not \\.\pipe or \\?\
+            (re.compile(r"(?<![\w:\\/])[\\/]{2,4}(?![.?][\\/])(?!<)[^\\/\s'\"<>|]+[\\/]+[^\\/\s'\"<>|]+"),
+             r"\\\\<server>\\<share>"),
             (re.compile(r"(?i)\b([A-Z]:[\\/]+Users[\\/]+)[^\\/:*?\"<>|\r\n]+"), r"\1<user>"),  # anyone's profile
             (re.compile(r"(?<![\w.])/(Users|home)/[^/\s]+"), r"/\1/<user>"),
-            (re.compile(r"\\\\(?![.?]\\)[^\\/\s]+\\[^\\/\s]+"), r"\\\\<server>\\<share>"),  # not \\.\pipe or \\?\
             (re.compile(r"(?i)\b((?:https?|ftp|file)://)([^/\s:?#]+)"), _host),
+            (re.compile(rf"(?i)\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:{HOST_ENDINGS})\b"), _bare_host),
         ]
-        names = {env.get(var, "") for var in ("USERNAME", "USER", "LOGNAME", "COMPUTERNAME", "USERDOMAIN")}
-        names |= set(env.get("USERDNSDOMAIN", "").split(".")[:1]) | {home.name}
-        labels = {env.get("USERDOMAIN", ""): "<domain>", env.get("COMPUTERNAME", ""): "<computer>"}
-        for name in sorted((n for n in names if len(n) >= 2), key=len, reverse=True):
+        machine = list(hostnames) if hostnames is not None else [platform.node(), socket.gethostname()]
+        machine.append(env.get("COMPUTERNAME", ""))
+        domain = env.get("USERDNSDOMAIN", "")
+        labels: dict[str, str] = {}
+        for name in (env.get(var, "") for var in ("USERNAME", "USER", "LOGNAME")):
+            labels[name] = "<user>"
+        labels[home.name] = "<user>"
+        for host in hosts:
+            labels[host] = "<host>"
+            labels[host.split(".", 1)[0]] = "<host>"
+        for name in (domain, env.get("USERDOMAIN", ""), *_labels(domain)):
+            labels[name] = "<domain>"
+        for name in machine:
+            labels[name] = labels[name.split(".", 1)[0]] = "<computer>"
+        for name in sorted((n for n in labels if len(n) >= 2), key=len, reverse=True):
             pattern = re.compile(rf"(?i)(?<![A-Za-z0-9<]){re.escape(name)}(?![A-Za-z0-9>])")
-            self._rules.append((pattern, labels.get(name, "<user>")))
+            self._rules.append((pattern, labels[name]))
 
     def __call__(self, text: str) -> str:
         for pattern, replacement in self._rules:
@@ -90,16 +115,42 @@ class Scrubber:
         return text
 
 
+def _labels(domain: str) -> list[str]:
+    """The parts of a DNS domain that name the organization ("contoso" in corp.contoso.com)."""
+    return [label for label in domain.split(".") if label and label.lower() not in GENERIC_LABELS]
+
+
 def _path_pattern(path: str) -> re.Pattern:
-    """A folder however it's written: either slash, any case, and only as a whole name."""
+    """A folder however it's written: either slash (or doubled, as Python shows them), any case, and
+    only as a whole name."""
     parts = [re.escape(part) for part in re.split(r"[\\/]+", path.rstrip("\\/")) if part]
-    lead = r"[\\/]" if path[:1] in ("/", "\\") else ""
-    return re.compile(f"(?i){lead}" + r"[\\/]+".join(parts) + r"(?![^\\/\s\"'<>|:;,)\]])")
+    lead = r"[\\/]+" if path[:1] in ("/", "\\") else ""
+    return re.compile(f"(?i){lead}" + r"[\\/]+".join(parts) + r"(?![\w-])")
 
 
 def _host(match: re.Match) -> str:
     host = match.group(2)
     return match.group(0) if host.lower() in KEEP_HOSTS else f"{match.group(1)}<host>"
+
+
+def _bare_host(match: re.Match) -> str:
+    return match.group(0) if match.group(0).lower() in KEEP_HOSTS else "<host>"
+
+
+def policy_hosts(hives: Sequence[Mapping[str, object]]) -> list[str]:
+    """The servers IT policy names (the update feed's), so they're taken out wherever they appear."""
+    hosts = []
+    for hive in hives:
+        feed = str(hive.get("UpdateFeed") or "").strip().strip('"')
+        if feed.lower().startswith("https://"):
+            host = urlparse(feed).hostname
+        elif feed.startswith(("\\\\", "//")):
+            host = re.split(r"[\\/]+", feed.lstrip("\\/"))[0]
+        else:
+            host = None
+        if host:
+            hosts.append(host)
+    return hosts
 
 
 # ---------------------------------------------------------------------------------- the parts
@@ -117,8 +168,11 @@ def summary_text(now: dt.datetime, library_root: Path | None = None, log_folder:
     ]
     if library_root is not None:
         lines.append(f"Library: {_count_folders(library_root)} in {library_root}")
-    for name, label in PROCESSES:
-        files = logs.Files(log_folder or logs.folder(), name)
+    place = log_folder or logs.folder()
+    for name in logs.names(place):
+        files, label = logs.Files(place, name), process_label(name)
+        if files.unseen_crash():
+            lines.append(f"Crash of {label}: {_modified(files.crash)} (in {files.crash.name})")
         if files.last_crash.is_file():
             lines.append(f"Last crash of {label}: {_modified(files.last_crash)} (in {files.last_crash.name})")
         if files.last_error.is_file():
@@ -126,6 +180,14 @@ def summary_text(now: dt.datetime, library_root: Path | None = None, log_folder:
                          f"(in {files.last_error.name})")
     lines += ["", "Displays", *displays_lines()]
     return "\n".join(lines) + "\n"
+
+
+def process_label(name: str) -> str:
+    """"SnipForge", "the recorder", "the recorder (2)"."""
+    if name == "snipforge":
+        return "SnipForge"
+    kind, _, n = name.partition("-")
+    return f"the {kind}" + (f" ({n})" if n else "")
 
 
 def _install_kind() -> str:
@@ -165,8 +227,9 @@ def _language() -> str:
 
 
 def _count_folders(root: Path) -> str:
-    try:
-        count = sum(1 for p in Path(root).iterdir() if p.is_dir())
+    try:  # scandir knows what's a folder without asking again (OneDrive files stay online-only)
+        with os.scandir(root) as entries:
+            count = sum(1 for entry in entries if entry.is_dir())
     except OSError:
         return "no folder yet"
     return f"{count:,} snips and recordings"
@@ -264,17 +327,20 @@ def _read(path: Path) -> str:
 
 def build(*, log_folder: Path | None = None, library_root: Path | None = None, settings=None,
           policy_hives: Sequence[Mapping[str, object]] | None = None, environ: Mapping[str, str] | None = None,
-          home: Path | None = None, now: dt.datetime | None = None) -> Report:
+          home: Path | None = None, hostnames: Sequence[str] | None = None, now: dt.datetime | None = None) -> Report:
     """Everything Report a problem shows, with the person's details taken out."""
     now = now or dt.datetime.now()
     folder = log_folder or logs.folder()
-    scrub = Scrubber(environ, home)
+    hives = update_platform.read_policy_hives() if policy_hives is None else policy_hives
+    scrub = Scrubber(environ, home, hosts=policy_hosts(hives), hostnames=hostnames)
     files = [ReportFile("summary.txt", "Summary: versions and displays", summary_text(now, library_root, folder)),
-             ReportFile("settings.txt", "Settings, private values left out", settings_text(settings, policy_hives))]
-    for name, label in PROCESSES:
-        process = logs.Files(folder, name)
+             ReportFile("settings.txt", "Settings, private values left out", settings_text(settings, hives))]
+    for name in logs.names(folder):
+        process, label = logs.Files(folder, name), process_label(name)
         if process.logs():
             files.append(ReportFile(process.log.name, f"Recent log of {label}", log_text(process)))
+        if crash := process.unseen_crash():
+            files.append(ReportFile(process.crash.name, f"Crash of {label}", crash))
         if process.last_crash.is_file():
             files.append(ReportFile(process.last_crash.name, f"Last crash of {label}", _read(process.last_crash)))
         if process.last_error.is_file():
@@ -291,8 +357,9 @@ def save(report: Report, path: Path) -> Path:
     try:
         with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for f in report.files:
-                archive.writestr(zipfile.ZipInfo(f.name, report.created.timetuple()[:6]), f.text.encode("utf-8"),
-                                 compress_type=zipfile.ZIP_DEFLATED)
+                info = zipfile.ZipInfo(f.name, report.created.timetuple()[:6])
+                info.external_attr = 0o644 << 16  # readable when unzipped on a Mac or Linux, not mode 000
+                archive.writestr(info, f.text.encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
         os.replace(partial, path)
     except BaseException:
         Path(partial).unlink(missing_ok=True)

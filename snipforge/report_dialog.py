@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
@@ -115,6 +116,10 @@ class ReportDialog(QDialog):
     def save_to(self, path: Path) -> bool:
         if path.suffix.lower() != ".zip":
             path = path.with_name(path.name + ".zip")
+            if path.exists() and QMessageBox.question(
+                    self, "Report a problem", f"{path.name} is already there. Replace it?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                return False  # the save dialog asked about the name typed, not this one
         try:
             diagnostics.save(self.report, path)
         except OSError as exc:
@@ -143,14 +148,20 @@ def _size(text: str) -> str:
     return f"{size / 1024:.0f} KB" if size >= 1024 else f"{size} bytes"
 
 
-def open_report(parent=None, library_root: Path | None = None) -> ReportDialog:
+def open_report(parent=None, library_root: Path | None = None) -> ReportDialog | None:
     """Put the report together and show it (the one already open comes to the front instead)."""
     for dialog in _open:
         dialog.showNormal()
         dialog.raise_()
         dialog.activateWindow()
         return dialog
-    dialog = ReportDialog(diagnostics.build(library_root=library_root), parent)
+    try:
+        report = diagnostics.build(library_root=library_root)
+    except Exception as exc:  # never a menu item that silently does nothing
+        log.exception("Couldn't put the problem report together")
+        QMessageBox.warning(parent, "Report a problem", f"SnipForge couldn't put the report together: {exc}")
+        return None
+    dialog = ReportDialog(report, parent)
     dialog.setAttribute(Qt.WA_DeleteOnClose)
     _open.append(dialog)
     dialog.finished.connect(lambda _code, d=dialog: _open.remove(d) if d in _open else None)

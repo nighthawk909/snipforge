@@ -3,6 +3,7 @@ taken out, the zip it's saved in, and where people find it (tray, About, Setting
 import datetime as dt
 import json
 import logging
+import os
 import subprocess
 import sys
 import textwrap
@@ -13,7 +14,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from snipforge import diagnostics, logs, report_dialog
 
@@ -97,6 +98,7 @@ def test_crash_details_are_kept_only_when_the_last_run_did_not_quit_normally(ses
     assert not second.crashed_last_time and "access violation" in files.last_crash.read_text(encoding="utf-8")
 
 
+@pytest.mark.windows  # a Mac developer would get macOS's "Python quit unexpectedly" window
 def test_a_real_crash_is_found_at_the_next_start(session, tmp_path):
     code = textwrap.dedent(f"""
         import faulthandler, sys
@@ -108,10 +110,102 @@ def test_a_real_crash_is_found_at_the_next_start(session, tmp_path):
     crashed = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=60,
                              cwd=Path(__file__).resolve().parents[1])
     assert crashed.returncode != 0
+    assert "Segmentation fault" in logs.Files(tmp_path, "snipforge").unseen_crash()  # before the next start too
     s = session()
     assert s.crashed_last_time
-    assert "Fatal Python error" in s.files.last_crash.read_text(encoding="utf-8") or \
-        "fatal exception" in s.files.last_crash.read_text(encoding="utf-8")
+    assert "Fatal Python error: Segmentation fault" in s.files.last_crash.read_text(encoding="utf-8")
+
+
+def gone_pid():
+    finished = subprocess.Popen([sys.executable, "-c", ""])
+    finished.wait()
+    return finished.pid
+
+
+def test_a_recorder_that_crashed_is_in_the_report_before_the_next_recording(tmp_path):
+    files = logs.Files(tmp_path, "recorder")
+    files.running.write_text(f"{gone_pid()} 2026-10-18 09:00:00\n", encoding="utf-8")
+    files.crash.write_text("Windows fatal exception: access violation\n", encoding="utf-8")
+    assert files.ended_badly() and "access violation" in files.unseen_crash()
+    report = diagnostics.build(log_folder=tmp_path, policy_hives=[{}, {}], environ={}, home=HOME, hostnames=())
+    assert report.file("recorder.crash.txt").title == "Crash of the recorder"
+    assert "Crash of the recorder:" in report.file("summary.txt").text
+
+
+def test_a_running_process_crash_file_is_not_a_crash(tmp_path):
+    files = logs.Files(tmp_path, "recorder")
+    files.running.write_text(f"{os.getppid()} 2026-10-18 09:00:00\n", encoding="utf-8")  # alive
+    files.crash.write_text("Windows fatal exception: code 0xc0000005\n", encoding="utf-8")
+    assert not files.ended_badly() and files.unseen_crash() == ""
+
+
+def test_a_second_recorder_keeps_its_own_files(session, tmp_path):
+    busy = logs.Files(tmp_path, "recorder")
+    busy.running.write_text(f"{os.getppid()} 2026-10-18 09:00:00\n", encoding="utf-8")  # still finishing
+    busy.crash.write_text("not ours", encoding="utf-8")
+    second = session("recorder")
+    assert second.files.name == "recorder-2" and busy.crash.read_text(encoding="utf-8") == "not ours"
+    assert logs.names(tmp_path) == ["recorder", "recorder-2"]
+    assert diagnostics.process_label("recorder-2") == "the recorder (2)"
+    busy.running.write_text(f"{gone_pid()} 2026-10-18 09:00:00\n", encoding="utf-8")
+    second.close()
+    assert session("recorder").files.name == "recorder"  # its last user is gone: free again
+
+
+def test_errors_windows_handled_are_not_kept_as_a_crash(session, monkeypatch):
+    s = session()
+    s._crash_file.write("Windows fatal exception: code 0xc0000005\n")
+    s._crash_file.flush()
+    s.tick()
+    assert s.files.crash.read_text(encoding="utf-8") == ""
+    assert "code 0xc0000005" in s.files.log.read_text(encoding="utf-8")
+
+
+def test_a_cancelled_sign_out_puts_the_marker_back(session, monkeypatch):
+    s = session()
+    s.ending()  # Windows asked; another app then cancelled the sign-out
+    assert not s.files.running.exists()
+    s.tick()
+    assert not s.files.running.exists()  # not straight away: Windows may still be ending the session
+    monkeypatch.setattr(logs, "REVIVE_AFTER_S", -1)
+    s.tick()
+    assert s.files.running.exists()
+
+
+def test_closing_leaves_a_hook_installed_later_alone(session):
+    s = session()
+    later = lambda *a: None  # noqa: E731 - the recorder installs its own
+    sys.excepthook = later
+    s.close()
+    assert sys.excepthook is later
+
+
+def test_a_flood_of_errors_is_counted_not_written_out(session):
+    s = session()
+    logs._recent_errors.clear()
+    for n in range(logs.ERRORS_PER_MINUTE + 5):
+        try:
+            raise RuntimeError(f"paint failed {n}")
+        except RuntimeError:
+            sys.excepthook(*sys.exc_info())
+    text = s.files.log.read_text(encoding="utf-8")
+    assert text.count("RuntimeError: paint failed") == logs.ERRORS_PER_MINUTE
+    logs._recent_errors.clear()
+    try:
+        raise RuntimeError("after the flood")
+    except RuntimeError:
+        sys.excepthook(*sys.exc_info())
+    assert "(5 more not written out)" in s.files.log.read_text(encoding="utf-8")
+    logs._recent_errors.clear()
+
+
+def test_the_recorder_keeps_its_last_error(session):
+    s = session("recorder")
+    try:
+        raise ValueError("in the recorder")
+    except ValueError:
+        logs.remember_error(*sys.exc_info())
+    assert "ValueError: in the recorder" in s.files.last_error.read_text(encoding="utf-8")
 
 
 def test_an_unwritable_folder_means_no_log_not_a_failure(tmp_path, faults):
@@ -132,7 +226,7 @@ def test_logs_have_a_home_on_each_platform(monkeypatch, on_a_mac):
 # --- taking private details out -------------------------------------------------------------------
 @pytest.fixture
 def scrub():
-    return diagnostics.Scrubber(ENV, HOME)
+    return diagnostics.Scrubber(ENV, HOME, hostnames=("CONTOSO-LT42",))
 
 
 def test_names_paths_emails_and_servers_are_taken_out(scrub):
@@ -144,10 +238,10 @@ def test_names_paths_emails_and_servers_are_taken_out(scrub):
         r"feed \\fileserver01\apps$\SnipForge; pipe \\.\pipe\SnipForge-recorder-ab12; display \\.\DISPLAY1; "
         "https://intranet.contoso.com/snipforge/releases.json and https://api.github.com/repos/x; "
         "mailed alex.kim@contoso.com; signed in as JORDAN.Q on CONTOSO-LT42 in CONTOSO")
-    for private in ("jordan.q", "JORDAN.Q", "sam.lee", "Contoso", "CONTOSO", "fileserver01", "apps$", "intranet",
-                    "alex.kim"):
-        assert private not in text, private
-    assert r"%USERPROFILE%\Pictures\SnipForge\x.png" in text.replace("/", "\\") or "%USERPROFILE%" in text
+    for private in ("jordan.q", "sam.lee", "contoso", "fileserver01", "apps$", "intranet", "alex.kim"):
+        assert private not in text.lower(), private
+    assert r"%USERPROFILE%\Pictures\SnipForge\x.png" in text
+    assert "%USERPROFILE%/AppData/Local/Temp/SnipForge" in text
     assert r"%OneDrive%\SnipForge\share.png" in text
     assert r"\\<server>\<share>\SnipForge" in text
     assert r"\\.\pipe\SnipForge-recorder-ab12" in text and r"\\.\DISPLAY1" in text
@@ -155,9 +249,48 @@ def test_names_paths_emails_and_servers_are_taken_out(scrub):
     assert "<email>" in text and "<user> on <computer> in <domain>" in text
 
 
+@pytest.mark.parametrize("written", [
+    r"\\fileserver01\apps\x.png",
+    "'\\\\\\\\fileserver01\\\\apps\\\\x.png'",  # as Python shows a path in an error message
+    "//fileserver01/apps/x.png",
+    r"\\?\UNC\fileserver01\apps\x.png",
+])
+def test_a_network_share_is_taken_out_however_it_is_written(scrub, written):
+    text = scrub(f"PermissionError: [Errno 13] Permission denied: {written}")
+    assert "fileserver01" not in text and "apps" not in text and "<server>" in text and "x.png" in text
+
+
+def test_server_names_and_the_organization_domain_are_taken_out():
+    scrub = diagnostics.Scrubber({"USERDNSDOMAIN": "CORP.FABRIKAM.COM", "USERNAME": "sam"}, HOME,
+                                 hosts=["updates.example-feed.net", "feedserver"], hostnames=("Sams-MacBook.local",))
+    text = scrub("Host fs01.corp.fabrikam.com not found; came from updates.example-feed.net; feedserver timed out; "
+                 "fabrikam staff; on Sams-MacBook.local and Sams-MacBook; logger snipforge.update_sources; x.png; "
+                 "objects.githubusercontent.com is fine")
+    for private in ("fabrikam", "example-feed", "feedserver", "Sams-MacBook", "fs01"):
+        assert private.lower() not in text.lower(), private
+    assert "snipforge.update_sources" in text and "x.png" in text and "objects.githubusercontent.com" in text
+
+
+def test_onedrive_folders_of_any_organization_are_taken_out(scrub):
+    text = scrub(rf"Saved to {HOME}\OneDrive - Contoso Ltd. and D:\Data\OneDrive - Fabrikam Inc\x.png")
+    assert "Contoso" not in text and "Fabrikam" not in text and r"OneDrive - <organization>\x.png" in text
+
+
+def test_the_policy_feed_names_its_server():
+    assert diagnostics.policy_hosts([{"UpdateFeed": "https://feed.contoso.com/snipforge"},
+                                     {"UpdateFeed": r"\\fileserver01\apps\SnipForge"}, {}]) == \
+        ["feed.contoso.com", "fileserver01"]
+
+
 def test_a_name_is_only_taken_out_as_a_whole_word():
-    scrub = diagnostics.Scrubber({"USERNAME": "al"}, Path("/Users/al"))
+    scrub = diagnostics.Scrubber({"USERNAME": "al"}, Path("/Users/al"), hostnames=())
     assert scrub("calendar al /Users/al/x /Users/alice/y") == "calendar <user> %USERPROFILE%/x /Users/<user>/y"
+
+
+@pytest.mark.windows
+def test_the_windows_version_comes_from_the_registry():
+    from snipforge._diagnostics_win32 import windows_version
+    assert windows_version().startswith("Windows") and "build" in windows_version()
 
 
 # --- the parts of the report ----------------------------------------------------------------------
@@ -222,7 +355,7 @@ def test_the_report_has_versions_displays_settings_logs_and_the_last_crash(tmp_p
                                 encoding="utf-8")
     report = diagnostics.build(log_folder=folder, library_root=library_with_a_private_snip.root,
                                settings=settings_store(tmp_path, {"appearance/theme": "dark"}), policy_hives=[{}, {}],
-                               environ=ENV, home=HOME, now=dt.datetime(2026, 10, 18, 15, 30))
+                               environ=ENV, home=HOME, hostnames=(), now=dt.datetime(2026, 10, 18, 15, 30))
     names = [f.name for f in report.files]
     assert names == ["summary.txt", "settings.txt", "snipforge.log", "snipforge.last-crash.txt"]
     assert report.default_name == "SnipForge-report-2026-10-18-1530.zip"
@@ -243,6 +376,7 @@ def test_saving_writes_a_zip_with_every_part(tmp_path):
     path = diagnostics.save(report, tmp_path / report.default_name)
     with zipfile.ZipFile(path) as archive:
         assert archive.namelist() == ["summary.txt", "snipforge.log"]
+        assert all(info.external_attr >> 16 == 0o644 for info in archive.infolist())  # readable once unzipped
         assert archive.read("summary.txt").decode() == "SnipForge 1.0\n"
     assert [p.name for p in tmp_path.iterdir()] == [report.default_name]  # no half-written file left
 
@@ -256,6 +390,12 @@ def test_a_failed_save_leaves_nothing_behind(tmp_path, monkeypatch):
 
 
 # --- the window ------------------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def no_report_left_open():
+    yield
+    report_dialog._open.clear()
+
+
 @pytest.fixture
 def dialog(qapp):
     report = diagnostics.Report(dt.datetime(2026, 10, 18, 15, 30), (
@@ -304,6 +444,18 @@ def test_cancelling_the_save_question_saves_nothing(dialog, monkeypatch):
     assert dialog.saved_to is None and not dialog.status.isVisible()
 
 
+def test_typing_a_name_without_zip_never_replaces_a_file_unasked(dialog, tmp_path, monkeypatch):
+    (tmp_path / "report.zip").write_text("keep me", encoding="utf-8")
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+    assert not dialog.save_to(tmp_path / "report")
+    assert (tmp_path / "report.zip").read_text(encoding="utf-8") == "keep me"
+
+
+def test_a_report_that_cannot_be_put_together_says_so(qapp, monkeypatch, _never_block_on_dialogs):
+    monkeypatch.setattr(report_dialog.diagnostics, "build", lambda **k: 1 / 0)
+    assert report_dialog.open_report() is None and _never_block_on_dialogs == ["warning"]
+
+
 def test_one_report_window_at_a_time(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(report_dialog.diagnostics, "build", lambda **k: diagnostics.Report(
         dt.datetime(2026, 10, 18), (diagnostics.ReportFile("summary.txt", "Summary", "x"),)))
@@ -350,6 +502,18 @@ def test_about_offers_report_a_problem(forge, opened, monkeypatch):
     monkeypatch.setattr(QMessageBox, "exec", click_report)
     forge.about()
     assert opened == [forge.library.root]
+
+
+def test_the_crash_notice_waits_for_an_update_notice(forge, opened, monkeypatch):
+    shown, later = [], []
+    monkeypatch.setattr(forge._tray, "showMessage", lambda *a: shown.append(a[1]))
+    monkeypatch.setattr(forge._updates, "_whats_new", object())  # "SnipForge was updated" is up
+    from snipforge import app as app_module
+    monkeypatch.setattr(app_module.QTimer, "singleShot", lambda ms, fn: later.append(ms))
+    forge.notice_crash()
+    assert shown == [] and later == [app_module.CRASH_NOTICE_MS + 1000]
+    forge._tray.messageClicked.emit()
+    assert opened == []
 
 
 def test_clicking_the_crash_notice_opens_the_report(forge, opened, monkeypatch):

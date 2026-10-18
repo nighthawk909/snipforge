@@ -214,6 +214,11 @@ class UpdateFlow(QObject):
         elif clicked is skip:
             self.controller.skip(release.version)
 
+    @property
+    def showing_whats_new(self) -> bool:
+        """Its "SnipForge was updated" notice is waiting for a click."""
+        return self._whats_new is not None
+
     def _show_whats_new(self) -> None:
         release, self._whats_new = self._whats_new, None
         if release is None:
