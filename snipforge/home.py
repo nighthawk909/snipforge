@@ -5,6 +5,7 @@ import datetime as dt
 import logging
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QLocale, QMimeData, Qt, QTimer, QUrl
@@ -212,7 +213,7 @@ class HomeWindow(QMainWindow):
             old = known.get(snap.entry.id)
             meta = self._meta_for(snap.entry, snap.meta_stamp, old.meta if old else None)
             created = old.created if old else snap.entry.created
-            duration = old.duration if old else self._duration(snap.entry)
+            duration = old.duration if old and old.duration is not None else self._duration(snap.entry)
             items.append(Item(snap.entry, created, meta, snap.edited_at, duration))
         self._items = items
         self._after_change()
@@ -379,8 +380,7 @@ class HomeWindow(QMainWindow):
         if entry is None:
             return
         meta = self._meta(entry)
-        self._items = [Item(i.entry, i.created, meta, i.edited_at) if i.entry.id == entry_id else i
-                       for i in self._items]
+        self._items = [replace(i, meta=meta) if i.entry.id == entry_id else i for i in self._items]
         if self._search.text().strip():
             self._indexed_timer.start()  # new words may match the search; regroup at most once a second
         else:
@@ -476,10 +476,9 @@ class HomeWindow(QMainWindow):
     def _trash(self, ids: list[str]) -> None:
         if not ids:
             return
-        if len(ids) > CONFIRM_TRASH_OVER:
-            answer = QMessageBox.question(self, "SnipForge", f"Move {len(ids)} snips to the Recycle Bin?")
-            if answer != QMessageBox.Yes:
-                return
+        question = self._trash_question(ids)
+        if question and QMessageBox.question(self, "SnipForge", question) != QMessageBox.Yes:
+            return
         failed, gone = 0, set()
         for entry_id in ids:
             entry = self._library.get(entry_id)
@@ -492,6 +491,18 @@ class HomeWindow(QMainWindow):
                                 "Close any editor showing them and try again.")
         self._items = [i for i in self._items if i.entry.id not in gone]
         self._after_change()
+
+    def _trash_question(self, ids: list[str]) -> str | None:
+        """What to ask before moving these to the Recycle Bin: many at once, or recordings with trimmed
+        copies or GIFs saved beside them (which go too); None to go ahead."""
+        exports = [name for entry_id in ids if (entry := self._library.get(entry_id))
+                   for name in self._library.exports(entry)]
+        if not exports:
+            return f"Move {len(ids)} snips to the Recycle Bin?" if len(ids) > CONFIRM_TRASH_OVER else None
+        named = ", ".join(exports[:3]) + (f" and {len(exports) - 3} more" if len(exports) > 3 else "")
+        what = "this recording" if len(ids) == 1 else f"these {len(ids)} items"
+        return (f"Move {what} to the Recycle Bin?\n\nThe trimmed copies and GIFs saved with it go too: "
+                f"{named}.")
 
     def _open_recycle_bin(self) -> None:
         try:

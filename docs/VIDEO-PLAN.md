@@ -354,7 +354,10 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    (saved as `preview.png` the first time), with a play badge and its length; opening it opens the
    video editor (the one already showing it, if there is one); Copy puts the file on the clipboard
    to paste into a chat, an email or a folder; favourites, tags, search ("recording", "video"),
-   Show in folder and Delete work as for snips. It's never read for text. A recording's folder has
+   Show in folder and Delete work as for snips (Delete asks first if trimmed copies or GIFs saved
+   beside it would go too). Its picture is made one video at a time, apart from snips' pictures,
+   and not for a OneDrive file that's online only (that would download it); if the recorder
+   process can't write `recording.json`, SnipForge does. It's never read for text. A recording's folder has
    no `original.png`, so older SnipForge versions sharing the folder don't list it, and
    `Library.entries()` (what opens images) still gives snips only.
 9. **Hardening and docs**. One-hour soak test (drift, memory), low disk space, a device unplugged

@@ -158,11 +158,12 @@ def test_a_recording_that_fails_to_start_leaves_nothing_behind(fakes, monkeypatc
 
 
 def test_a_recording_opens_in_the_video_editor_from_the_library(forge, monkeypatch, qapp):  # noqa: F811
+    from snipforge.library import write_recording_details
     from snipforge.video import clip, recordings
 
     video = recordings.new_recording(forge.library.root)
     clip.make_test_clip(video, seconds=0.5)
-    recordings.write_details(video, 0.5, (320, 240))
+    write_recording_details(video, 0.5, (320, 240))
     opened = []
     monkeypatch.setattr(forge, "_open_video", lambda path: opened.append(Path(path)))
 

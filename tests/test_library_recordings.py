@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtCore import QMimeData, QSize
 from PySide6.QtGui import QColor, QGuiApplication, QImage
 
-from snipforge.library import RECORDING, RECORDING_DETAILS, Library
+from snipforge.library import RECORDING, RECORDING_DETAILS, Library, write_recording_details
 from snipforge.video import clip, recordings
 
 
@@ -20,7 +20,7 @@ def white() -> QImage:
 def finished_recording(lib: Library, seconds: float = 1.0):
     path = recordings.new_recording(lib.root)
     clip.make_test_clip(path, seconds=seconds)
-    recordings.write_details(path, seconds, (320, 240))
+    write_recording_details(path, seconds, (320, 240))
     return path
 
 
@@ -87,7 +87,7 @@ def test_a_recording_has_no_image_to_load(lib, qapp):
 def test_details_are_written_whole_or_not_at_all(tmp_path):
     path = tmp_path / RECORDING
 
-    recordings.write_details(path, 12.345, (1280, 720))
+    assert write_recording_details(path, 12.345, (1280, 720))
 
     data = json.loads((tmp_path / RECORDING_DETAILS).read_text(encoding="utf-8"))
     assert data == {"duration": 12.345, "width": 1280, "height": 720, "version": 1}
@@ -95,9 +95,29 @@ def test_details_are_written_whole_or_not_at_all(tmp_path):
 
 
 def test_details_are_only_written_beside_a_library_recording(tmp_path):
-    recordings.write_details(tmp_path / "something else.mp4", 3.0, (320, 240))
+    assert not write_recording_details(tmp_path / "something else.mp4", 3.0, (320, 240))
 
     assert not (tmp_path / RECORDING_DETAILS).exists()
+
+
+def test_details_already_there_are_kept_when_asked_only_if_missing(tmp_path):
+    path = tmp_path / RECORDING
+    write_recording_details(path, 2.0, (640, 360))
+
+    assert write_recording_details(path, 9.0, (1, 1), only_if_missing=True)
+
+    assert json.loads((tmp_path / RECORDING_DETAILS).read_text(encoding="utf-8"))["duration"] == 2.0
+
+
+def test_details_that_cant_be_written_say_so_without_raising(tmp_path):
+    path = tmp_path / RECORDING
+    (tmp_path / RECORDING_DETAILS).mkdir()  # in the way: the rename fails
+
+    assert write_recording_details(path, 2.0, (640, 360)) is False
+    other = tmp_path / "other"
+    other.mkdir()
+    assert write_recording_details(other / RECORDING, float("nan"), (640, 360)) is False
+    assert not (other / RECORDING_DETAILS).exists()
 
 
 def test_a_recording_is_never_read_for_text(lib, qapp):
@@ -138,7 +158,7 @@ def test_a_video_that_cant_be_read_isnt_tried_on_every_repaint(lib, qapp):
     delegate = SnipGrid().itemDelegate()
     item = Item(entry, entry.created, lib.meta(entry), duration=1.0)
     started = []
-    delegate._pool.start = lambda job: started.append(job)
+    delegate._video_pool.start = lambda job: started.append(job)
     size = QSize(232, 136)
 
     assert delegate._thumb(item, size, 1.0) is None and len(started) == 1
@@ -146,6 +166,107 @@ def test_a_video_that_cant_be_read_isnt_tried_on_every_repaint(lib, qapp):
     qapp.processEvents()
     assert delegate._thumb(item, size, 1.0) is None and len(started) == 1  # not opened again
     assert not (entry.path / "preview.png").exists()
+
+
+def test_a_snip_whose_picture_cant_be_read_yet_is_tried_again(lib, qapp):
+    from snipforge.library_search import Item
+    from snipforge.library_view import SnipGrid
+
+    snip = lib.create(white())
+    (snip.path / "preview.png").write_bytes(b"held by antivirus for a moment")
+    delegate = SnipGrid().itemDelegate()
+    item = Item(snip, snip.created, lib.meta(snip))
+    started = []
+    delegate._pool.start = lambda job: started.append(job)
+    size = QSize(232, 136)
+
+    delegate._thumb(item, size, 1.0)
+    started[0].run()
+    qapp.processEvents()
+    delegate._thumb(item, size, 1.0)
+
+    assert len(started) == 2  # as before recordings: snips are never given up on
+
+
+def test_video_cards_are_read_one_at_a_time_apart_from_snips(lib, qapp):
+    from snipforge.library_search import Item
+    from snipforge.library_view import SnipGrid
+
+    video = finished_recording(lib)
+    entry = lib.get(video.parent.name)
+    delegate = SnipGrid().itemDelegate()
+    snips, videos = [], []
+    delegate._pool.start = lambda job: snips.append(job)
+    delegate._video_pool.start = lambda job: videos.append(job)
+
+    delegate._thumb(Item(entry, entry.created, lib.meta(entry)), QSize(232, 136), 1.0)
+
+    assert len(videos) == 1 and not snips and delegate._video_pool.maxThreadCount() == 1
+
+
+def test_a_video_only_in_the_cloud_isnt_downloaded_for_its_card(lib, qapp, monkeypatch):
+    from snipforge import library_view
+    from snipforge.library_search import Item
+    from snipforge.library_view import SnipGrid
+
+    video = finished_recording(lib)
+    entry = lib.get(video.parent.name)
+    delegate = SnipGrid().itemDelegate()
+    started = []
+    delegate._video_pool.start = lambda job: started.append(job)
+    monkeypatch.setattr(library_view, "_cloud_only", lambda info: True)
+
+    assert delegate._thumb(Item(entry, entry.created, lib.meta(entry)), QSize(232, 136), 1.0) is None
+    assert not started
+
+
+def test_a_cloud_only_file_is_known_by_its_attributes():
+    from types import SimpleNamespace
+
+    from snipforge.library_view import RECALL_ON_DATA_ACCESS, _cloud_only
+
+    assert _cloud_only(SimpleNamespace(st_file_attributes=RECALL_ON_DATA_ACCESS | 0x20))
+    assert not _cloud_only(SimpleNamespace(st_file_attributes=0x20)) and not _cloud_only(SimpleNamespace())
+
+
+def test_a_videos_card_is_shown_straight_from_the_frame_not_read_again(lib, qapp):
+    from snipforge.library_search import Item
+    from snipforge.library_view import SnipGrid
+
+    video = finished_recording(lib)
+    entry = lib.get(video.parent.name)
+    delegate = SnipGrid().itemDelegate()
+    started = []
+    delegate._video_pool.start = lambda job: started.append(job)
+    delegate._pool.start = lambda job: started.append(job)
+    item, size = Item(entry, entry.created, lib.meta(entry)), QSize(232, 136)
+
+    delegate._thumb(item, size, 1.0)
+    started[0].run()
+    qapp.processEvents()
+
+    assert delegate._thumb(item, size, 1.0) is not None and len(started) == 1  # from preview.png's key
+
+
+def test_the_frame_shown_half_a_second_in_is_the_cards_picture(lib, qapp, monkeypatch):
+    from snipforge.library_view import _Loaded, _ThumbJob
+    from snipforge.video import frames
+
+    shades = {0.0: "red", 0.4: "green", 0.9: "blue"}
+
+    def fake_read(path, width=None):
+        for seconds, name in shades.items():
+            image = QImage(32, 32, QImage.Format.Format_RGB32)
+            image.fill(QColor(name))
+            yield seconds, image
+        raise OSError("the rest of the file is damaged")
+
+    monkeypatch.setattr(frames, "read", fake_read)
+    job = _ThumbJob(("k",), "x.mp4", QSize(32, 32), None, _Loaded(), video=True)
+
+    assert job._video_frame().pixelColor(5, 5) == QColor("green")  # not the later blue one
+    shades.pop(0.9)
+    assert job._video_frame().pixelColor(5, 5) == QColor("green")  # a break after a good frame keeps it
 
 
 def test_a_recording_card_paints_its_length(lib, qapp):
@@ -200,6 +321,67 @@ def test_the_library_window_lists_a_recording_with_its_length(lib, qapp):
         items = {i.entry.id: i for i in home._items}
         assert items[video.parent.name].duration == pytest.approx(1.0)
         assert len(items) == 2
+    finally:
+        home.close()
+
+
+def test_a_screen_reader_hears_its_a_video_and_how_long(lib, qapp):
+    from PySide6.QtCore import Qt
+
+    from snipforge.library_search import Item
+    from snipforge.library_view import LibraryModel
+
+    video = finished_recording(lib, seconds=65.0)
+    entry = lib.get(video.parent.name)
+    model = LibraryModel()
+    model.set_groups([("Today", [Item(entry, entry.created, lib.meta(entry), duration=65.0)])])
+
+    text = model.data(model.index(1), Qt.AccessibleTextRole)
+
+    assert text.startswith("Recording, video 1:05")
+
+
+def test_new_tags_keep_a_recordings_length(lib, qapp):
+    from snipforge.library_search import Item
+    from snipforge.library_view import LibraryModel
+
+    video = finished_recording(lib, seconds=65.0)
+    entry = lib.get(video.parent.name)
+    model = LibraryModel()
+    model.set_groups([("Today", [Item(entry, entry.created, lib.meta(entry), duration=65.0)])])
+
+    model.update_meta(entry.id, lib.meta(entry))
+
+    assert model._rows[1].item.duration == 65.0
+
+
+def test_exports_saved_beside_a_recording_are_found(lib, qapp):
+    video = finished_recording(lib)
+    for name in ("recording (trimmed).mp4", "recording.gif", ".recording.ab12.partial.mp4", "preview.png"):
+        (video.parent / name).write_bytes(b"x")
+    entry = lib.get(video.parent.name)
+
+    assert lib.exports(entry) == ["recording (trimmed).mp4", "recording.gif"]
+    assert lib.exports(lib.create(white())) == []
+
+
+def test_deleting_a_recording_with_exports_asks_first(lib, qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from snipforge.home import HomeWindow
+
+    video = finished_recording(lib)
+    (video.parent / "recording (trimmed).mp4").write_bytes(b"x")
+    plain = finished_recording(lib)
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a[2]) or QMessageBox.No)
+    home = HomeWindow(lib, on_new_snip=lambda: None, on_open_entry=lambda entry_id: None)
+    try:
+        home.refresh()
+        home._trash([video.parent.name])
+        assert video.exists() and "recording (trimmed).mp4" in asked[-1]  # No: nothing moved
+
+        assert home._trash_question([plain.parent.name]) is None  # nothing else to lose: no question
     finally:
         home.close()
 

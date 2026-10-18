@@ -196,6 +196,26 @@ def _save_image_atomic(image: QImage, target: Path) -> None:
     _replace(tmp, target)
 
 
+def write_recording_details(path: Path, duration: float, size: tuple[int, int], *,
+                            only_if_missing: bool = False) -> bool:
+    """Mark a Library recording finished, with its length and size: the Library lists it from then
+    on. Written whole or not at all; nothing is written beside a file not named as a recording.
+    Returns whether recording.json is there now."""
+    path = Path(path)
+    if path.name != RECORDING:
+        return False
+    target = path.with_name(RECORDING_DETAILS)
+    if only_if_missing and target.exists():
+        return True
+    try:
+        data = {"duration": round(float(duration), 3), "width": int(size[0]), "height": int(size[1]), "version": 1}
+        _write_text_atomic(json.dumps(data, allow_nan=False), target)  # ValueError for an endless length
+    except (OSError, TypeError, ValueError) as exc:  # the video is safe; it just isn't listed yet
+        log.warning("Couldn't mark %s finished for the Library: %s", path, exc)
+        return False
+    return True
+
+
 def _kind(files: dict) -> str | None:
     """What a folder holds, from its file names: a snip, a finished recording, or neither."""
     if ORIGINAL in files:
@@ -321,6 +341,18 @@ class Library:
         duration = float(duration) if isinstance(duration, (int, float)) and 0 <= duration < 10**7 else None
         size = (width, height) if all(isinstance(v, int) and 0 < v <= 100_000 for v in (width, height)) else None
         return RecordingDetails(duration, size)
+
+    def exports(self, entry: Entry) -> list[str]:
+        """Files the video editor saved beside a recording (trimmed copies, GIFs): they go with it to
+        the Recycle Bin, so the person is asked first. Empty for a snip."""
+        if not entry.is_recording:
+            return []
+        own = {RECORDING, RECORDING_DETAILS, PREVIEW, META}
+        try:
+            names = [f.name for f in os.scandir(entry.path) if f.is_file()]
+        except OSError:
+            return []
+        return sorted(n for n in names if n not in own and not n.startswith(".") and not n.endswith(".tmp"))
 
     def load_image(self, entry: Entry) -> QImage:
         if entry.is_recording:

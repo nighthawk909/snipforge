@@ -233,9 +233,11 @@ class SnipForgeApp:
         """A finished recording: shown in the video editor, and in the Library if it's open."""
         from .video import editor_window
 
-        self._track(editor_window.open_video(path))
-        if self._home is not None and self._home.isVisible():
-            self._home.update_entry(Path(path).parent.name)
+        try:
+            self._track(editor_window.open_video(path))
+        finally:  # listed even if it can't be shown
+            if self._home is not None and self._home.isVisible():
+                self._home.update_entry(Path(path).parent.name)
 
     def _open_recording(self, path) -> None:
         """From the Library: the video editor already showing it, or a new one."""
@@ -246,6 +248,7 @@ class SnipForgeApp:
         try:
             self._open_video(path)
         except Exception as exc:  # FFmpegError: a file that can't be read
+            log.exception("Couldn't open the recording %s", path)
             QMessageBox.warning(None, "SnipForge", f"Couldn't open that recording: {exc}")
 
     def repeat_last(self) -> None:
