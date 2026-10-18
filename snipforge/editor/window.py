@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QStatusBar,
@@ -62,6 +64,7 @@ TOOLS = [
     ("blur", "Blur (B)"), ("pixelate", "Pixelate (X)"), ("erase", "Smart erase: fill an area from around it (W)"),
     None,
     ("crop", "Crop (C)"), ("cutout", "Cut out: remove a strip and join the rest (U)"),
+    ("move", "Smart Move: drag out part of the snip, then put it anywhere; where it was is filled in (G)"),
 ]
 AUTOSAVE_MS = 700
 META_TRIES, META_RETRY_S = 4, 0.05  # reading a snip's details: tries, and the first wait between them
@@ -207,6 +210,7 @@ class EditorWindow(QMainWindow):
         bar.zoom_out.connect(self._zoom_out)
         bar.fit.connect(self.canvas.fit_image)
         bar.grab_text.connect(self.grab_text)
+        bar.edit_text.connect(self.edit_text)
         bar.redact.connect(self.auto_redact)
         bar.pin.connect(self.pin)
         bar.save.connect(self.save)
@@ -227,6 +231,7 @@ class EditorWindow(QMainWindow):
             self.addAction(act)
 
         add("Ctrl+C", self.copy_to_clipboard)
+        add("Ctrl+Shift+E", self.edit_text)
         add("Ctrl+X", self.cut)
         add("Ctrl+V", self.paste)
         add("Ctrl+S", self.save)
@@ -538,6 +543,34 @@ class EditorWindow(QMainWindow):
         if result.text:
             QGuiApplication.clipboard().setText(result.text)
         GrabbedTextDialog(result.text, self).exec()
+
+    def edit_text(self) -> None:
+        """Edit text: find the snip's lines of text, let you click one, ask for its new words, then
+        smart-erase it and write them over it in a matching size and colour."""
+        from .edit_text import line_rect
+
+        result = self._run_ocr()
+        if result is None:
+            return
+        _, ox, oy = self._ocr_source()
+        lines = [line for line in result.lines if line.words and line.text.strip()]
+        if not lines:
+            self.statusBar().showMessage("No text found in this snip", 3500)
+            return
+        rects = [line_rect(line).translated(ox, oy) for line in lines]
+        self.statusBar().showMessage("Click the line of text to change. Esc cancels.", 0)
+        self.canvas.setFocus()
+        self.canvas.start_choosing(rects, lambda n: self._retype(rects[n], lines[n].text))
+
+    def _retype(self, rect, old: str) -> None:
+        self.statusBar().clearMessage()
+        new, ok = QInputDialog.getText(self, "Edit text", "Change it to (leave it empty to remove the line):",
+                                       QLineEdit.Normal, old)
+        if not ok or new == old:
+            return
+        self.canvas.edit_line(rect, old, new)
+        self.statusBar().showMessage("Changed. It's a text box now: select it to change it again. "
+                                     f"{keys('Ctrl+Z')} undoes it.", 6000)
 
     def auto_redact(self) -> None:
         result = self._run_ocr()

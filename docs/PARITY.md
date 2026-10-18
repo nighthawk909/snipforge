@@ -41,6 +41,8 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | **Editor** | Markup tools, crop, undo, Beautify, quick styles | ✅ | ✅ CI self-test draws and renders | |
 | | Rotate, eyedropper, Magnify, edges, Cut out, Smart erase, stamp | ✅ | 🟡 | |
 | | Grab text, redaction suggestions | ✅ | ❌ | Phase 4: Vision |
+| | Edit text (retype a line in the snip) | ✅ | ❌ explains, as Grab text does | Phase 4: Vision |
+| | Smart Move | ✅ | 🟡 same code | |
 | | Save PNG, JPG, WebP, PDF | ✅ | 🟡 | |
 | | Copy, Drag out, Pin | ✅ | 🟡 | |
 | | Copy, cut and paste markup between snips; right-click menu | ✅ | 🟡 Qt's clipboard and menus; the private markup format needs a check on a real Mac | A tester confirms |

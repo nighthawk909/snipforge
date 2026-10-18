@@ -5,12 +5,13 @@ those gestures draw, and canvas_view.py zoom, fit and the background.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QUndoStack
 from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
 from .. import theme
 from .beautify import BeautifyStyle
+from .canvas_choose import ChooseMixin
 from .canvas_clipboard import ClipboardMixin
 from .canvas_draw import DrawMixin
 from .canvas_image import ImageMixin
@@ -28,7 +29,7 @@ from .handles import HandleOverlay, OwnRubberBand
 from .image_ops import ImageGeometry
 from .items import Annotation, EffectItem
 from .style import DEFAULT_TOOL_STYLES, Style
-from .text_items import EditableText
+from .text_items import EditableText, TextItem
 
 DUPLICATE_OFFSET = 16.0
 DOCUMENT_VERSION = 1  # documents from newer versions are opened read-only (see load_document)
@@ -38,7 +39,7 @@ class UnsupportedDocument(ValueError):
     """Saved by a newer SnipForge, in a way this version can't show correctly."""
 
 
-class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsView):
+class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, ImageMixin, ViewMixin, QGraphicsView):
     tool_changed = Signal(str)
     selection_changed = Signal()
     zoom_changed = Signal(float)
@@ -145,6 +146,7 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewM
     # ------------------------------------------------------------------ tools and style
     def set_tool(self, tool: str) -> None:
         self.stop_picking()
+        self.stop_choosing()
         self.commit_text()
         if tool == "crop" and self.tool == "crop" and self._mask.editing:
             return  # re-choosing Crop mid-crop keeps your adjustments
@@ -382,6 +384,43 @@ class Canvas(InputMixin, DrawMixin, ClipboardMixin, PickMixin, ImageMixin, ViewM
         finally:
             if hidden and not draft:
                 self._edge_item.setVisible(False)
+
+    def shown_pixels(self, rect: QRect | None = None) -> QImage:
+        """The snip under `rect` (all of it by default) as it looks with what hides parts of it
+        (smart erase, blur, pixelate) and without other markup: what Smart Move picks up and Edit
+        text matches, so nothing hidden comes back through them."""
+        rect = (rect or self._image_rect.toAlignedRect()).intersected(self._image_rect.toAlignedRect())
+        others = [i for i in self.annotations() if i.isVisible() and not getattr(i, "hides_content", False)]
+        edges = self._edge_item.isVisible()
+        for item in others:
+            item.setVisible(False)
+        self._edge_item.setVisible(False)
+        try:
+            return self._render_rect(rect)
+        finally:
+            for item in others:
+                item.setVisible(True)
+            self._edge_item.setVisible(edges)
+
+    def edit_line(self, rect: QRectF, old_text: str, new_text: str) -> None:
+        """Edit text: smart-erase the line at `rect` and write `new_text` over it, matched in size
+        and colour, as one undo step. The new text is an ordinary text box (select it to change it)."""
+        from .edit_text import replacement
+        from .erase import EraseItem
+
+        swap = replacement(self.shown_pixels(), rect, old_text, new_text)
+        erase = EraseItem(self.tool_styles.get("erase", Style()), self.base_image)
+        erase.set_scene_rect(swap.erase)
+        erase.setZValue(self._next_z())
+        if not new_text.strip():  # nothing typed: the line is just removed
+            self.undo_stack.push(AddItemsCommand(self._scene, [erase], "Edit text"))
+            self._select([erase])
+            return
+        text = self._adopt(TextItem(swap.style, new_text))
+        text.setPos(swap.pos)
+        text.setZValue(self._next_z())
+        self.undo_stack.push(AddItemsCommand(self._scene, [erase, text], "Edit text"))
+        self._select([text])
 
     def content_image(self) -> QImage:
         """The snip with its smart erases filled in, without other markup: what Grab text and

@@ -43,6 +43,7 @@ class CommandBar(QWidget):
     zoom_in = Signal()
     fit = Signal()
     grab_text = Signal()
+    edit_text = Signal()
     redact = Signal()
     pin = Signal()
     save = Signal()
@@ -83,6 +84,10 @@ class CommandBar(QWidget):
         row.addStretch(1)
         row.addWidget(self._button("Grab text", "ocr", f"Copy the text in this snip ({keys('Ctrl+Shift+T')})",
                                    self.grab_text))
+        self.edit_text_button = self._button("Edit text", "text", "Retype a line of text in the snip: it's "
+                                             f"replaced in a matching size and colour ({keys('Ctrl+Shift+E')})",
+                                             self.edit_text)
+        row.addWidget(self.edit_text_button)
         row.addWidget(self._button("Redact", "redact", "Blur emails, phone and card numbers automatically",
                                    self.redact))
         row.addWidget(self._button("Pin", "pin", f"Float this snip on top of other windows ({keys('Ctrl+P')})",

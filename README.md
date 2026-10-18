@@ -69,12 +69,18 @@ the snip, with a magnified view of the pixels under the pointer. Everything you 
 | Pen, highlighter | P, H | |
 | Blur, pixelate | B, X | hide sensitive details |
 | Smart erase | W | remove something: the area is filled in from what's around it |
+| Smart Move | G | drag out part of the snip, then put it anywhere: where it was is filled in from around it |
 | Spotlight | S | dim everything except one area |
 | Magnify | M | a circle or box lens showing part of the snip enlarged; move and resize the lens and what it shows |
 | Crop | C | drag edges in to cut, back out to restore; Enter applies |
 | Cut out | U | drag across a vertical or horizontal strip to take it out and join the rest, with a straight or torn seam |
 
 Undo/redo, duplicate (Ctrl+D), nudge with arrow keys, zoom with Ctrl+wheel.
+
+**Edit text.** **Edit text** in the toolbar (Ctrl+Shift+E) finds the snip's lines of text; click
+one and type its new words. The old line is smart-erased and the new words are written in a
+matching size and colour, as a text box you can still change (Windows' built-in text recognition,
+offline).
 
 **Edit the snip itself.** With the Select tool, the panel's **Image** section turns the snip left or
 right (Ctrl+Shift+R, Ctrl+R), flips it, and resizes it by pixels or percent with the aspect ratio

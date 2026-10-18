@@ -246,6 +246,9 @@ def mapped_state(item, remap: Remap) -> dict:
         state["pos"] = [new_pos.x(), new_pos.y()]
     if "size" in state:
         _big_enough(item, state)
+    if kind == "piece" and remap.cut is None:  # a moved piece turns and flips with the snip
+        from .piece import turned
+        state["image"] = turned(state["image"], remap.transform)
     if "source" in state:  # a magnifier's source area, in scene coordinates
         source = remap.map_rect(QRectF(*state["source"]))
         grow_w, grow_h = max(0.0, MIN_BOX - source.width()), max(0.0, MIN_BOX - source.height())
