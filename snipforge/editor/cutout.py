@@ -6,12 +6,12 @@ cuts along (turning a column cut makes it a row cut, and so on).
 """
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, replace
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
-from PySide6.QtWidgets import QGraphicsItem
 
 SEAMS = ("straight", "torn")
 AXES = ("x", "y")  # x: remove columns (a vertical strip); y: remove rows (a horizontal strip)
@@ -105,10 +105,25 @@ def flipped(cut: Cut, width: int, height: int, horizontal: bool) -> Cut:
     return cut
 
 
-def scaled(cut: Cut, sx: float, sy: float) -> Cut:
-    k = sx if cut.axis == "x" else sy
-    start = round(cut.start * k)
-    return replace(cut, start=start, end=max(start + 1, round(cut.end * k)))
+def scaled_all(cuts: tuple[Cut, ...], width: int, height: int, sx: float, sy: float) -> tuple[Cut, ...]:
+    """The cuts for the image resized by (sx, sy) to `width` x `height` (after its cuts).
+
+    Worked back from the last cut, so each one fits the frame it's made in, and rounded outwards,
+    so a cut only ever grows: resizing never brings back any of what was cut out."""
+    out: list[Cut] = []
+    w, h = width, height
+    for cut in reversed(cuts):
+        k = sx if cut.axis == "x" else sy
+        start, end = math.floor(cut.start * k), math.ceil(cut.end * k)
+        size = max(1, end - start)
+        if cut.axis == "x":
+            w += size
+            start = min(start, w - size)
+        else:
+            h += size
+            start = min(start, h - size)
+        out.append(replace(cut, start=max(0, start), end=max(0, start) + size))
+    return tuple(reversed(out))
 
 
 # ---------------------------------------------------------------------------
@@ -164,32 +179,3 @@ def apply(image: QImage, cut: Cut) -> QImage:
     p.end()
     return out
 
-
-class CutPreview(QGraphicsItem):
-    """While you drag with Cut out: the strip that will be taken away."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._rect = QRectF()
-        self.setZValue(995)
-        self.setAcceptedMouseButtons(Qt.NoButton)
-        self.hide()
-
-    def show_strip(self, rect: QRectF) -> None:
-        self.prepareGeometryChange()
-        self._rect = QRectF(rect)
-        self.show()
-        self.update()
-
-    def boundingRect(self) -> QRectF:  # noqa: N802 - Qt API
-        return self._rect.adjusted(-2, -2, 2, 2)
-
-    def paint(self, p: QPainter, _opt, _widget=None) -> None:
-        if self._rect.isEmpty():
-            return
-        p.fillRect(self._rect, QColor(255, 59, 48, 70))
-        pen = QPen(QColor("#ff3b30"), 0)  # one screen pixel at any zoom
-        pen.setStyle(Qt.DashLine)
-        p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        p.drawRect(self._rect)

@@ -165,11 +165,16 @@ def resize(geometry: ImageGeometry, width: int, height: int) -> tuple[ImageGeome
     """Make the image (after its cuts) `width` x `height`."""
     w, h = geometry.size()
     sx, sy = width / w, height / h
-    cuts = tuple(cutout.scaled(cut, sx, sy) for cut in geometry.cuts)
+    cuts = cutout.scaled_all(geometry.cuts, width, height, sx, sy)
     full_w = width + sum(c.size for c in cuts if c.axis == "x")
     full_h = height + sum(c.size for c in cuts if c.axis == "y")
     new = replace(geometry, width=full_w, height=full_h, cuts=cuts)
     return new, Remap(QTransform.fromScale(sx, sy), sx, sy)
+
+
+def reopens(geometry: ImageGeometry, original: QSize) -> bool:
+    """Whether a document with this geometry opens again exactly (what the editor saves must)."""
+    return ImageGeometry.from_dict(geometry.to_dict(), original) == geometry
 
 
 def cut(geometry: ImageGeometry, axis: str, start: int, end: int, seam: str) -> tuple[ImageGeometry, Remap]:
@@ -178,6 +183,8 @@ def cut(geometry: ImageGeometry, axis: str, start: int, end: int, seam: str) -> 
     new_cut = Cut(axis, start, end, seam)
     if not cutout.fits(new_cut, *geometry.size()):
         raise ValueError(f"can't cut {axis} {start}-{end} from a {geometry.size()} image")
+    if len(geometry.cuts) >= MAX_CUTS:
+        raise ValueError(f"a snip can have {MAX_CUTS} cuts at most")
     return replace(geometry, cuts=(*geometry.cuts, new_cut)), Remap(QTransform(), cut=new_cut)
 
 

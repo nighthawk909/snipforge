@@ -1,4 +1,5 @@
-"""Edge effects on the snip itself: a border, and torn edges on the sides you choose.
+"""Edge effects on the snip itself: a border, and torn edges on the sides you choose (and the Cut out
+tool's preview of the strip it will take away).
 
 They belong to the snip (saved in its document, part of every export) and are drawn by an item
 above all markup, so markup near a torn edge is torn too. Beautify (beautify.py) is separate and
@@ -38,7 +39,7 @@ class Edges:
         if not isinstance(data, dict):
             return Edges()
         border = data.get("border", 0)
-        border = border if type(border) is int and 0 <= border <= MAX_BORDER else 0
+        border = min(max(border, 0), MAX_BORDER) if type(border) is int else 0
         color = data.get("color", "#1c1c1e")
         color = color if isinstance(color, str) and QColor(color).isValid() else "#1c1c1e"
         torn = data.get("torn", [])
@@ -136,3 +137,33 @@ class EdgeItem(QGraphicsItem):
             p.setBrush(Qt.NoBrush)
             p.drawPath(shape)
         p.restore()
+
+
+class CutPreview(QGraphicsItem):
+    """While you drag with Cut out: the strip that will be taken away."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rect = QRectF()
+        self.setZValue(995)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.hide()
+
+    def show_strip(self, rect: QRectF) -> None:
+        self.prepareGeometryChange()
+        self._rect = QRectF(rect)
+        self.show()
+        self.update()
+
+    def boundingRect(self) -> QRectF:  # noqa: N802 - Qt API
+        return self._rect.adjusted(-2, -2, 2, 2)
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        if self._rect.isEmpty():
+            return
+        p.fillRect(self._rect, QColor(255, 59, 48, 70))
+        pen = QPen(QColor("#ff3b30"), 0)  # one screen pixel at any zoom
+        pen.setStyle(Qt.DashLine)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(self._rect)

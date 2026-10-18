@@ -144,6 +144,7 @@ class EditorWindow(QMainWindow):
         self.panel.image_action.connect(self.image_action)
         self.panel.pick_color.connect(self._toggle_picking)
         self.panel.edges_changed.connect(self.canvas.set_edges)
+        self.canvas.notice.connect(lambda text: self.statusBar().showMessage(text, 6000))
         self.panel.cutout_changed.connect(lambda changes: self.canvas.set_cutout_options(**changes))
         self.panel.style_saved.connect(
             lambda kind: self.statusBar().showMessage(f"Saved as a quick style for {TOOL_NAMES.get(kind, kind)}", 3000))

@@ -68,7 +68,10 @@ class ImageMixin:
         if width < 1 or height < 1:
             return False
         original = self.original_image.size()
-        return image_ops.fits(width, height, original) and image_ops.fits(*self._full_size(width, height), original)
+        if not (image_ops.fits(width, height, original) and image_ops.fits(*self._full_size(width, height), original)):
+            return False
+        geometry, _remap = image_ops.resize(self._geometry, *self._full_size(width, height))
+        return image_ops.reopens(geometry, original)  # e.g. a cut snip squeezed to almost nothing
 
     def _full_size(self, width: int, height: int) -> tuple[int, int]:
         """The whole image's size when the crop becomes `width` x `height`."""
@@ -119,12 +122,14 @@ class ImageMixin:
     def _change_image(self, text: str, geometry: ImageGeometry, remap: Remap, crop: QRectF | None = None) -> None:
         if not self.can_change_image():
             raise ValueError(NEWER_MARKUP)
+        if not image_ops.reopens(geometry, self.original_image.size()):
+            raise ValueError("SnipForge can't save the snip that way")  # never save what won't open again
         self._finish_gestures()
         bounds = QRectF(0, 0, *geometry.size())
         if crop is None:
             crop = image_ops.snap(remap.map_rect(self._crop_rect), bounds)
-        if crop.width() < MIN_CROP or crop.height() < MIN_CROP:  # cut away almost all of it
-            crop = bounds
+        if remap.cut is not None and (crop.width() < MIN_CROP or crop.height() < MIN_CROP):
+            crop = bounds  # the cut took away almost all of the crop
         edges = self._edges
         if remap.sides:  # a torn bottom is a torn left once turned clockwise
             edges = Edges(edges.border, edges.color, frozenset(remap.sides.get(s, s) for s in edges.torn))

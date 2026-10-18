@@ -50,6 +50,7 @@ class EdgeControls(QWidget):
         self.width_slider = QSlider(Qt.Horizontal)
         self.width_slider.setRange(1, MAX_BORDER)
         self.width_slider.setAccessibleName("Border width")
+        self.width_slider.setValue(4)
         self.width_slider.valueChanged.connect(lambda v: self._emit(border=int(v)))
         details.addWidget(self.width_slider)
         swatches = QHBoxLayout()
@@ -88,7 +89,8 @@ class EdgeControls(QWidget):
         self._edges = edges
         self.border.setChecked(bool(edges.border))
         self._details.setVisible(bool(edges.border))
-        self.width_slider.setValue(edges.border or 4)
+        if edges.border:  # off keeps the last width, for switching it back on
+            self.width_slider.setValue(edges.border)
         for color, swatch in self.swatches.items():
             swatch.setChecked(color.lower() == edges.color.lower())
         for side, chip in self.sides.items():

@@ -58,8 +58,8 @@ class DrawMixin:
             return  # a click, not a cut
         try:
             self.cut_out(axis, start, end, self.cutout_options["seam"])
-        except ValueError:
-            pass  # markup from a newer SnipForge: the Image buttons explain; a cut just doesn't happen
+        except ValueError as exc:
+            self.notice.emit(f"Couldn't cut that out: {exc}")
 
     def _begin_crop_drag(self, pos: QPointF) -> dict:
         rect = QRectF(self._mask.crop)

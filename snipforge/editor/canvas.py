@@ -20,8 +20,7 @@ from .canvas_view import MIN_ZOOM as MIN_ZOOM
 from .canvas_view import SCENE_MARGIN, ViewMixin
 from .commands import AddItemsCommand, CropCommand, RemoveItemsCommand, StateCommand
 from .crop import MIN_CROP, CropMask
-from .cutout import CutPreview
-from .edges import EdgeItem, Edges
+from .edges import CutPreview, EdgeItem, Edges
 from .eyedropper import Loupe
 from .factory import create_item
 from .handles import HandleOverlay
@@ -45,6 +44,7 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
     document_changed = Signal()
     picking_changed = Signal(bool)  # the eyedropper started or ended
     color_picked = Signal(str)  # "#rrggbb", now the selection's or the tool's color
+    notice = Signal(str)  # something to tell you in the status bar
 
     def __init__(self, image: QImage, tool_styles: dict[str, Style] | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -362,8 +362,16 @@ class Canvas(InputMixin, DrawMixin, PickMixin, ImageMixin, ViewMixin, QGraphicsV
         False so the library always matches the saved document."""
         if commit:
             self.commit_text()
-        crop = self._mask.crop if (self._mask.editing and use_draft) else self._crop_rect
-        return self._render_rect(crop.toAlignedRect())
+        draft = self._mask.editing and use_draft
+        crop = self._mask.crop if draft else self._crop_rect
+        hidden = not self._edge_item.isVisible()  # hidden while cropping, but they're part of the saved snip
+        if hidden and not draft:
+            self._edge_item.setVisible(True)
+        try:
+            return self._render_rect(crop.toAlignedRect())
+        finally:
+            if hidden and not draft:
+                self._edge_item.setVisible(False)
 
     def _render_rect(self, rect) -> QImage:
         """The snip and its markup inside `rect` (scene pixels), without crop shading or handles."""

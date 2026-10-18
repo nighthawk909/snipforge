@@ -277,3 +277,98 @@ def test_the_new_sections_fit_the_panel(qapp):
     for kind in ("select", "cutout"):
         panel.load(kind, None, has_selection=False)
         assert panel.widget().minimumSizeHint().width() <= PANEL_WIDTH - 14, kind
+
+
+# --- review: what's saved always reopens, cuts only grow, eyedropper and autosave see edges -------
+def test_any_resize_of_a_cut_snip_saves_a_document_that_reopens(banded):
+    import random
+
+    from snipforge.editor import image_ops
+    rng = random.Random(7)
+    for _ in range(60):
+        c = Canvas(banded)
+        for _ in range(rng.randint(1, 3)):
+            w, h = c.image_geometry().size()
+            axis = rng.choice("xy")
+            length = w if axis == "x" else h
+            start = rng.randint(0, length - 20)
+            end = start + rng.randint(1, max(1, length - start - 12))
+            c.cut_out(axis, start, end, rng.choice(["straight", "torn"]))
+        w, h = c.image_geometry().size()
+        k = rng.choice([0.37, 0.5, 0.75, 1.3, 2.0, 3.1])
+        target = (max(1, round(w * k)), max(1, round(h * k)))
+        if c.can_resize(*target):
+            c.resize_image(*target)
+            assert c.render_image().size().toTuple() == target
+        assert image_ops.reopens(c.image_geometry(), banded.size())
+        clone = Canvas(banded)
+        clone.load_document(c.to_document())
+        assert clone.render_image() == c.render_image()
+
+
+def test_a_cut_snip_cant_be_squeezed_to_nothing(banded):
+    c = make_canvas(banded)
+    c.cut_out("x", 100, 200)
+    assert not c.can_resize(5, 5)
+    with pytest.raises(ValueError):
+        c.resize_image(5, 5)
+    assert c.render_image().size().toTuple() == (200, 100)
+
+
+def test_resizing_down_and_up_never_brings_a_cut_strip_back(banded):
+    c = make_canvas(banded)
+    c.cut_out("x", 101, 199)  # leaves a column of green either side
+    before = c.image_geometry().cuts[0]
+    c.resize_image(67, 33)
+    c.resize_image(202, 100)
+    after = c.image_geometry().cuts[0]
+    assert after.start <= before.start and after.end >= before.end
+
+
+def test_there_is_a_limit_on_cuts(banded):
+    from snipforge.editor import image_ops
+    big = banded.scaled(3000, 100)
+    c = Canvas(big)
+    for _ in range(image_ops.MAX_CUTS):
+        c.cut_out("x", 10, 12)
+    with pytest.raises(ValueError):
+        c.cut_out("x", 10, 12)
+
+
+def test_the_eyedropper_picks_edges_too(banded):
+    c = make_canvas(banded)
+    c.set_edges(Edges(border=6, color="#000000", torn=frozenset({"bottom"})))
+    c.set_tool("arrow")
+    c.start_picking()
+    assert c.color_at(QPointF(2, 50)).name() == "#000000"
+    gone = next(x for x in range(100, 300) if alpha(c.render_image(), x, 99) == 0)
+    assert c.color_at(QPointF(gone + 0.5, 99.5)) is None
+
+
+def test_autosave_while_cropping_keeps_the_edges(banded):
+    c = make_canvas(banded)
+    c.set_edges(Edges(border=6, color="#000000", torn=frozenset({"bottom"})))
+    c.set_tool("crop")
+    out = c.render_image(commit=False, use_draft=False)
+    assert out.pixelColor(2, 50).name() == "#000000"
+    assert min(alpha(out, x, 99) for x in range(300)) == 0
+    assert not c._edge_item.isVisible()  # still hidden on screen while cropping
+
+
+def test_a_turned_torn_cut_reopens(banded):
+    c = make_canvas(banded)
+    c.cut_out("x", 100, 200, "torn")
+    c.rotate_image(True)
+    c.flip_image(False)
+    clone = Canvas(banded)
+    clone.load_document(c.to_document())
+    assert clone.render_image() == c.render_image()
+
+
+def test_switching_the_border_off_and_on_keeps_its_width(editor):
+    controls = editor.panel.edge_controls()
+    QTest.mouseClick(controls.border, Qt.LeftButton)
+    controls.width_slider.setValue(17)
+    QTest.mouseClick(controls.border, Qt.LeftButton)
+    QTest.mouseClick(controls.border, Qt.LeftButton)
+    assert editor.canvas.edges().border == 17
