@@ -477,7 +477,7 @@ def test_moving_the_bubble_moves_it_in_the_recording(tmp_path, qapp):
     from snipforge.video.recorder import Settings as RecordingSettings
 
     process = InProcess()
-    share = "SnipForge-camera-" + "d" * 32
+    share = "sfcam-" + "d" * 16
     remote = RemoteRecorder(RecordingSettings(area=(0, 0, 320, 240), output=Path(tmp_path).resolve() / "rec.mp4",
                                               camera_share=share, camera_bubble=(10, 10, 100, 100)), launch=process)
     remote.start()

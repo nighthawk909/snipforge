@@ -164,7 +164,7 @@ def test_a_camera_picture_that_cant_be_reached_is_left_out_with_a_warning(tmp_pa
     def frames(area, fps, clock, overlay):
         return ScreenFrames(area, fps, clock, overlay, open_screen=lambda a: StillScreen(), first_image=grey)
 
-    recorder = Recorder(Settings(AREA, tmp_path / "rec.mp4", fps=FPS, camera_share="SnipForge-camera-" + "c" * 32,
+    recorder = Recorder(Settings(AREA, tmp_path / "rec.mp4", fps=FPS, camera_share="sfcam-" + "c" * 16,
                                  camera_bubble=(0, 0, 100, 100)),
                         screen_frames=frames, capture=sound_maker(), free_space=lambda folder: 10**12,
                         overlay=lambda s: recorder_module._real_overlay(s))  # SnipForge's share isn't there

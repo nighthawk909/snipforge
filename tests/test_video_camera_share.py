@@ -1,6 +1,12 @@
 """snipforge/video/camera_share.py: the webcam's picture from SnipForge to its recorder process, and
 where its bubble is."""
+import os
+import pathlib
+import struct
+import subprocess
+import sys
 import threading
+from multiprocessing import shared_memory
 
 import pytest
 from PySide6.QtGui import QColor, QImage
@@ -65,7 +71,7 @@ def test_a_picture_half_written_is_never_read(writer, qapp):
     try:
         writer.write(picture(color="#112233"))
         assert reader.latest().pixelColor(0, 0).name() == "#112233"
-        writer._begin_write()  # as if the other process were in the middle of writing
+        struct.pack_into("<Q", writer._memory.buf, camera_share.SEQUENCE, 99)  # odd: mid-write, elsewhere
 
         assert reader.latest().pixelColor(0, 0).name() == "#112233"  # the last whole one
     finally:
@@ -97,10 +103,15 @@ def test_pictures_written_while_being_read_are_never_torn(writer, qapp):
     assert torn == []
 
 
-@pytest.mark.parametrize("name", ["", "Global\\\\thing", "SnipForge-camera-../x", "SnipForge-recorder-" + "0" * 32])
+@pytest.mark.parametrize("name", ["", "Global\\\\thing", "sfcam-../x", "SnipForge-recorder-" + "0" * 32, 5, None])
 def test_only_names_snipforge_makes_are_opened(name):
+    assert not camera_share.is_name(name)
     with pytest.raises(ValueError):
         CameraReader(name)
+
+
+def test_names_are_short_enough_for_macos():
+    assert len("/" + CameraWriter.__init__.__globals__["NAME_PREFIX"] + "0" * 16) <= 31
 
 
 def test_the_bubbles_place_is_kept_for_the_frame_thread():
@@ -117,7 +128,7 @@ def test_a_bubble_place_that_makes_no_sense_is_ignored():
     bubble = BubbleState((1500, 800, 240, 240), "circle")
 
     for rect, shape in [((1, 2, 3), "circle"), ((0, 0, -5, 10), "circle"), ((0, 0, 50, 50), "star"),
-                        (("a", 0, 50, 50), "circle")]:
+                        (("a", 0, 50, 50), "circle"), ((10**30, 0, 50, 50), "circle"), ((0, 0, 50, 10**9), "circle")]:
         bubble.update(rect, shape)
 
     assert bubble.snapshot().rect == (1500, 800, 240, 240)
@@ -133,16 +144,105 @@ def test_the_writer_sends_pictures_as_rgb32(writer, qapp):
         reader.close()
 
 
-def test_a_closed_writer_leaves_a_reader_with_its_last_picture(qapp):
+def test_a_camera_that_stops_is_dropped_not_frozen_into_the_recording(qapp):
+    clock = [100.0]
     writer = CameraWriter()
-    reader = CameraReader(writer.name)
+    reader = CameraReader(writer.name, now=lambda: clock[0])
     writer.write(picture(color="#445566"))
-    reader.latest()
-
-    writer.close()
-
     assert reader.latest().pixelColor(0, 0).name() == "#445566"
+
+    writer.close()  # unplugged, or SnipForge closed it
+    clock[0] += 1.0
+    assert reader.latest() is not None  # a moment's gap: keep the last picture
+    clock[0] += camera_share.STALE_SECONDS
+    assert reader.latest() is None  # gone for good: the recording leaves the camera out
     reader.close()
+
+
+def test_a_picture_rewritten_while_it_is_copied_is_not_used(writer, qapp):
+    reader = CameraReader(writer.name)
+    try:
+        writer.write(picture(color="#101010"))
+        assert reader.latest().pixelColor(0, 0).name() == "#101010"
+        writer.write(picture(color="#202020"))
+        copy = reader._copy
+
+        def copy_while_rewritten(size):
+            data = copy(size)
+            writer.write(picture(color="#303030"))  # SnipForge writes again mid-copy
+            return data
+
+        reader._copy = copy_while_rewritten
+        assert reader.latest().pixelColor(0, 0).name() == "#101010"  # the torn copy was thrown away
+        reader._copy = copy
+        assert reader.latest().pixelColor(0, 0).name() == "#303030"
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("header", [
+    (b"NOTMAGIC", 2, 320, 240, 1280),
+    (camera_share.MAGIC, 2, 99_999, 240, 1280),
+    (camera_share.MAGIC, 2, 320, 240, 100),  # fewer bytes per line than the width needs
+    (camera_share.MAGIC, 2, 0, 240, 1280),
+])
+def test_a_header_snipforge_didnt_write_is_ignored(writer, qapp, header):
+    reader = CameraReader(writer.name)
+    try:
+        camera_share.HEADER.pack_into(writer._memory.buf, 0, *header)
+
+        assert reader.latest() is None
+    finally:
+        reader.close()
+
+
+def test_a_block_too_small_to_be_ours_is_refused(qapp):
+    name = "sfcam-" + "e" * 16
+    small = shared_memory.SharedMemory(name=name, create=True, size=4096)
+    try:
+        with pytest.raises(ValueError, match="too small"):
+            CameraReader(name)
+    finally:
+        small.close()
+        small.unlink()
+
+
+def test_a_write_that_fails_halfway_leaves_the_next_one_readable(writer, qapp, monkeypatch):
+    reader = CameraReader(writer.name)
+
+    def out_of_memory(_data):
+        raise MemoryError("out of memory")
+
+    try:
+        monkeypatch.setattr(camera_share, "bytes", out_of_memory, raising=False)  # the copy, mid-write
+        with pytest.raises(MemoryError):
+            writer.write(picture())
+        monkeypatch.undo()
+        writer.write(picture(color="#606060"))
+
+        assert reader.latest().pixelColor(0, 0).name() == "#606060"
+    finally:
+        reader.close()
+
+
+def test_the_picture_crosses_from_one_process_to_another(writer, qapp, tmp_path):
+    writer.write(picture(color="#708090"))
+    script = tmp_path / "read.py"
+    script.write_text(
+        "import sys\n"
+        "from PySide6.QtGui import QGuiApplication\n"
+        "app = QGuiApplication(['x', '-platform', 'offscreen'])\n"
+        "from snipforge.video.camera_share import CameraReader\n"
+        "reader = CameraReader(sys.argv[1])\n"
+        "print(reader.latest().pixelColor(2, 2).name())\n"
+        "reader.close()\n")
+
+    root = str(pathlib.Path(camera_share.__file__).resolve().parents[2])  # this checkout, not an installed copy
+    run = subprocess.run([sys.executable, str(script), writer.name], capture_output=True, text=True, timeout=60,
+                         env={**os.environ, "PYTHONPATH": root})
+
+    assert run.stdout.strip() == "#708090", run.stderr
+    assert "leaked" not in run.stderr  # the recorder side never takes charge of SnipForge's block
 
 
 # --- in the recording -----------------------------------------------------------------------------
@@ -190,7 +290,7 @@ def test_camera_settings_that_make_no_sense_are_refused(change, reason, tmp_path
     from snipforge.video.recorder import Settings
 
     values = {"area": (0, 0, 320, 240), "output": Path(tmp_path) / "r.mp4",
-              "camera_share": "SnipForge-camera-" + "a" * 32, "camera_bubble": (0, 0, 100, 100), **change}
+              "camera_share": "sfcam-" + "a" * 16, "camera_bubble": (0, 0, 100, 100), **change}
     with pytest.raises(ValueError, match=reason):
         Settings(**values)
 
@@ -202,7 +302,7 @@ def test_camera_settings_go_through_the_channel(tmp_path):
     from snipforge.video.recorder import Settings
 
     settings = Settings((0, 0, 320, 240), Path(tmp_path).resolve() / "r.mp4",
-                        camera_share="SnipForge-camera-" + "b" * 32, camera_bubble=(10, 20, 160, 160),
+                        camera_share="sfcam-" + "b" * 16, camera_bubble=(10, 20, 160, 160),
                         camera_shape="rounded")
 
     assert settings_from_message(settings_to_message(settings)) == settings
