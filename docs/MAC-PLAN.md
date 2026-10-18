@@ -219,3 +219,8 @@ Mac-only code that needs a real Mac to prove it gets a manual check from the tes
 - The bundle identifier is `io.github.nighthawk909.snipforge` (`packaging/snipforge.spec`). Never
   change it once Macs have SnipForge: macOS keys the Screen Recording permission, login items and IT
   profiles to it, like the installer's `AppId` on Windows.
+- **Universal2:** Pillow publishes separate arm64 and x86_64 macOS wheels, so `build_mac.py` first
+  downloads both for the installed version and fuses its compiled files with `lipo`
+  (`scripts/universal.py`, which lists such packages in `SPLIT_WHEELS`), then checks with
+  `lipo -archs` that the copies in the built app hold both. It changes the installed Pillow in
+  place, harmlessly: a universal file works on either Mac.
