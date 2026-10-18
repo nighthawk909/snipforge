@@ -35,12 +35,14 @@ def controller(window):
 
 
 def test_menu_lists_targets(window, monkeypatch):
+    monkeypatch.setattr(share, "windows_shell_available", lambda: True)  # Windows, with a fake OneDrive
     monkeypatch.setattr(share, "onedrive_accounts",
                         lambda: [share.OneDriveAccount("Work", window._library.root, True)])
     menu = QMenu()
     controller(window)._populate(menu)
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
     assert texts[0].startswith("Email with Outlook") and any("OneDrive (Work)" in t for t in texts)
+    assert "Teams chat, Outlook and more apps…" in texts  # the Windows share sheet
 
 
 def test_email_success_and_fallback(window, fakes, monkeypatch):

@@ -10,9 +10,10 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPainterPathStroker, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPainterPathStroker, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsItem
 
+from ..fonts import ui_font
 from .style import Style
 
 FLAGS = QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable
@@ -595,7 +596,7 @@ class StepItem(Annotation, QGraphicsItem):
         p.setPen(QPen(QColor("#ffffff"), 2))
         p.setBrush(color)
         p.drawEllipse(r)
-        font = QFont("Segoe UI", max(8, int(d * 0.36)))
+        font = ui_font(max(8, int(d * 0.36)))
         font.setBold(True)
         p.setFont(font)
         p.setPen(readable_on(color))

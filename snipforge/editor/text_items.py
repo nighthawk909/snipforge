@@ -7,6 +7,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextOption
 from PySide6.QtWidgets import QGraphicsTextItem, QStyle, QStyleOptionGraphicsItem
 
+from ..fonts import ui_font
 from .items import HIT_SLOP, Annotation, BoxItem, make_pen, readable_on, stroke_band
 from .style import Style
 
@@ -71,7 +72,7 @@ class EditableText(QGraphicsTextItem):
 
 
 def _font(size: int, weight: QFont.Weight) -> QFont:
-    font = QFont("Segoe UI", int(size))
+    font = ui_font(int(size))
     font.setWeight(weight)
     return font
 

@@ -1,5 +1,6 @@
 # Runtime dependencies, pinned for reproducible builds. Dependabot keeps these current.
-# pywin32 and WinRT (OCR) are Windows only; the macOS build installs just PySide6 (docs/MAC-PLAN.md).
+# pywin32 and WinRT (OCR) are Windows only; PyObjC (the macOS APIs, each framework only as it's needed)
+# is Mac only (docs/MAC-PLAN.md).
 PySide6-Essentials==6.12.0
 PySide6-Addons==6.12.0  # QtMultimedia, for screen recording
 pillow==12.3.0  # writes GIFs in the video editor (only its core and GIF writer are bundled)
@@ -11,3 +12,6 @@ winrt-Windows.Storage.Streams==3.2.1; sys_platform == "win32"
 winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
 winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
 winrt-Windows.Globalization==3.2.1; sys_platform == "win32"
+pyobjc-core==12.2.2; sys_platform == "darwin"
+pyobjc-framework-Cocoa==12.2.2; sys_platform == "darwin"  # needed by Quartz
+pyobjc-framework-Quartz==12.2.2; sys_platform == "darwin"  # Screen Recording permission check

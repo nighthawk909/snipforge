@@ -11,20 +11,23 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 
 | Area | Feature | Windows | Mac | Mac plan |
 |---|---|---|---|---|
-| **Release** | Installer / download | ✅ setup.exe, portable zip | 🟡 every release attaches `SnipForge-<version>.dmg` and `SnipForge.dmg` (#80) | |
-| | Download page offers the right build | ✅ | 🟡 a Mac download and first-launch steps (#80) | |
-| | Updates (check, download, install, roll back) | ✅ | 🟡 checks, then says to download the new `.dmg` (#80) | Phase 8: installs the `.dmg` itself |
+| **Release** | Installer / download | ✅ setup.exe, portable zip | ✅ every release attaches `SnipForge-<version>.dmg` (#80) | |
+| | Download page offers the right build | ✅ | ✅ Download for Mac (#80) | |
+| | Updates (check, download, install, roll back) | ✅ | 🟡 checks, then says to download the .dmg and drag it to Applications | Phase 8: `.dmg` install path |
 | | First launch without warnings | 🔒 SmartScreen warns until the installer is signed | 🔒 Gatekeeper's Open Anyway until notarized | Free signing (SignPath) / Apple account: maintainer's call |
 | | IT policy settings | ✅ registry | ❌ | Phase 8: managed preferences |
 | **App** | Starts, one copy at a time | ✅ | ✅ CI | |
-| | Tray / menu bar icon and menu | ✅ | 🟡 | Phase 1 |
-| | Opening it again brings up the Library | ✅ | ❌ | Phase 1 |
+| | Tray / menu bar icon and menu | ✅ | 🟡 menu bar wording done | Dock icon or menu bar only: after the first tester |
+| | Opening it again brings up the Library | ✅ | 🟡 from Finder or the Dock (`reopen.py`) | Phase 1 done; a tester confirms |
+| | Words and shortcuts (Trash, menu bar, Finder, ⌘, About) | ✅ | ✅ unit tests on both; CI compares with Qt's own Mac shortcut text | |
+| | Fonts (no Segoe UI or Consolas on a Mac) | ✅ | ✅ CI self-test resolves the system font and Menlo | |
+| | License texts and theme packs shipped with the app; caches | ✅ next to SnipForge.exe; `%LOCALAPPDATA%` | ✅ CI self-test finds them in `Contents/Resources`; `~/Library/Caches` | |
 | | Start when I sign in | ✅ | ❌ explains it isn't available | Phase 6: `SMAppService` |
-| | Settings, themes, accents | ✅ | 🟡 | |
+| | Settings, themes, accents | ✅ | 🟡 Match macOS; no Windows key switches | |
 | **Capture** | The snip key (Win+Shift+S, Print Screen) | ✅ | ❌ | Phase 3: `RegisterEventHotKey` (e.g. ⌘⇧2) |
 | | Shortcuts of your own | ✅ | ❌ hidden | Phase 3: same API |
-| | Screen Recording permission check | n/a | ❌ | Phase 1 |
-| | Area and Full screen | ✅ | 🟡 needs Screen Recording | Phase 1 |
+| | Screen Recording permission check | n/a | 🟡 CI calls the check in the packaged app; the explanation and System Settings need a person | Phase 1 done |
+| | Area and Full screen | ✅ | 🟡 needs Screen Recording (asked for first) | A tester confirms |
 | | Window (click a window), and where a snip came from | ✅ | ❌ | Phase 2: `CGWindowListCopyWindowInfo` |
 | | Fixed size | ✅ | 🟡 | |
 | | Scrolling | ✅ | ❌ hidden | Phase 7: `CGEvent` scrolling (needs Accessibility) |
@@ -40,8 +43,8 @@ Keep this page true: a PR that changes a feature's status on either platform upd
 | | Copy, Drag out, Pin | ✅ | 🟡 | |
 | **Share** | Send in Teams | ✅ | 🟡 | |
 | | Email | ✅ Outlook draft with the snip | 🟡 copies, opens the mail app | Phase 5: compose-email service |
-| | OneDrive link, share sheet | ✅ | ❌ | Phase 5: `NSSharingServicePicker` |
-| **Library** | Browse, favorites, tags, delete, search titles and tags | ✅ | 🟡 | |
+| | OneDrive link, share sheet | ✅ | ❌ hidden | Phase 5: `NSSharingServicePicker` |
+| **Library** | Browse, favorites, tags, delete, search titles and tags | ✅ | 🟡 Trash (⌘⌫), Finder | |
 | | Search the words inside snips | ✅ | ❌ | Phase 4: Vision |
 | **Recording** | Record an area (screen, pointer effects) | ✅ | ❌ hidden | New phase: ScreenCaptureKit |
 | | Microphone and computer sound | ✅ | ❌ | New phase: ScreenCaptureKit audio, AVFoundation |

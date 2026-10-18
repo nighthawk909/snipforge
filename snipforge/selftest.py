@@ -5,7 +5,8 @@ Windows OCR, the keyboard hook, Explorer share commands) and writes a JSON repor
 means every required check passed. CI runs this against the built exe before publishing.
 
 On a Mac (docs/MAC-PLAN.md) the Windows-only checks are reported as skipped rather than required,
-until each feature has its macOS version.
+until each feature has its macOS version; the Mac's own (the Screen Recording check, files in
+Contents/Resources) are required there.
 """
 from __future__ import annotations
 
@@ -16,9 +17,10 @@ import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor, QFont, QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 
 from . import __version__
+from .fonts import ui_font
 
 OCR_PHRASE = "SnipForge self test"
 
@@ -96,6 +98,47 @@ def _not_on_this_platform() -> str:
     return f"skipped: Windows only for now ({sys.platform}, see docs/MAC-PLAN.md)"
 
 
+def _app_folders() -> str:
+    """The license texts are where About and Settings say (next to SnipForge.exe, or in
+    SnipForge.app's Contents/Resources), and the theme's cache is in the platform's cache folder."""
+    from .bundle import cache_dir, resources_dir
+    from .theme.manager import ASSET_DIR
+
+    folder = resources_dir()
+    missing = [name for name in ("THIRD_PARTY_NOTICES.md", "licenses") if not (folder / name).exists()]
+    if missing:
+        raise RuntimeError(f"{' and '.join(missing)} not found in {folder}")
+    if cache_dir() not in ASSET_DIR.parents:
+        raise RuntimeError(f"the theme cache {ASSET_DIR} isn't in {cache_dir()}")
+    return f"license texts in {folder}; cache in {cache_dir()}"
+
+
+def _fonts() -> str:
+    """The interface and fixed-width fonts SnipForge asks for are there (a Mac has no Segoe UI or
+    Consolas: snipforge/fonts.py picks its own)."""
+    from PySide6.QtGui import QFontInfo
+
+    from .fonts import mono_font
+
+    ui, mono = QFontInfo(ui_font(10)), QFontInfo(mono_font(10))
+    if not mono.fixedPitch():
+        raise RuntimeError(f"the fixed-width font came out as {mono.family()}, which isn't fixed-width")
+    return f"interface: {ui.family()}; fixed-width: {mono.family()}"
+
+
+def _screen_access() -> str:
+    """macOS's Screen Recording check made it into the build (PyObjC's Quartz) and answers. CI can't
+    grant the permission, so either answer passes."""
+    from . import _screen_access_mac
+
+    allowed = _screen_access_mac.preflight()
+    return f"Screen Recording permission: {'allowed' if allowed else 'not allowed yet'}"
+
+
+def _no_screen_permission() -> str:
+    return f"skipped: {sys.platform} needs no permission to capture the screen"
+
+
 def _theme() -> str:
     """Theme packs load and the app-wide stylesheet builds and applies (restored afterwards)."""
     from PySide6.QtWidgets import QApplication
@@ -140,7 +183,7 @@ def _ocr() -> str:
     image = QImage(560, 90, QImage.Format_ARGB32)
     image.fill(QColor("white"))
     p = QPainter(image)
-    p.setFont(QFont("Segoe UI", 20))
+    p.setFont(ui_font(20))
     p.setPen(QColor("black"))
     p.drawText(16, 58, OCR_PHRASE)
     p.end()
@@ -166,7 +209,7 @@ def _search_index() -> str:
     image = QImage(560, 90, QImage.Format_ARGB32)
     image.fill(QColor("white"))
     p = QPainter(image)
-    p.setFont(QFont("Segoe UI", 20))
+    p.setFont(ui_font(20))
     p.setPen(QColor("black"))
     p.drawText(16, 58, OCR_PHRASE)
     p.end()
@@ -268,9 +311,12 @@ def _recorder_process() -> str:
 
 
 def run(report_path: str) -> int:
-    windows = sys.platform == "win32"
+    windows, mac = sys.platform == "win32", sys.platform == "darwin"
     results: dict = {}
     _check(results, "theme", _theme)
+    _check(results, "app_folders", _app_folders)
+    _check(results, "fonts", _fonts, required=mac)
+    _check(results, "screen_access", _screen_access if mac else _no_screen_permission, required=mac)
     _check(results, "editor", _editor)
     _check(results, "save_formats", _save_formats)
     _check(results, "library", _library)
