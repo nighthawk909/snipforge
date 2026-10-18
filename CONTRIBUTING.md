@@ -40,7 +40,9 @@ dist/SnipForge/SnipForge.exe --self-test report.json   # proves the packaged app
 
 ## Design notes
 
-- `snipforge/editor/canvas.py`: gestures, undo and export. Annotations live in `items.py`,
+- `snipforge/editor/canvas.py`: tools, edits, crop, undo and export. Its mixins hold the rest:
+  `canvas_input.py` (keyboard and mouse), `canvas_draw.py` (what gestures create) and
+  `canvas_view.py` (zoom, fit, background). Annotations live in `items.py`,
   `text_items.py` and `stamps.py`; each serializes with `get_state()`/`set_state()`, which undo,
   duplicate and the library all build on.
 - `snipforge/capture.py`: the freeze-frame overlay. `hotkey.py`: the Win+Shift+S hook.

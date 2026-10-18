@@ -333,6 +333,24 @@ class Canvas(InputMixin, DrawMixin, ViewMixin, QGraphicsView):
             item.on_edit_finished = self._on_text_finished
         return item
 
+    def _on_text_finished(self, item, before: dict | None) -> None:
+        if self.closing:
+            return
+        if item.is_new:
+            item.is_new = False
+            if item.is_degenerate():
+                self._scene.removeItem(item)
+            else:
+                self.undo_stack.push(AddItemsCommand(self._scene, [item], "Add text"))
+            return
+        if item.is_degenerate() and before is not None:
+            item.set_state(before)
+            self.undo_stack.push(RemoveItemsCommand(self._scene, [item]))
+            return
+        after = item.get_state()
+        if before is not None and after != before:
+            self.undo_stack.push(StateCommand([(item, before, after)], "Edit text"))
+
     def _select(self, items) -> None:
         self._scene.clearSelection()
         for item in items:

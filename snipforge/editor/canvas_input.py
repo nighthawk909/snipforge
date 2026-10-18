@@ -1,4 +1,4 @@
-"""Keyboard and mouse handling for the canvas.
+"""Keyboard and mouse handling for the canvas, with hit testing and hover.
 
 Gestures, with any tool active:
   * click an annotation           -> select it (Shift/Ctrl+click adds or removes)
@@ -31,7 +31,11 @@ TEXT_TOOLS = {"text", "callout"}
 
 class InputMixin:
     """Keyboard and mouse events for the Canvas (a QGraphicsView). The drawing steps they start
-    live in DrawMixin (canvas_draw.py)."""
+    live in DrawMixin (canvas_draw.py).
+
+    A gesture in progress is `self._drag`, a dict whose "type" is one of: pending (pressed on an
+    annotation, not yet moved), create, handle, move, crop_handle, crop_move or crop_new. Uses the
+    canvas's `_scene`, `_mask`, `_overlay`, `_press_states`, `_panning`, `tool` and `undo_stack`."""
 
     # ------------------------------------------------------------------ keyboard
     def keyPressEvent(self, e) -> None:

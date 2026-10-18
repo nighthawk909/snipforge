@@ -1,10 +1,10 @@
-"""What the canvas's gestures do: start, grow and finish new annotations, turn a press into a
-move or a draw, and record moves and text edits for undo."""
+"""What the canvas's gestures do: start a crop drag, start, grow and finish new annotations,
+turn a press on an annotation into a click-select, a move or a draw, and record moves for undo."""
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF
 
-from .commands import AddItemsCommand, RemoveItemsCommand, StateCommand
+from .commands import AddItemsCommand, StateCommand
 from .crop import crop_handle_at
 from .items import (
     Annotation,
@@ -134,24 +134,6 @@ class DrawMixin:
         self._select([item])
         self.setFocus()
         item.start_editing()
-
-    def _on_text_finished(self, item, before: dict | None) -> None:
-        if self.closing:
-            return
-        if item.is_new:
-            item.is_new = False
-            if item.is_degenerate():
-                self._scene.removeItem(item)
-            else:
-                self.undo_stack.push(AddItemsCommand(self._scene, [item], "Add text"))
-            return
-        if item.is_degenerate() and before is not None:
-            item.set_state(before)
-            self.undo_stack.push(RemoveItemsCommand(self._scene, [item]))
-            return
-        after = item.get_state()
-        if before is not None and after != before:
-            self.undo_stack.push(StateCommand([(item, before, after)], "Edit text"))
 
     def _add_step(self, pos: QPointF) -> None:
         numbers = [i.number for i in self.annotations() if isinstance(i, StepItem)]
