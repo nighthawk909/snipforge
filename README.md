@@ -48,7 +48,7 @@ the snip, with a magnified view of the pixels under the pointer. Everything you 
 | Rectangle, ellipse | R, E | outline or filled, solid or dashed |
 | Text | T | plain or on a colored background |
 | Callout | K | text in a bubble, box, ellipse or pill, with a pointer you can aim |
-| Stamp | I | check, cross, warning, info, star, thumbs up, mouse pointer and more |
+| Stamp | I | check, cross, warning, info, star, thumbs up, mouse pointer and more, or **App name and date**: text saying which app or window the snip came from and when |
 | Step number | N | 1, 2, 3… badges for how-to guides |
 | Pen, highlighter | P, H | |
 | Blur, pixelate | B, X | hide sensitive details |

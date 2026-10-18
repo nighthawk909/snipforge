@@ -21,9 +21,13 @@ from .items import (
 from .magnify import MIN_SOURCE, MagnifyItem, default_source, place_lens
 from .stamps import DEFAULT_SIZE as STAMP_SIZE
 from .stamps import StampItem
+from .style import Style
 from .text_items import CalloutItem, TextItem
 
 DEFAULT_CALLOUT = (190.0, 64.0)
+TEXT_STAMP_STYLE = Style(color="#1c1c1e", fill=True, font_size=12, shadow=False)  # small, dark and readable
+STAMP_INSET = 10.0
+MIN_STAMP_FONT = 6
 
 
 class DrawMixin:
@@ -186,6 +190,23 @@ class DrawMixin:
         self._select([item])
         self.setFocus()
         item.start_editing()
+
+    def add_text_stamp(self, text: str) -> None:
+        """Text in the snip's bottom-left corner (like the App name and date stamp), selected so you
+        can move or restyle it; one undo step."""
+        self.commit_text()
+        self.set_tool("select")
+        crop = self._crop_rect
+        item = self._adopt(TextItem(TEXT_STAMP_STYLE, text))
+        room = crop.width() - 2 * STAMP_INSET
+        if item.boundingRect().width() > room > 0:  # a small snip: smaller text, so it fits across
+            size = TEXT_STAMP_STYLE.font_size * room / item.boundingRect().width()
+            item.set_style(TEXT_STAMP_STYLE.with_changes(font_size=max(MIN_STAMP_FONT, int(size))))
+        box = item.boundingRect()
+        item.setPos(crop.left() + STAMP_INSET, max(crop.top(), crop.bottom() - STAMP_INSET - box.height()))
+        item.setZValue(self._next_z())
+        self.undo_stack.push(AddItemsCommand(self._scene, [item], "Add app name and date"))
+        self._select([item])
 
     def _add_step(self, pos: QPointF) -> None:
         numbers = [i.number for i in self.annotations() if isinstance(i, StepItem)]
