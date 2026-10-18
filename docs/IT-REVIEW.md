@@ -28,7 +28,7 @@ be checked in the source code; file references are given where useful.
 | Temporary copies for drag-out and sharing (auto-deleted after 24 hours) and downloaded updates (`updates` subfolder, removed once installed) | `%TEMP%\SnipForge` | Yes |
 | Startup entry (if enabled) | `HKCU` or, for all-users installs, `HKLM\...\CurrentVersion\Run` | Yes |
 | OneDrive shares | `<OneDrive>\SnipForge` (synced by the user's OneDrive client) | No |
-| Trimmed copies and GIFs made in the video editor, under a new name (`<video> (trimmed).mp4`, `<video>.gif`); the original recording is never changed. While one is being written it's a `.<name>.<random>.partial.mp4` (or `.gif`) file in the same folder, renamed when done and deleted if cancelled or failed | Next to the original video | No (it's the user's work) |
+| Trimmed copies and GIFs made in the video editor, under a new name (`<video> (trimmed).mp4`, `<video>.gif`); the original recording is never changed. While one is being written it's a `.<name>.<random>.partial.mp4` (or `.gif`) file in the same folder, renamed when done and deleted if cancelled, failed or SnipForge quits first (only a crash or power cut can leave one behind) | Next to the original video | No (it's the user's work) |
 
 Note that a snip's original, uncropped capture is kept so crops can be undone; deleting a snip from
 the Library sends its whole folder to the Recycle Bin.

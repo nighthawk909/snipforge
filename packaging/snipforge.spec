@@ -24,6 +24,9 @@ EXCLUDES = [
     # modules (~11 MB uncompressed) stay out; Pillow's image plugins carry on without them.
     "PIL._avif", "PIL._imagingft", "PIL._webp", "PIL._imagingcms", "PIL._imagingmorph", "PIL._imagingtk",
     "PIL.ImageTk", "PIL.ImageQt",
+    # Pillow names numpy for type checking only; where numpy happens to be installed, PyInstaller
+    # would otherwise bundle it (~27 MB, and the YAML and charset modules it brings).
+    "numpy",
 ]
 
 a = Analysis(

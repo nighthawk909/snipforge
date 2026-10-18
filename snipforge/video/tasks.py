@@ -75,6 +75,9 @@ class Task:
         return not self._thread.is_alive()
 
     def _run(self) -> None:
+        """Work that returns is done, even if cancel came too late to stop it (a GIF that was
+        already written is there, and the window should say so). Work that stops with an
+        exception after a cancel was cancelled; otherwise it failed."""
         try:
             result = self._work(self)
         except TaskCancelled:
@@ -86,7 +89,4 @@ class Task:
             log.exception("%s failed", self._thread.name)
             self._signals.failed.emit(str(exc) or type(exc).__name__)
         else:
-            if self._cancel.is_set():
-                self._signals.cancelled.emit()
-            else:
-                self._signals.done.emit(result)
+            self._signals.done.emit(result)

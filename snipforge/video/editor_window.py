@@ -12,8 +12,10 @@ opens one for trying out. open_video(path) is the entry point for the rest of Sn
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
@@ -31,14 +33,16 @@ from PySide6.QtWidgets import (
 )
 
 from .. import theme
-from . import editor_parts, ffmpeg, gif, timeline, trim
+from . import editor_parts, ffmpeg, frame_times, gif, trim
 from .player import Player
 from .tasks import Task
 from .timeline import format_time
 from .timeline_strip import TimelineStrip
 from .video_view import VideoView
 
-CLOSE_WAIT = 5.0  # seconds to let background work finish when the window closes
+log = logging.getLogger(__name__)
+
+CLOSE_WAIT = 5.0  # seconds, in all, to let background work finish when the window closes
 GIF_FPS, GIF_WIDTH = 12, 960
 
 
@@ -47,15 +51,15 @@ class VideoEditorWindow(QMainWindow):
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.path = Path(os.path.abspath(path))
-        self.frames = timeline.read_frame_times(self.path)  # FFmpegError if it isn't a video we can read
+        self.frames = frame_times.read(self.path)  # FFmpegError if it isn't a video we can read
         self._trim_copy, self._export_gif = trim_copy, export_gif
         self._playing = False
+        self._play_from = 0  # the frame playing started at; earlier ones the player sends aren't shown
         self._job: Task | None = None
-        self._still: Task | None = None  # reading one exact frame; at most one at a time
-        self._still_busy = False
-        self._still_index = self._still_wanted = 0
-        self._saved: Path | None = None  # the last file written, for "Show in folder"
+        self._job_cancellable = False
         self._job_target = self.path
+        self._saved: Path | None = None  # the last file written, for "Show in folder"
+        self._stopped = False
         self.setWindowTitle(f"{self.path.name} - SnipForge")
         self.resize(1100, 720)
         self._build()
@@ -64,12 +68,16 @@ class VideoEditorWindow(QMainWindow):
         self.player.finished.connect(self._on_player_finished)
         self.player.failed.connect(self._on_player_failed)
         self.player.load(self.path)
+        self._stills = editor_parts.StillFrames(self.path, self.frames, self)
+        self._stills.shown.connect(self._on_still)
+        self._stills.failed.connect(self._on_still_failed)
         self._thumbs = Task(editor_parts.thumbnail_work(self.path, self.frames.end), item=self._on_thumbnail,
-                            name="snipforge-video-thumbnails").start()
+                            failed=self._on_thumbnails_failed, name="snipforge-video-thumbnails").start()
+        QApplication.instance().aboutToQuit.connect(self._stop_work)  # a tray Quit doesn't close windows
         theme.on_change(self._restyle)
         self._refresh()
         self._restyle()
-        self._request_still(0)
+        self._stills.request(0)
 
     # ------------------------------------------------------------------ building
     def _build(self) -> None:
@@ -194,6 +202,7 @@ class VideoEditorWindow(QMainWindow):
         r, head = self.timeline.range, self.timeline.playhead
         start = head if r.first <= head < r.last else r.first  # from the in point when at or past the end
         self.timeline.set_playhead(start)
+        self._play_from = start
         self._set_playing(True)
         self.player.play((self.frames.boundary(start) + self.frames.boundary(start + 1)) / 2)  # mid-frame
 
@@ -202,14 +211,14 @@ class VideoEditorWindow(QMainWindow):
         self._set_playing(False)
 
     def _on_player_frame(self, image: QImage, seconds: float) -> None:
-        if not self._playing:
-            return
         index, r = self.frames.index_at(seconds), self.timeline.range
+        if not self._playing or index < self._play_from:
+            return  # late, or from before where playing started (Qt's player can start a little early)
         if index >= r.stop:  # reached the out point: stop on the last frame kept
             self._pause()
             self.timeline.set_playhead(r.last)
             self._refresh()
-            self._request_still(r.last)
+            self._stills.request(r.last)
             return
         self.view.set_image(image)
         self.timeline.set_playhead(index)
@@ -227,37 +236,21 @@ class VideoEditorWindow(QMainWindow):
         if self._playing:
             self._pause()
         self._refresh()
-        self._request_still(self.timeline.playhead)
+        self._stills.request(self.timeline.playhead)
 
-    def _request_still(self, index: int) -> None:
-        """Show frame `index` exactly. One frame is read at a time; requests made meanwhile only
-        keep the latest, which is read next (so dragging stays quick and ends on the right frame)."""
-        self._still_wanted = index
-        if self._still_busy:
-            return
-        self._still_busy, self._still_index = True, index
-        work = editor_parts.still_work(self.path, index, self.frames.boundary(index), self.frames.boundary(index + 1))
-        self._still = Task(work, done=self._on_still, failed=self._on_still_failed,
-                           name="snipforge-video-still").start()
-
-    def _on_still(self, result) -> None:
-        index, image = result
-        if not self._playing and index == self._still_wanted:
+    def _on_still(self, _index: int, image: QImage) -> None:
+        if not self._playing:
             self.view.set_image(image)
-        self._still_finished()
 
     def _on_still_failed(self, message: str) -> None:
         self._set_status(f"Couldn't show that frame: {message}", error=True)
-        self._still_finished()
-
-    def _still_finished(self) -> None:
-        self._still_busy = False
-        if self._still_index != self._still_wanted:
-            self._request_still(self._still_wanted)
 
     def _on_thumbnail(self, item) -> None:
         seconds, image = item
         self.timeline.add_thumbnail(seconds, image)
+
+    def _on_thumbnails_failed(self, message: str) -> None:
+        self._set_status(f"Couldn't make the timeline's pictures: {message}", error=True)
 
     # ------------------------------------------------------------------ saving
     def save_trimmed_copy(self) -> None:
@@ -273,19 +266,20 @@ class VideoEditorWindow(QMainWindow):
         def work(task):
             return self._export_gif(self.path, dst, start=r.start, end=r.export_end, fps=GIF_FPS, width=GIF_WIDTH,
                                     progress=task.report, cancel=lambda: task.is_cancelled)
-        self._start_job(work, dst, "Making the GIF…", progress=True)
+        self._start_job(work, dst, "Making the GIF…", cancellable=True)
 
-    def _start_job(self, work, dst: Path, message: str, progress: bool = False) -> None:
-        """One save or export at a time, on its own thread; its buttons wait until it's done."""
+    def _start_job(self, work, dst: Path, message: str, cancellable: bool = False) -> None:
+        """One save or export at a time, on its own thread; its buttons wait until it's done. A
+        cancellable one (the GIF) shows its progress and a Cancel button."""
         if self._job is not None:
             return
         if self._playing:
             self._pause()
         self._set_status(message)
         self.progress.setValue(0)
-        self.progress.setVisible(progress)
-        self.cancel_button.setVisible(progress)
-        self._job_target = dst
+        self.progress.setVisible(cancellable)
+        self.cancel_button.setVisible(cancellable)
+        self._job_target, self._job_cancellable = dst, cancellable
         self._job = Task(lambda task: work(task) or dst, done=self._on_job_done, failed=self._on_job_failed,
                          cancelled=self._on_job_cancelled, progress=self._on_job_progress,
                          name="snipforge-video-save").start()
@@ -319,8 +313,8 @@ class VideoEditorWindow(QMainWindow):
         self._refresh()
 
     def _reveal(self) -> None:
-        if self._saved is not None:
-            editor_parts.reveal(self._saved)
+        if self._saved is not None and not editor_parts.reveal(self._saved):
+            self._set_status(f"Couldn't open the folder of “{self._saved.name}”.", error=True, saved=self._saved)
 
     # ------------------------------------------------------------------ keys and closing
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API
@@ -328,18 +322,40 @@ class VideoEditorWindow(QMainWindow):
             super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API
-        tasks = [t for t in (self._thumbs, self._still, self._job) if t is not None]
+        if self._job is not None and self._job_cancellable and not self._stop_making_gif():
+            event.ignore()
+            return
+        self._stop_work()
+        super().closeEvent(event)
+
+    def _stop_making_gif(self) -> bool:
+        answer = QMessageBox.question(self, "SnipForge", "The GIF isn't finished yet. Stop making it and close?",
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
+
+    def _stop_work(self) -> None:
+        """Cancel what can be cancelled (thumbnails, still frames, a GIF, which then removes its
+        unfinished file) and give it all, with a trimmed copy being saved, a few seconds to end."""
+        if self._stopped:
+            return
+        self._stopped = True
+        tasks = [t for t in (self._thumbs, self._stills.task, self._job) if t is not None]
         for task in tasks:
-            task.cancel()
+            if task is not self._job or self._job_cancellable:
+                task.cancel()
+        deadline = time.monotonic() + CLOSE_WAIT
         for task in tasks:
-            task.wait(CLOSE_WAIT)
+            if not task.wait(max(0.0, deadline - time.monotonic())):
+                log.warning("Video editor work for %s was still running as the editor closed", self.path.name)
         self._playing = False
         self.player.close()
-        super().closeEvent(event)
 
 
 def open_video(path: str | os.PathLike, parent: QWidget | None = None) -> VideoEditorWindow:
-    """Open `path` in a new editor window and show it. Raises FFmpegError if it can't be read."""
+    """Open `path` in a new editor window and show it. Raises FFmpegError if it can't be read.
+
+    Without a parent the window belongs to the caller: keep a reference to it while it's open (Python
+    deletes a window nothing refers to)."""
     window = VideoEditorWindow(path, parent=parent)
     window.show()
     window.raise_()

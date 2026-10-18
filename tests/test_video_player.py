@@ -25,9 +25,13 @@ class FakeMedia(QObject):
         super().__init__()
         self.calls: list[tuple] = []
         self.has_video = True
+        self.status = QMediaPlayer.MediaStatus.LoadedMedia  # loads at once unless a test says otherwise
 
     def setSource(self, url: QUrl) -> None:  # noqa: N802 - Qt API
         self.calls.append(("source", url.toLocalFile()))
+
+    def mediaStatus(self):  # noqa: N802 - Qt API
+        return self.status
 
     def setPosition(self, ms: int) -> None:  # noqa: N802 - Qt API
         self.calls.append(("position", ms))
@@ -102,6 +106,19 @@ def test_playing_seeks_and_passes_on_frames_with_their_times(player, media):
     assert shown[0][0].pixelColor(1, 1) == image.pixelColor(1, 1)
     assert shown[0][1] == pytest.approx(1.25)
     assert player.is_playing
+
+
+def test_a_file_still_loading_is_played_from_the_right_place_once_loaded(player, media):
+    """Qt's player drops a seek made before the file has loaded and plays from the start, so the
+    seek waits for the file."""
+    media.status = QMediaPlayer.MediaStatus.LoadingMedia
+    player.play(1.5)
+    assert [c for c in media.calls if c[0] != "source"] == []
+
+    media.status = QMediaPlayer.MediaStatus.LoadedMedia
+    media.mediaStatusChanged.emit(QMediaPlayer.MediaStatus.LoadedMedia)
+
+    assert media.calls[-2:] == [("position", 1500), ("play",)]
 
 
 def test_frames_after_a_pause_are_ignored(player, media):
@@ -192,12 +209,7 @@ def test_only_local_files_are_played(qapp):
         p.load("http://127.0.0.1:9/clip.mp4")
 
 
-def test_qt_s_player_is_limited_to_local_files(qapp, tmp_path, monkeypatch):
-    monkeypatch.delenv("QT_FFMPEG_PROTOCOL_WHITELIST", raising=False)
-    p = Player()
-    p.load(tmp_path / "missing.mp4")
-    p.play(0.0)
-    try:
-        assert os.environ["QT_FFMPEG_PROTOCOL_WHITELIST"] == "file"
-    finally:
-        p.close()
+def test_qt_s_player_is_limited_to_local_files(qapp):
+    import snipforge.video  # noqa: F401 - sets it before Qt Multimedia loads
+
+    assert os.environ["QT_FFMPEG_PROTOCOL_WHITELIST"] == "file"

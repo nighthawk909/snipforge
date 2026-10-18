@@ -248,6 +248,26 @@ def test_frames_shown_only_briefly_are_merged_not_rushed(qapp):
     assert all(f.delay >= 2 for f in written.frames)
 
 
+def test_a_still_stretch_longer_than_a_gif_delay_holds_is_carried_on(qapp):
+    """A GIF delay holds at most 655.35 s; a frame shown longer carries on in a one-pixel frame
+    that redraws what's already there."""
+    out = io.BytesIO()
+    gif.write_gif(out, [(0.0, noise(1, (32, 24))), (700.0, noise(2, (32, 24)))], stop=701.0)
+
+    written = parse(out.getvalue())
+    assert [f.delay for f in written.frames] == [65535, 4465, 100]
+    assert (written.frames[1].width, written.frames[1].height) == (1, 1)
+    shown = shown_images(io.BytesIO(out.getvalue()))
+    assert shown[0] == shown[1]
+
+
+def test_the_last_frame_is_never_too_brief(qapp):
+    out = io.BytesIO()
+    gif.write_gif(out, [(0.0, noise(1)), (1 / 12, noise(2))], stop=1 / 12 + 0.005, fps=12)
+
+    assert [f.delay for f in parse(out.getvalue()).frames] == [8, 2]
+
+
 def test_dithering_keeps_the_colours_of_a_gradient(qapp):
     """More colours than a GIF holds: Floyd-Steinberg dithering mixes palette colours so that, seen
     from a little way off (averaged over 4x4 pixels), the picture keeps its colours."""

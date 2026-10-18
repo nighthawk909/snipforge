@@ -8,8 +8,12 @@ the file loads without video, or the player reports an error, the file is loaded
 resumes where it was, a couple of times before giving up with `failed`. Trimming and export don't
 need the player, so a video that won't play can still be cut.
 
+Qt's player also drops a seek made before the file has loaded and plays from the start, so playing
+waits for the file to load before seeking.
+
 Qt Multimedia is imported, and the player made, only on the first play. Qt's player is limited to
-local files (QT_FFMPEG_PROTOCOL_WHITELIST=file), as SnipForge's own FFmpeg calls are.
+local files (QT_FFMPEG_PROTOCOL_WHITELIST=file, set when snipforge.video is imported), as
+SnipForge's own FFmpeg calls are.
 """
 from __future__ import annotations
 
@@ -29,7 +33,6 @@ RETRIES = 2
 
 def _qt_backend():
     """A real QMediaPlayer with sound and a video sink; returns (player, sink)."""
-    os.environ["QT_FFMPEG_PROTOCOL_WHITELIST"] = "file"  # read by Qt's FFmpeg back-end as it opens a file
     from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
 
     player = QMediaPlayer()
@@ -53,6 +56,7 @@ class Player(QObject):
         self._retries = retries
         self._tries = 0
         self._playing = False
+        self._waiting_for_load = False
         self._resume_at = 0.0
         self._watchdog = QTimer(self)
         self._watchdog.setSingleShot(True)
@@ -104,9 +108,18 @@ class Player(QObject):
         self._media.setSource(self._url)
 
     def _start(self) -> None:
+        """Seek and play now, or once the file has loaded (Qt drops a seek made before that)."""
+        from PySide6.QtMultimedia import QMediaPlayer
+
+        self._watchdog.start()
+        loading = (QMediaPlayer.MediaStatus.NoMedia, QMediaPlayer.MediaStatus.LoadingMedia)
+        self._waiting_for_load = self._media.mediaStatus() in loading
+        if not self._waiting_for_load:
+            self._seek_and_play()
+
+    def _seek_and_play(self) -> None:
         self._media.setPosition(round(self._resume_at * 1000))
         self._media.play()
-        self._watchdog.start()
 
     def _on_frame(self, frame) -> None:
         if not self._playing or not frame.isValid():
@@ -132,6 +145,9 @@ class Player(QObject):
             self._reload("Qt's player couldn't read the video")
         elif status == QMediaPlayer.MediaStatus.LoadedMedia and not self._media.hasVideo():
             self._reload("Qt's player loaded the video without its picture")
+        elif status == QMediaPlayer.MediaStatus.LoadedMedia and self._waiting_for_load:
+            self._waiting_for_load = False
+            self._seek_and_play()
 
     def _on_error(self, _error, message: str) -> None:
         if self._playing:

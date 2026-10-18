@@ -1,24 +1,18 @@
 """The video editor's timeline: when each frame starts, and which frames a trim keeps.
 
-Frame times come from the file's packets (read_frame_times), not from a frame rate, because
-recordings drop frames when the PC is busy and so don't have an even one. A trim always starts and
-ends on a frame boundary, which is exactly what trim.copy and frames.read cut on, so what the editor
-shows is what the copy and the GIF contain.
+Frame times come from the file (frame_times.read), not from a frame rate, because recordings drop
+frames when the PC is busy and so don't have an even one. A trim always starts and ends on a frame
+boundary, which is exactly what trim.copy and frames.read cut on, so what the editor shows is what
+the copy and the GIF contain.
 
 FrameTimes and TrimRange are values: every change returns a new one.
 """
 from __future__ import annotations
 
 import bisect
-import os
-import statistics
-from ctypes import byref
 from dataclasses import dataclass, replace
 
-from . import ffmpeg
-
 EPSILON = 1e-6
-AV_PKT_FLAG_DISCARD = 0x0004  # frames an edit list hides (before a trimmed copy's start)
 
 
 @dataclass(frozen=True)
@@ -65,6 +59,11 @@ class TrimRange:
     frames: FrameTimes
     first: int
     stop: int
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.first < self.stop <= len(self.frames):
+            raise ValueError(f"A trim keeps at least one of the {len(self.frames)} frames, not {self.first} to "
+                             f"{self.stop}")
 
     @classmethod
     def whole(cls, frames: FrameTimes) -> TrimRange:
@@ -126,45 +125,3 @@ def format_time(seconds: float) -> str:
     hours, minutes = divmod(minutes, 60)
     seconds_text = f"{rest // 100:02d}.{rest % 100:02d}"
     return f"{hours}:{minutes:02d}:{seconds_text}" if hours else f"{minutes}:{seconds_text}"
-
-
-def read_frame_times(path: str | os.PathLike) -> FrameTimes:
-    """When each frame of `path`'s video starts, from its packets (nothing is decoded, so this is
-    quick even for long recordings), counted from its first frame as frames.read does."""
-    ctx = ffmpeg.open_input(path)
-    try:
-        stream = ffmpeg.video_stream(ctx)
-        if stream is None:
-            raise ffmpeg.FFmpegError(f"{os.path.basename(os.fspath(path))} has no video")
-        origin = max(0.0, ffmpeg.seconds(stream.start_time, stream.time_base) or 0.0)
-        stamps = _packet_times(ctx, stream, os.fspath(path))
-    finally:
-        ffmpeg.close_input(ctx)
-    starts = sorted({round(start - origin, 6) for start, _ in stamps if start - origin > -EPSILON})
-    if not starts:
-        raise ffmpeg.FFmpegError(f"{os.path.basename(os.fspath(path))} has no frames")
-    ends = [start + length - origin for start, length in stamps if length > 0]
-    gaps = [b - a for a, b in zip(starts, starts[1:], strict=False)]
-    end = max([*ends, starts[-1] + (statistics.median(gaps) if gaps else 1 / 30)])
-    return FrameTimes(tuple(max(0.0, s) for s in starts), end)
-
-
-def _packet_times(ctx, stream: ffmpeg.AVStream, name: str) -> list[tuple[float, float]]:
-    """(start, length) in seconds for each video packet the file doesn't mark to be skipped."""
-    libs = ffmpeg.libs()
-    fmt, codec_lib = libs["avformat"], libs["avcodec"]
-    base = stream.time_base
-    packet = codec_lib.av_packet_alloc()
-    found = []
-    try:
-        while (code := fmt.av_read_frame(ctx, packet)) >= 0:
-            p = packet.contents
-            stamp = p.pts if p.pts != ffmpeg.AV_NOPTS_VALUE else p.dts
-            if p.stream_index == stream.index and stamp != ffmpeg.AV_NOPTS_VALUE and not p.flags & AV_PKT_FLAG_DISCARD:
-                found.append((stamp * base.num / base.den, max(0, p.duration) * base.num / base.den))
-            codec_lib.av_packet_unref(packet)
-        if code != ffmpeg.AVERROR_EOF:
-            raise ffmpeg.FFmpegError(f"Couldn't read {name}: {ffmpeg.message(code)}")
-    finally:
-        codec_lib.av_packet_free(byref(packet))
-    return found

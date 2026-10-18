@@ -1,10 +1,11 @@
-"""The video editor's timeline maths (snipforge/video/timeline.py): when each frame starts, read
-from the file without decoding, and the trim range, which always starts and ends on a frame."""
+"""The video editor's timeline maths (snipforge/video/timeline.py), with the trim range always
+starting and ending on a frame, and when each frame starts, read from the file without decoding
+(snipforge/video/frame_times.py)."""
 import sys
 
 import pytest
 
-from snipforge.video import clip, ffmpeg, timeline, trim
+from snipforge.video import clip, ffmpeg, frame_times, trim
 from snipforge.video.timeline import FrameTimes, TrimRange, format_time
 
 needs_ffmpeg = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
@@ -106,11 +107,20 @@ def test_times_are_shown_as_minutes_and_seconds(seconds, text):
     assert format_time(seconds) == text
 
 
-@needs_ffmpeg
-def test_frame_times_are_read_from_a_real_file(tmp_path, qapp):
-    path = clip.make_test_clip(tmp_path / "clip.mp4", seconds=1.0, fps=30)
+@pytest.mark.parametrize("first, stop", [(5, 5), (6, 5), (-1, 10), (0, 91)])
+def test_a_range_that_keeps_nothing_or_too_much_is_refused(frames, first, stop):
+    with pytest.raises(ValueError):
+        TrimRange(frames, first, stop)
 
-    times = timeline.read_frame_times(path)
+
+@pytest.fixture(scope="module")
+def one_second(tmp_path_factory, qapp):
+    return clip.make_test_clip(tmp_path_factory.mktemp("times") / "clip.mp4", seconds=1.0, fps=30)
+
+
+@needs_ffmpeg
+def test_frame_times_are_read_from_a_real_file(one_second):
+    times = frame_times.read(one_second)
 
     assert len(times) == 30
     assert times.starts == pytest.approx([n / 30 for n in range(30)], abs=0.001)
@@ -118,13 +128,36 @@ def test_frame_times_are_read_from_a_real_file(tmp_path, qapp):
 
 
 @needs_ffmpeg
-def test_frames_hidden_before_a_trim_s_start_are_left_out(tmp_path, qapp):
+def test_an_mp4_s_frame_times_come_from_its_index_alone(one_second, monkeypatch):
+    """Reading every packet reads the whole file (an hour-long recording, or a OneDrive file not yet
+    downloaded); an MP4's index has every frame's time without that."""
+    def no_packets(*args):
+        raise AssertionError("read the packets")
+
+    monkeypatch.setattr(frame_times, "_packet_times", no_packets)
+
+    assert len(frame_times.read(one_second)) == 30
+
+
+@needs_ffmpeg
+def test_other_containers_are_read_packet_by_packet(tmp_path, qapp):
+    """Qt's Matroska starts at about 1 s; times still count from its first frame."""
+    path = clip.make_test_clip(tmp_path / "clip.mkv", seconds=1.0, fps=30, container="mkv")
+
+    times = frame_times.read(path)
+
+    assert len(times) == 30
+    assert times.starts[0] == 0.0
+    assert times.starts[29] == pytest.approx(29 / 30, abs=0.002)
+
+
+@needs_ffmpeg
+def test_frames_hidden_before_a_trim_s_start_are_left_out(one_second, tmp_path):
     """A trimmed copy carries a few frames before its start (an edit list hides them); they aren't
     part of the video, so they aren't on its timeline."""
-    path = clip.make_test_clip(tmp_path / "clip.mp4", seconds=1.0, fps=30)
-    cut = trim.copy(path, tmp_path / "cut.mp4", start=0.5)
+    cut = trim.copy(one_second, tmp_path / "cut.mp4", start=0.5)
 
-    times = timeline.read_frame_times(cut)
+    times = frame_times.read(cut)
 
     assert len(times) == 15
     assert times.starts[0] == pytest.approx(0.0, abs=0.001)
@@ -137,4 +170,5 @@ def test_a_file_without_video_is_refused(tmp_path):
     path.write_bytes(b"\x00" * 64)
 
     with pytest.raises(ffmpeg.FFmpegError):
-        timeline.read_frame_times(path)
+        frame_times.read(path)
+

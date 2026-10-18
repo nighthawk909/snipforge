@@ -13,9 +13,9 @@ from PIL import Image
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, Signal
 from PySide6.QtGui import QImage, QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
-from snipforge.video import clip, editor_window, ffmpeg, frames, gif
+from snipforge.video import clip, editor_parts, editor_window, ffmpeg, frames, gif
 from snipforge.video.editor_window import VideoEditorWindow, open_video
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
@@ -258,6 +258,69 @@ def test_export_gif_shows_progress_and_can_be_cancelled(video):
         assert not video.with_suffix(".gif").exists()
     finally:
         w.close()
+
+
+def test_closing_while_a_gif_is_being_made_asks_first(video, monkeypatch):
+    started = threading.Event()
+
+    def slow_export(src, dst, start, end, progress=None, cancel=None, **kwargs):
+        started.set()
+        while not cancel():
+            time.sleep(0.01)
+        raise gif.Cancelled
+
+    w = VideoEditorWindow(video, player=FakePlayer(), export_gif=slow_export)
+    w.show()
+    w.gif_button.click()
+    assert started.wait(5)
+
+    assert not w.close()  # the conftest answers No: the GIF carries on
+    assert w.isVisible() and w.cancel_button.isVisible()
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    assert w.close()
+    assert not w._job.is_running
+    assert w.player.calls[-1] == ("close",)
+
+
+def test_long_videos_get_their_thumbnails_one_jump_at_a_time(video, monkeypatch):
+    """Past a length, thumbnails are read by jumping to each place rather than decoding it all."""
+    monkeypatch.setattr(editor_parts, "READ_THROUGH_UP_TO", 0.5)
+    w = VideoEditorWindow(video, player=FakePlayer())
+    w.show()
+    try:
+        wait_until(lambda: len(w.timeline.thumbnails) == editor_parts.THUMBNAILS)
+        for seconds, image in w.timeline.thumbnails.items():
+            assert clip.frame_number(image) == w.timeline.frames.index_at(seconds)
+    finally:
+        w.close()
+
+
+def test_frames_from_before_where_playing_started_are_not_shown(window):
+    click(window.timeline, middle_of(window, 30))
+    wait_until(lambda: shown_number(window) == 30)
+    window.play_button.click()
+
+    window.player.frame_shown.emit(QImage(8, 8, QImage.Format.Format_ARGB32), 0.0)  # Qt started at the beginning
+
+    assert window.timeline.playhead == 30
+    assert shown_number(window) == 30
+
+
+@pytest.mark.parametrize("taken, label, suffix, expected", [
+    ([], "trimmed", ".mp4", "Clip (trimmed).mp4"),
+    (["Clip (trimmed).mp4"], "trimmed", ".mp4", "Clip (trimmed 2).mp4"),
+    ([], None, ".gif", "Clip.gif"),
+    (["Clip.gif", "Clip (2).gif"], None, ".gif", "Clip (3).gif"),
+    ([], None, ".mp4", "Clip (2).mp4"),  # never the original itself
+])
+def test_saved_files_get_names_that_aren_t_taken(tmp_path, taken, label, suffix, expected):
+    original = tmp_path / "Clip.mp4"
+    original.write_bytes(b"")
+    for name in taken:
+        (tmp_path / name).write_bytes(b"")
+
+    assert editor_parts.next_free_name(original, label, suffix) == tmp_path / expected
 
 
 def test_a_failed_save_says_why(video):

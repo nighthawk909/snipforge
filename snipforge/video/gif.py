@@ -18,6 +18,7 @@ the next one.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import os
@@ -35,6 +36,7 @@ log = logging.getLogger(__name__)
 
 MAX_FPS = 50  # GIF times are hundredths of a second, and browsers slow down anything under 2
 MIN_DELAY = 2  # hundredths of a second
+MAX_DELAY = 65535  # hundredths: a GIF delay is 16 bits, so a frame shows for at most 655.35 s at a time
 CHANGE_THRESHOLD = 6  # out of 255: smaller differences are compression noise, lost in the dithering anyway
 DISPOSAL_KEEP = 1  # each frame stays on screen and the next one draws over it
 EPSILON = 1e-6
@@ -66,9 +68,9 @@ def export_gif(src: str | os.PathLike, dst: str | os.PathLike, start: float = 0.
     handle, partial_name = tempfile.mkstemp(dir=dst.parent, prefix=f".{dst.stem}.", suffix=".partial.gif")
     partial = Path(partial_name)
     try:
-        with os.fdopen(handle, "wb") as out:
-            write_gif(out, frames.read(src, fps=fps, width=width, start=start, end=end), start, stop, fps,
-                      progress, cancel)
+        with os.fdopen(handle, "wb") as out, \
+                contextlib.closing(frames.read(src, fps=fps, width=width, start=start, end=end)) as images:
+            write_gif(out, images, start, stop, fps, progress, cancel)  # closing: FFmpeg lets go of src at once
         os.replace(partial, dst)
     finally:
         try:
@@ -185,13 +187,23 @@ class _Writer:
     def finish(self, stop: float) -> int:
         if self.shown is None:
             raise ValueError("There are no frames to write")
-        self._write(max(self.begins + 1, round((stop - self.start) * 100)))
+        self._write(max(self.begins + MIN_DELAY, round((stop - self.start) * 100)))
         self.out.write(b";")  # the GIF trailer
         return self.written
 
     def _write(self, until: int) -> None:
+        """Write the waiting frame, shown until `until`. A wait longer than a GIF delay holds carries
+        on in one-pixel frames that redraw a pixel the frame just drew, so nothing changes."""
         frame = _to_palette(self.shown.crop(self.box))
-        params = {"duration": (until - self.begins) * 10, "disposal": DISPOSAL_KEEP}
+        delays = _delays(until - self.begins)
+        self._emit(frame, delays[0])
+        if len(delays) > 1:
+            pixel = _to_palette(frame.crop((0, 0, 1, 1)).convert("RGB"))
+            for delay in delays[1:]:
+                self._emit(pixel, delay)
+
+    def _emit(self, frame: Image.Image, delay: int) -> None:
+        params = {"duration": delay * 10, "disposal": DISPOSAL_KEEP}
         if self.written == 0:  # the first frame's palette is the GIF's global one
             header, _ = GifImagePlugin.getheader(frame, info={"loop": 0})
             self.out.write(b"".join(header))
@@ -199,3 +211,13 @@ class _Writer:
             params["include_color_table"] = True
         self.out.write(b"".join(GifImagePlugin.getdata(frame, offset=self.box[:2], **params)))
         self.written += 1
+
+
+def _delays(total: int) -> list[int]:
+    """`total` hundredths as GIF delays: none over MAX_DELAY, none under MIN_DELAY."""
+    delays = []
+    while total > MAX_DELAY:
+        part = MAX_DELAY if total - MAX_DELAY >= MIN_DELAY else MAX_DELAY - MIN_DELAY
+        delays.append(part)
+        total -= part
+    return [*delays, total]
