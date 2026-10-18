@@ -407,6 +407,28 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    FFmpeg (the MP4's index, kept in memory until the file is finished, would be about 15 MB an hour
    of it by estimate).
 
+   **Step 9 is done on Windows (2026-10-18).** The platform layer is in place for the Mac's
+   recording phase (`power.py` / `_power_win32.py`; `wasapi.py` and `dxgi.py` are the Windows
+   capture), and the video tests check what holds on any machine, so they pass on the macOS runner
+   too. What's left can only be checked by a person, on real hardware:
+
+   - [ ] **An hour of the real thing:** `python scripts/soak_recording.py --minutes 60 --real-screen
+     --real-sound` on a PC where recording the screen and microphone for an hour is fine.
+     `report.json` should say `"ok": true`, with no frames dropped and memory level.
+   - [ ] **A headset plugged in and unplugged mid-recording** (USB or Bluetooth, with the
+     microphone left on "Windows' default"): the sound carries on from the new device within about
+     a second, and from the next one when it's unplugged.
+   - [ ] **Two monitors with different scaling** (say 100% and 150%): record an area on each. The
+     area's frame, the ready panel, the control bar and the webcam bubble sit where they should,
+     and the video shows exactly the area.
+   - [ ] **A UAC prompt mid-recording:** the recording goes on (the secure desktop can't be
+     recorded, so the video holds the last picture) and picks up again when the prompt is gone.
+   - [ ] **Win+L mid-recording:** paused, with a note; after unlocking, Resume carries on.
+   - [ ] **Sleep and sign-out mid-recording** (close the lid; Start > Sign out): the file is
+     finished first and plays.
+   - [ ] **An HDR display and a rotated (portrait) monitor:** colours look normal, and the picture
+     is upright.
+
 Later, not in Phase 4: following a moving or covered window (Windows.Graphics.Capture), editing the
 pointer effects after recording (by saving the pointer's path separately), noise suppression.
 
