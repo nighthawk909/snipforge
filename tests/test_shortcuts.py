@@ -94,6 +94,9 @@ def test_key_combinations_become_windows_hotkeys(text, expected):
     ("Ctrl+C", "Apps already use"),
     ("Alt+Space", "Apps already use"),
     ("Ctrl+Home", "Apps already use"),
+    ("Ctrl+Shift+R", "SnipForge's editor rotates"),
+    ("Ctrl+Shift+Z", "redo"),
+    ("Ctrl+Shift+V", "paste plain text"),
 ])
 def test_combinations_that_would_get_in_the_way_are_refused(text, problem):
     assert problem in shortcuts.check(text)
@@ -116,12 +119,12 @@ def test_a_shortcut_registers_and_runs_its_action(qapp):
     keys = shortcuts.GlobalShortcuts(api=api)
     got = []
     keys.triggered.connect(got.append)
-    assert keys.set("repeat", "Ctrl+Shift+R") is None
+    assert keys.set("repeat", "Ctrl+Shift+F9") is None
     (hotkey_id,) = api.registered
-    assert api.registered[hotkey_id] == (MOD_CONTROL | MOD_SHIFT, 0x52)
+    assert api.registered[hotkey_id] == (MOD_CONTROL | MOD_SHIFT, 0x78)
     keys._hotkey(hotkey_id)
     keys._hotkey(99999)  # not one of ours
-    assert got == ["repeat"] and keys.bindings() == {"repeat": "Ctrl+Shift+R"}
+    assert got == ["repeat"] and keys.bindings() == {"repeat": "Ctrl+Shift+F9"}
     assert keys.set("repeat", "") is None
     assert api.registered == {} and keys.bindings() == {}
     keys.close()
@@ -193,8 +196,8 @@ def test_settings_set_a_shortcut_of_your_own(settings):
     edit = settings.shortcut_edits["repeat"]
     assert edit.isVisibleTo(settings) and edit.text() == ""
     assert edit.accessibleName() == "Shortcut for Repeat last snip"
-    edit.changed.emit("Ctrl+Shift+R")
-    assert prefs.shortcut("repeat") == "Ctrl+Shift+R" and settings.changed
+    edit.changed.emit("Ctrl+Shift+F9")
+    assert prefs.shortcut("repeat") == "Ctrl+Shift+F9" and settings.changed
     assert settings.shortcut_problem.isHidden()
     edit.changed.emit("")
     assert prefs.shortcut("repeat") == ""
@@ -249,22 +252,22 @@ def test_the_shortcut_editor_records_one_combination(qapp):
 
 
 def test_a_lone_modifier_then_leaving_never_wipes_a_shortcut(qapp):
-    edit = editor("Ctrl+Shift+R")
+    edit = editor("Ctrl+Shift+F9")
     for modifier, mods in ((Qt.Key_Control, Qt.ControlModifier), (Qt.Key_Meta, Qt.MetaModifier),
                            (Qt.Key_Alt, Qt.AltModifier)):
         _focus(edit.edit, True)
         QApplication.sendEvent(edit.edit, QKeyEvent(QEvent.KeyPress, modifier, mods))
         _focus(edit.edit, False)
         edit.edit.editingFinished.emit()  # however Qt finishes it
-        assert edit.got == [] and edit.text() == "Ctrl+Shift+R", modifier
+        assert edit.got == [] and edit.text() == "Ctrl+Shift+F9", modifier
         assert not edit.edit.keySequence().isEmpty()  # the field shows it again too
 
 
 def test_esc_cancels_and_backspace_clears(qapp):
-    edit = editor("Ctrl+Shift+R")
+    edit = editor("Ctrl+Shift+F9")
     _focus(edit.edit, True)
     _key(edit.edit, Qt.Key_Escape)
-    assert edit.got == [] and edit.text() == "Ctrl+Shift+R"
+    assert edit.got == [] and edit.text() == "Ctrl+Shift+F9"
     _focus(edit.edit, True)
     _key(edit.edit, Qt.Key_Backspace)
     assert edit.got == [""] and edit.text() == ""
@@ -294,11 +297,11 @@ def test_shortcuts_step_aside_while_one_is_edited(qapp):
     keys.set("snip", "Ctrl+Shift+X")
     keys.suspend()
     assert api.registered == {}  # pressing Ctrl+Shift+X now records it instead of snipping
-    assert keys.set("repeat", "Ctrl+Shift+R") is None  # checked free, but not taken until editing ends
-    assert api.registered == {} and keys.bindings() == {"snip": "Ctrl+Shift+X", "repeat": "Ctrl+Shift+R"}
+    assert keys.set("repeat", "Ctrl+Shift+F9") is None  # checked free, but not taken until editing ends
+    assert api.registered == {} and keys.bindings() == {"snip": "Ctrl+Shift+X", "repeat": "Ctrl+Shift+F9"}
     assert "already the shortcut for New snip" in keys.set("library", "Ctrl+Shift+X")
     assert keys.resume() == {}
-    assert sorted(api.registered.values()) == [(MOD_CONTROL | MOD_SHIFT, 0x52), (MOD_CONTROL | MOD_SHIFT, 0x58)]
+    assert sorted(api.registered.values()) == [(MOD_CONTROL | MOD_SHIFT, 0x58), (MOD_CONTROL | MOD_SHIFT, 0x78)]
     keys.close()
 
 
@@ -316,12 +319,12 @@ def test_a_combination_taken_while_editing_is_reported(qapp):
 
 def test_settings_suspend_shortcuts_while_a_field_has_the_keyboard(settings):
     keys = settings._shortcuts
-    keys.set("repeat", "Ctrl+Shift+R")
+    keys.set("repeat", "Ctrl+Shift+F9")
     api = keys._api
     _focus(settings.shortcut_edits["snip"].edit, True)
     assert api.registered == {}
     _focus(settings.shortcut_edits["snip"].edit, False)
-    assert list(api.registered.values()) == [(MOD_CONTROL | MOD_SHIFT, 0x52)]
+    assert list(api.registered.values()) == [(MOD_CONTROL | MOD_SHIFT, 0x78)]
 
 
 def test_settings_show_a_saved_shortcut_that_failed_at_start(qapp, tmp_path):
@@ -370,14 +373,14 @@ def test_a_real_shortcut_fires_when_pressed(qapp):
 
 
 def test_tab_and_shift_tab_move_on_instead_of_being_recorded(qapp, monkeypatch):
-    edit = editor("Ctrl+Shift+R")
+    edit = editor("Ctrl+Shift+F9")
     moves = []
     monkeypatch.setattr(edit.edit, "focusPreviousChild", lambda: moves.append("back") or True)
     _focus(edit.edit, True)
     _key(edit.edit, Qt.Key_Backtab, Qt.ShiftModifier)
     _key(edit.edit, Qt.Key_Tab, Qt.ShiftModifier)
     _key(edit.edit, Qt.Key_Tab)  # Qt's own focus chain moves on with Tab
-    assert moves == ["back", "back"] and edit.got == [] and edit.text() == "Ctrl+Shift+R"
+    assert moves == ["back", "back"] and edit.got == [] and edit.text() == "Ctrl+Shift+F9"
 
 
 def test_a_saved_shortcut_that_fails_can_still_be_cleared(qapp, tmp_path):

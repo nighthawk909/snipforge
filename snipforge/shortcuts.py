@@ -44,6 +44,14 @@ _RESERVED = {
     "Alt+F4": "Alt+F4 closes windows",
     "Ctrl+F4": "Ctrl+F4 closes tabs and documents",
     "Ctrl+Alt+Del": "Ctrl+Alt+Delete belongs to Windows",
+    # Ctrl+Shift combinations most apps rely on (a shortcut of your own would take them everywhere,
+    # SnipForge's own editor included).
+    "Ctrl+Shift+R": "SnipForge's editor rotates with Ctrl+Shift+R, and browsers reload with it",
+    "Ctrl+Shift+S": "Apps use Ctrl+Shift+S for Save as",
+    "Ctrl+Shift+T": "Browsers reopen closed tabs with Ctrl+Shift+T",
+    "Ctrl+Shift+Z": "Apps use Ctrl+Shift+Z to redo",
+    "Ctrl+Shift+N": "Apps use Ctrl+Shift+N for a new window or folder",
+    "Ctrl+Shift+V": "Apps use Ctrl+Shift+V to paste plain text",
 }
 KEY_PROBLEM = ("Use a letter, a number, a function key (F1-F24), Print Screen, Space, Insert, Delete, "
                "Home, End, Page Up, Page Down, an arrow or Pause.")
