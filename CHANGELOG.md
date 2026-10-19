@@ -3,6 +3,13 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.16.1](https://github.com/nighthawk909/snipforge/compare/v0.16.0...v0.16.1) (2026-10-19)
+
+
+### Documentation
+
+* 0.16.0 on the roadmap, video editor part two in progress, and what 1.0 needs ([#118](https://github.com/nighthawk909/snipforge/issues/118)) ([949956d](https://github.com/nighthawk909/snipforge/commit/949956de70c757da7f29db17ffb9d93e6881903b))
+
 ## [0.16.0](https://github.com/nighthawk909/snipforge/compare/v0.15.0...v0.16.0) (2026-10-18)
 
 
