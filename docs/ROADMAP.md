@@ -64,7 +64,7 @@ Software Center) and the SnagIt features people miss most. Built in this order:
 - [x] Combine images: side by side, a grid, or numbered steps with captions (#109)
 - [x] Edit text in a screenshot, and Smart Move (drag part of a snip somewhere else) (#111)
 - [x] Accessibility: full keyboard use, screen-reader names, Windows high-contrast mode (#114)
-- [ ] Video editor, part two: cut out the middle, add a title or caption
+- [ ] Video editor, part two: cut out the middle, add a title or caption (in progress: draft #117)
 - [ ] Enterprise packaging: an MSI or MSIX for Intune and Software Center, and an ADMX policy
   template for the IT settings
 
@@ -84,7 +84,9 @@ Software Center) and the SnagIt features people miss most. Built in this order:
 - [x] 0.14.0: start-up in about half the time, a faster Library, a smaller download, Combine
   images (#105)
 - [x] 0.15.0: Edit text in a screenshot, and Smart Move (#112)
-- [ ] 1.0: when Phase 4's hand checks and the fix-it backlog are done
+- [x] 0.16.0: accessibility: keyboard use, screen-reader names, Windows contrast themes (#115)
+- [ ] 1.0: when Phase 5 is done and the maintainer's 1.0 checklist passes: Phase 4's recording
+  checks on real hardware, and a walkthrough of every feature (anything found goes to fix-it)
 
 ## Fix-it: feedback from testing
 Josh tests the installed app and reports what's broken or could be better; the fix-it session
