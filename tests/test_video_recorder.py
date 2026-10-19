@@ -12,6 +12,7 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter
 
 from snipforge.video import clip, ffmpeg, frames
+from snipforge.video import frame_times as stamps
 from snipforge.video import recorder as recorder_module
 from snipforge.video.encoder import Encoder
 from snipforge.video.recorder import START_DELAY, Recorder, RecordingError, Settings
@@ -199,6 +200,29 @@ def frame_times(path):
     return [(clip.frame_number(image), t * FPS) for t, image in frames.read(path)]
 
 
+def track_lengths(path) -> dict:
+    """How long each part of the file is: the container (ffprobe's figure, the longest track,
+    reordering delays and all), the video's own frames (where the last one ends), and the sound."""
+    info = ffmpeg.probe(path)
+    video, audio, times = info.first("video"), info.first("audio"), stamps.read(path)
+    return {"file": info.duration, "frames_end": times.end, "frames": len(times),
+            "video_stream": video.duration, "video_start": video.start,
+            "audio_stream": audio.duration if audio else None, "audio_start": audio.start if audio else None}
+
+
+def assert_lengths(path, recorded: float) -> None:
+    """Nothing in the file runs past where Stop was pressed (issue #107): the last frame ends within
+    two frames of it (one can slip in as it stops; a busy machine may have lost the last few, so it
+    can end earlier), and the sound is as long as the recording (AAC pads its last packet). The
+    container's figure is the loosest, since it also counts reordering delays; every number is in
+    the message, to tell which part ran long when one does."""
+    got = track_lengths(path)
+    assert got["frames_end"] <= recorded + 2 / FPS + STAMP_SLACK, got
+    if got["audio_stream"] is not None:
+        assert got["audio_stream"] == pytest.approx(recorded, abs=0.1), got
+    assert got["file"] == pytest.approx(recorded, abs=FILE_LENGTH_SLACK), got
+
+
 def assert_in_time(shown, result):
     """Each frame shows the number due when it was made, so it should be at its own place in the
     video, never before it. One can be up to LATE_FRAMES whole frames late before the thread skips ahead, and
@@ -225,7 +249,7 @@ def test_a_recording_has_its_picture_and_both_sounds_at_the_right_times(tmp_path
     assert earliest <= result.duration <= latest  # it ends where stop was asked for
     _media, asked, _after = outcome["at"]["stop"]
     assert result.duration >= asked - outcome["recording_at"] - START_DELAY  # from when it began, the warm-up left out
-    assert info.duration == pytest.approx(result.duration, abs=FILE_LENGTH_SLACK)
+    assert_lengths(result.path, result.duration)
     assert_in_time(frame_times(result.path), result)
     # An overloaded machine is rightly told so; nothing else may be wrong.
     assert [w for w in warnings if not w.startswith(BUSY)] == [] and recorder.state == "finished"
@@ -304,7 +328,7 @@ def test_a_pause_is_left_out_of_the_recording(tmp_path, qapp):
     _m, resume_asked, resume_done = outcome["at"]["resume"]
     _m, stop_asked, stop_done = outcome["at"]["stop"]
     assert pause_low + stop_asked - resume_done <= result.duration <= pause_high + stop_done - resume_asked
-    assert ffmpeg.probe(result.path).duration == pytest.approx(result.duration, abs=FILE_LENGTH_SLACK)
+    assert_lengths(result.path, result.duration)
     assert_in_time(frame_times(result.path), result)  # no jump where the pause was
 
 
