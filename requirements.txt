@@ -3,7 +3,7 @@
 # is Mac only (docs/MAC-PLAN.md).
 PySide6-Essentials==6.12.0
 PySide6-Addons==6.12.0  # QtMultimedia, for screen recording
-pillow==12.3.0  # writes GIFs in the video editor (only its core and GIF writer are bundled)
+pillow==13.0.0  # writes GIFs in the video editor (only its core and GIF writer are bundled)
 pywin32==312; sys_platform == "win32"
 winrt-runtime==3.2.1; sys_platform == "win32"
 winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"
