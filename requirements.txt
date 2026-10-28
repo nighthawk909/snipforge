@@ -3,15 +3,15 @@
 # is Mac only (docs/MAC-PLAN.md).
 PySide6-Essentials==6.12.0
 PySide6-Addons==6.12.0  # QtMultimedia, for screen recording
-pillow==12.3.0  # writes GIFs in the video editor (only its core and GIF writer are bundled)
+pillow==13.0.0  # writes GIFs in the video editor (only its core and GIF writer are bundled)
 pywin32==312; sys_platform == "win32"
-winrt-runtime==3.2.1; sys_platform == "win32"
-winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"
-winrt-Windows.Graphics.Imaging==3.2.1; sys_platform == "win32"
-winrt-Windows.Storage.Streams==3.2.1; sys_platform == "win32"
-winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
-winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
-winrt-Windows.Globalization==3.2.1; sys_platform == "win32"
+winrt-runtime==4.0.3; sys_platform == "win32"
+winrt-Windows.Media.Ocr==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Storage.Streams==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Foundation==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==4!10.0.28000.2705; sys_platform == "win32"
+winrt-Windows.Globalization==4!10.0.28000.2705; sys_platform == "win32"
 pyobjc-core==12.2.2; sys_platform == "darwin"
 pyobjc-framework-Cocoa==12.2.2; sys_platform == "darwin"  # needed by Quartz
 pyobjc-framework-Quartz==12.2.2; sys_platform == "darwin"  # Screen Recording permission check
