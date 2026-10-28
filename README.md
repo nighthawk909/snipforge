@@ -60,17 +60,17 @@ the snip, with a magnified view of the pixels under the pointer. Everything you 
 | Tool | Key | |
 |---|---|---|
 | Select / move | V | click anything to select it with any tool; drag selected items to move them |
-| Arrow, line | A, L | Shift snaps to 45° |
-| Rectangle, ellipse | R, E | outline or filled, solid or dashed |
-| Text | T | plain or on a colored background |
-| Callout | K | text in a bubble, box, ellipse or pill, with a pointer you can aim |
-| Stamp | I | check, cross, warning, info, star, thumbs up, mouse pointer and more, or **App name and date**: text saying which app or window the snip came from and when |
-| Step number | N | 1, 2, 3… badges for how-to guides |
-| Pen, highlighter | P, H | |
-| Blur, pixelate | B, X | hide sensitive details |
+| Arrow, line | A, L | Shift snaps to 45°; heads at the end, the start or both, filled or open; **Curved** adds a bend you drag |
+| Rectangle, ellipse | R, E | outline or filled, solid or dashed; the rectangle can be a box with corners you round, a diamond, a triangle or a star |
+| Text | T | plain or on a colored background; any font, bold, italic, underline, left/center/right, and an **Outline** so it reads on any background |
+| Callout | K | text in a bubble, box, ellipse or pill, with a pointer you can aim; the same fonts and alignment |
+| Stamp | I | check, cross, warning, info, star, thumbs up, mouse pointer and more, **your own pictures** (Add your own…), or **App name and date**: text saying which app or window the snip came from and when |
+| Step number | N | 1 2 3, A B C or I II III badges, in a circle, square or pill, starting from any number |
+| Pen, highlighter | P, H | the highlighter draws a stroke, or a translucent **box** over a whole area |
+| Blur, pixelate | B, X | hide sensitive details, with square or rounded corners |
 | Smart erase | W | remove something: the area is filled in from what's around it |
 | Smart Move | G | drag out part of the snip, then put it anywhere: where it was is filled in from around it |
-| Spotlight | S | dim everything except one area |
+| Spotlight | S | dim everything except one area: a box or an ellipse, as dark as you like |
 | Magnify | M | a circle or box lens showing part of the snip enlarged; move and resize the lens and what it shows |
 | Crop | C | drag edges in to cut, back out to restore; Enter applies |
 | Cut out | U | drag across a vertical or horizontal strip to take it out and join the rest, with a straight or torn seam |

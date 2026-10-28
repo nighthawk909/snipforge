@@ -18,7 +18,7 @@ CURSORS = {
     "tr": Qt.SizeBDiagCursor, "bl": Qt.SizeBDiagCursor,
     "t": Qt.SizeVerCursor, "b": Qt.SizeVerCursor,
     "l": Qt.SizeHorCursor, "r": Qt.SizeHorCursor,
-    "p1": Qt.SizeAllCursor, "p2": Qt.SizeAllCursor, "tail": Qt.SizeAllCursor,
+    "p1": Qt.SizeAllCursor, "p2": Qt.SizeAllCursor, "tail": Qt.SizeAllCursor, "control": Qt.SizeAllCursor,
     # a magnifier's source area
     "s_tl": Qt.SizeFDiagCursor, "s_br": Qt.SizeFDiagCursor, "s_tr": Qt.SizeBDiagCursor, "s_bl": Qt.SizeBDiagCursor,
     "source": Qt.SizeAllCursor,
@@ -96,7 +96,7 @@ class HandleOverlay(QGraphicsItem):
         tint = QColor(accent)
         tint.setAlpha(28)
         for item in self._selected:
-            if item.scene() is None or len(item.handle_points()) == 2:  # lines show just their end handles
+            if item.scene() is None or getattr(item, "kind", "") in ("line", "arrow"):  # lines: just their handles
                 continue
             for rect in _outline_rects(item):
                 p.fillRect(rect, tint)
@@ -112,8 +112,8 @@ class HandleOverlay(QGraphicsItem):
         size = HANDLE_PX / scale
         for name, pt in target.handle_points().items():
             p.setPen(QPen(accent, 1.5 / scale))
-            p.setBrush(TAIL if name == "tail" else QColor("#ffffff"))
-            if name == "tail":
+            p.setBrush(TAIL if name in ("tail", "control") else QColor("#ffffff"))
+            if name in ("tail", "control"):  # the dots you drag to aim a pointer or bend a curve
                 p.drawEllipse(QRectF(pt.x() - size * 0.65, pt.y() - size * 0.65, size * 1.3, size * 1.3))
             else:
                 p.drawRect(QRectF(pt.x() - size / 2, pt.y() - size / 2, size, size))

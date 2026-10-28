@@ -245,7 +245,8 @@ class MagnifyItem(BoxItem):
         # Every redaction is in the key, not just those over the source: a blur draws from the erases
         # under it, which may lie just outside. There are only ever a few.
         key = (area.getRect(), self._base.cacheKey(),
-               tuple((id(i), i.sceneBoundingRect().getRect(), i.zValue(), i.kind, i.style.width) for i in every))
+               tuple((id(i), i.sceneBoundingRect().getRect(), i.zValue(), i.kind, i.style.width, i.style.rounded)
+                     for i in every))
         if self._picture is None or self._picture[0] != key:
             picture = self._base.copy(area).convertToFormat(QImage.Format_ARGB32_Premultiplied)
             painter = QPainter(picture)

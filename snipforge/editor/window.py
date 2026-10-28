@@ -130,6 +130,7 @@ class EditorWindow(QMainWindow):
         self.canvas.undo_stack.canRedoChanged.connect(self.commands.redo_button.setEnabled)
         self.panel.changed.connect(lambda changes: self.canvas.apply_style(**changes))
         self.panel.crop_action.connect(self._crop_action)
+        self.panel.next_step.connect(self.canvas.set_next_step_number)
         self.panel.image_action.connect(self.image_action)
         self.panel.pick_color.connect(self._toggle_picking)
         self.panel.edges_changed.connect(self.canvas.set_edges)
@@ -514,7 +515,7 @@ class EditorWindow(QMainWindow):
 
     def _refresh_props(self) -> None:
         kind, style = self.canvas.style_target()
-        self.panel.load(kind, style, bool(self.canvas.selected_annotations()))
+        self.panel.load(kind, style, bool(self.canvas.selected_annotations()), self.canvas.next_step_number())
         self.panel.load_edges(self.canvas.edges())
         self.panel.load_cutout(self.canvas.cutout_options)
 

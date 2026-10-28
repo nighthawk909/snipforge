@@ -73,7 +73,7 @@ A tool palette that's yours, tools with variants, and a properties panel that do
 SnagIt's does. Built in this order:
 - [x] A tool palette that's yours: Favorites, hide tools, your order and groups, labels, the rail on
   either side, and Ctrl+K to find any tool or action by name
-- [ ] Tool variants: arrow heads and curves, more shapes, step number styles, highlight boxes, text
+- [x] Tool variants: arrow heads and curves, more shapes, step number styles, highlight boxes, text
   formatting, your own stamps, blur strength, spotlight shape
 - [ ] Properties panel 3.0: opacity and rotation for everything, a hex color box, recent and custom
   colors, "set as this tool's default", a mini toolbar over the selection, align and distribute,

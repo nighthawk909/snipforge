@@ -30,12 +30,14 @@ from .factory import create_item
 from .handles import HandleOverlay, OwnRubberBand
 from .image_ops import ImageGeometry
 from .items import Annotation, EffectItem
-from .style import DEFAULT_TOOL_STYLES, Style
+from .style import DEFAULT_TOOL_STYLES, VERSION_3_KINDS, Style, needs_version_3
 from .text_items import EditableText, TextItem
 
 DUPLICATE_OFFSET = 16.0
-DOCUMENT_VERSION = 2  # documents from newer versions are opened read-only (see load_document)
+DOCUMENT_VERSION = 3  # documents from newer versions are opened read-only (see load_document)
 # 2: moved pieces (Smart Move) and regular-weight text (Edit text), which version 1 can't show
+# 3: tool variants (style.py: arrow heads and curves, shapes, step styles, highlight boxes, text formatting,
+#    rounded redactions, spotlight dimming), which version 2 draws plain
 
 
 class UnsupportedDocument(ValueError):
@@ -45,13 +47,16 @@ class UnsupportedDocument(ValueError):
 def document_version(states: list[dict]) -> int:
     """The oldest document version that shows these items right: older SnipForges still open
     every snip that doesn't need a newer one."""
+    version = 1
     for state in states:
         if not isinstance(state, dict):  # kept unread from a damaged document
             continue
         style = state.get("style")
+        if state.get("kind") in VERSION_3_KINDS or needs_version_3(style, state.get("kind")):
+            return 3
         if state.get("kind") == "piece" or (isinstance(style, dict) and style.get("bold") is False):
-            return 2
-    return 1
+            version = 2
+    return version
 
 
 def _shows_snip(item) -> bool:

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from functools import cache
 
-from PySide6.QtCore import QByteArray, QRectF, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtCore import QByteArray, QRectF, QSizeF, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
+from . import custom_stamps
 from .items import BoxItem
 
 DEFAULT_SIZE = 56.0
@@ -59,14 +60,46 @@ def renderer(name: str) -> QSvgRenderer:
     return QSvgRenderer(QByteArray(_svg(name)))
 
 
-@cache
 def stamp_icon(name: str, size: int = 40) -> QIcon:
+    """A built-in stamp's icon (cached), or your own stamp's picture (read each time, since it can change)."""
+    if custom_stamps.is_custom(name):
+        pix = QPixmap(size, size)
+        pix.fill(Qt.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        draw_stamp(p, name, QRectF(0, 0, size, size))
+        p.end()
+        return QIcon(pix)
+    return _built_in_icon(name, size)
+
+
+@cache
+def _built_in_icon(name: str, size: int) -> QIcon:
     pix = QPixmap(size, size)
     pix.fill(Qt.transparent)
     p = QPainter(pix)
     renderer(name).render(p, QRectF(0, 0, size, size))
     p.end()
     return QIcon(pix)
+
+
+def draw_stamp(p: QPainter, name: str, rect: QRectF) -> None:
+    """Draw the stamp `name` to fill `rect`: a built-in one, your own picture fitted inside it, or
+    an empty dashed frame when your picture's file is gone."""
+    if not custom_stamps.is_custom(name):
+        renderer(name).render(p, rect)
+        return
+    picture = custom_stamps.image(name)
+    if picture is None:
+        p.setPen(QPen(QColor("#8e8e93"), 1.5, Qt.DashLine))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(rect.adjusted(1, 1, -1, -1))
+        return
+    fitted = QRectF(rect)
+    scale = min(rect.width() / max(1, picture.width()), rect.height() / max(1, picture.height()))
+    fitted.setSize(QSizeF(picture.width() * scale, picture.height() * scale))
+    fitted.moveCenter(rect.center())
+    p.drawImage(fitted, picture)
 
 
 class StampItem(BoxItem):
@@ -79,7 +112,8 @@ class StampItem(BoxItem):
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         p.setRenderHint(QPainter.Antialiasing)
-        renderer(self.style.stamp).render(p, self._rect)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        draw_stamp(p, self.style.stamp, self._rect)
 
     def is_degenerate(self) -> bool:
         return self._rect.width() < 8
