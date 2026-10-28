@@ -18,7 +18,7 @@ from .. import theme
 from . import saved_styles
 from .items import readable_on
 from .quick_styles import QUICK_STYLES, QuickStyle, changes_for
-from .style import COLOR_NAMES, STRENGTH_KINDS, USUAL_OPACITY, Style
+from .style import COLOR_NAMES, STRENGTH_KINDS, USUAL_CORNER, USUAL_DIM, USUAL_OPACITY, Style
 from .style_sample import paint_sample
 
 COLUMNS = 4
@@ -94,12 +94,36 @@ def describe(kind: str, style: Style) -> str:
         parts.append(COLOR_NAMES.get(style.color.lower(), style.color.upper()))
     if "stamp" in found:
         parts.append(style.stamp.replace("_", " "))
-    if "shape" in found:
-        parts.append({"rounded": "rounded box", "rect": "box", "ellipse": "ellipse", "pill": "pill"}[style.shape])
+    if "heads" in found and style.heads != "end":
+        parts.append("two heads" if style.heads == "both" else "head at the start")
+    if found.get("open_head"):
+        parts.append("open head")
+    if found.get("curve"):
+        parts.append("curved")
+    if "shape" in found and not (kind in ("rect", "spotlight") and style.shape == "rounded"):
+        parts.append(SHAPE_WORDS.get(style.shape, style.shape))
+    if "corner" in found and style.corner != USUAL_CORNER:
+        parts.append(f"corners {style.corner}")
+    if "numbering" in found and style.numbering != "digits":
+        parts.append({"letters": "A B C", "roman": "I II III"}[style.numbering])
+    if "badge" in found and style.badge != "circle":
+        parts.append(style.badge)
+    if found.get("box"):
+        parts.append("box")
     if "width" in found:
         parts.append(f"strength {round(style.width)}" if kind in STRENGTH_KINDS else f"{round(style.width)} px")
     if "font_size" in found:
         parts.append(f"{style.font_size} pt")
+    if found.get("font_family"):
+        parts.append(style.font_family)
+    for key, word in (("italic", "italic"), ("underline", "underlined"), ("outline", "outlined"),
+                      ("rounded", "rounded")):
+        if found.get(key):
+            parts.append(word)
+    if "align" in found and style.align != "left":
+        parts.append(f"{style.align} aligned" if style.align == "right" else "centered")
+    if "dim" in found and style.dim != USUAL_DIM:
+        parts.append(f"dim {style.dim}%")
     if found.get("fill"):
         fill = COLOR_NAMES.get(style.fill_color.lower(), style.fill_color.upper()) if style.fill_color else ""
         opacity = f"{style.fill_opacity}%" if style.fill_opacity != USUAL_OPACITY else ""
@@ -109,6 +133,10 @@ def describe(kind: str, style: Style) -> str:
     if found.get("shadow"):
         parts.append("shadow")
     return ", ".join(parts) or "Saved style"
+
+
+SHAPE_WORDS = {"rounded": "rounded box", "rect": "box", "ellipse": "ellipse", "pill": "pill", "diamond": "diamond",
+               "triangle": "triangle", "star": "star"}
 
 
 class SavedStyleTile(_Tile):

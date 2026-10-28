@@ -10,11 +10,21 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPainterPathStroker, QPen, QPolygonF
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFontMetricsF,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPainterPathStroker,
+    QPen,
+    QPolygonF,
+)
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsItem
 
 from ..fonts import ui_font
-from .style import USUAL_OPACITY, Style, fill_opacity, fill_qcolor
+from .style import USUAL_CORNER, USUAL_DIM, USUAL_OPACITY, Style, fill_opacity, fill_qcolor
 
 FLAGS = QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable
 HIT_SLOP = 8.0
@@ -295,13 +305,46 @@ class _OutlineShape(BoxItem):
         p.drawPath(self._outline())
 
 
+def shape_path(shape: str, r: QRectF, corner: float = 3.0) -> QPainterPath:
+    """The outline of a rectangle tool's shape in `r`: a box with `corner` rounding, a diamond, a
+    triangle (point up) or a five-point star. Anything else is the rounded box."""
+    path = QPainterPath()
+    if shape == "diamond":
+        c = r.center()
+        path.addPolygon(QPolygonF([QPointF(c.x(), r.top()), QPointF(r.right(), c.y()),
+                                   QPointF(c.x(), r.bottom()), QPointF(r.left(), c.y())]))
+        path.closeSubpath()
+    elif shape == "triangle":
+        path.addPolygon(QPolygonF([QPointF(r.center().x(), r.top()), r.bottomRight(), r.bottomLeft()]))
+        path.closeSubpath()
+    elif shape == "star":
+        c, outer = r.center(), (r.width() / 2, r.height() / 2)
+        points = []
+        for n in range(10):
+            angle = -math.pi / 2 + n * math.pi / 5
+            scale = 1.0 if n % 2 == 0 else 0.4
+            points.append(QPointF(c.x() + outer[0] * scale * math.cos(angle),
+                                  c.y() + outer[1] * scale * math.sin(angle)))
+        path.addPolygon(QPolygonF(points))
+        path.closeSubpath()
+    else:
+        radius = min(corner, r.width() / 2, r.height() / 2)
+        path.addRoundedRect(r, radius, radius)
+    return path
+
+
 class RectItem(_OutlineShape):
+    """The Rectangle tool: a box with rounded or square corners, or a diamond, triangle or star."""
+
     kind = "rect"
 
+    def _corner(self) -> float:
+        if self.style.corner != USUAL_CORNER:
+            return float(self.style.corner)
+        return 0.0 if self.style.shape == "rect" else 3.0  # as always: a small rounding
+
     def _outline(self) -> QPainterPath:
-        path = QPainterPath()
-        path.addRoundedRect(self._rect, 3, 3)
-        return path
+        return shape_path(self.style.shape, self._rect, self._corner())
 
 
 class EllipseItem(_OutlineShape):
@@ -374,10 +417,22 @@ class EffectItem(HidesContent, BoxItem):
     def _margin(self) -> float:
         return 1.0
 
+    ROUNDING = 10.0  # the corners, with Rounded corners on
+
+    def shape(self) -> QPainterPath:
+        if not self.style.rounded:
+            return super().shape()
+        path = QPainterPath()
+        path.addRoundedRect(self._rect, self.ROUNDING, self.ROUNDING)
+        return path
+
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         area = self.scene_rect().toAlignedRect().intersected(self._base.rect())
         if area.isEmpty():
             return
+        if self.style.rounded:
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setClipPath(self.shape())
         erases = self._erases_under(area)
         key = (area.x(), area.y(), area.width(), area.height(), self.mode, self.style.width,
                tuple((e.area().getRect(), e.zValue()) for e in erases))
@@ -435,21 +490,37 @@ class SpotlightItem(BoxItem):
     def boundingRect(self) -> QRectF:
         return self.mapRectFromScene(self._image_rect).united(self._rect).adjusted(-2, -2, 2, 2)
 
+    USUAL_ALPHA = 150
+
+    def dim_alpha(self) -> int:
+        """How dark the rest of the snip is, 0 to 255."""
+        return self.USUAL_ALPHA if self.style.dim == USUAL_DIM else round(self.style.dim * 255 / 100)
+
+    def lit_path(self) -> QPainterPath:
+        """The area that stays lit, in item coordinates: a box (rounded a little, or a lot) or an ellipse."""
+        hole = QPainterPath()
+        if self.style.shape == "ellipse":
+            hole.addEllipse(self._rect)
+        else:
+            radius = 14 if self.style.rounded else 4
+            hole.addRoundedRect(self._rect, radius, radius)
+        return hole
+
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         outer = QPainterPath()
         outer.addRect(self.mapRectFromScene(self._image_rect))
-        hole = QPainterPath()
-        hole.addRoundedRect(self._rect, 4, 4)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(0, 0, 0, 150))
-        p.drawPath(outer.subtracted(hole))
+        p.setBrush(QColor(0, 0, 0, self.dim_alpha()))
+        p.drawPath(outer.subtracted(self.lit_path()))
 
 
 # ---------------------------------------------------------------------------
 # Line-shaped items
 # ---------------------------------------------------------------------------
 class LineItem(Annotation, QGraphicsItem):
+    """A straight line, or a curve (style.curve) with a bend you drag by its handle."""
+
     kind = "line"
 
     def __init__(self, style: Style, start: QPointF | None = None) -> None:
@@ -457,6 +528,7 @@ class LineItem(Annotation, QGraphicsItem):
         start = start or QPointF()
         self._p1 = QPointF(start)
         self._p2 = QPointF(start)
+        self._control: QPointF | None = None  # the bend, once dragged; None: halfway, so it looks straight
         self.init_annotation(style)
 
     def set_points(self, p1: QPointF, p2: QPointF) -> None:
@@ -474,33 +546,58 @@ class LineItem(Annotation, QGraphicsItem):
     def is_degenerate(self) -> bool:
         return self.length() < 4
 
+    def set_style(self, style: Style) -> None:
+        if not style.curve:
+            self._control = None  # straight again: the bend is forgotten
+        super().set_style(style)
+
+    def control(self) -> QPointF:
+        """The bend, in item coordinates (halfway along until it's dragged)."""
+        return QPointF(self._control) if self._control is not None else (self._p1 + self._p2) / 2
+
     def _geometry(self) -> dict:
-        return {"p1": [self._p1.x(), self._p1.y()], "p2": [self._p2.x(), self._p2.y()]}
+        geometry = {"p1": [self._p1.x(), self._p1.y()], "p2": [self._p2.x(), self._p2.y()]}
+        if self.style.curve and self._control is not None:
+            geometry["control"] = [self._control.x(), self._control.y()]
+        return geometry
 
     def _set_geometry(self, state: dict) -> None:
         self._p1, self._p2 = QPointF(*state["p1"]), QPointF(*state["p2"])
+        control = state.get("control")
+        self._control = QPointF(*control) if self.style.curve and control is not None else None
 
     def _extra(self) -> float:
         return self.style.width / 2 + HIT_SLOP + 2  # bounds must contain the hit area
 
     def boundingRect(self) -> QRectF:
         m = self._extra()
-        return QRectF(self._p1, self._p2).normalized().adjusted(-m, -m, m, m)
+        return self._path().boundingRect().adjusted(-m, -m, m, m)
 
     def _path(self) -> QPainterPath:
+        """From p1 to p2: a line, or a curve through the bend."""
         path = QPainterPath(self._p1)
-        path.lineTo(self._p2)
+        if self.style.curve:
+            path.quadTo(self.control(), self._p2)
+        else:
+            path.lineTo(self._p2)
         return path
 
     def shape(self) -> QPainterPath:
         return stroke_band(self._path(), self.style.width + HIT_SLOP * 2)
 
     def handle_points(self) -> dict[str, QPointF]:
-        return {"p1": self.mapToScene(self._p1), "p2": self.mapToScene(self._p2)}
+        points = {"p1": self.mapToScene(self._p1), "p2": self.mapToScene(self._p2)}
+        if self.style.curve:
+            points["control"] = self.mapToScene(self.control())
+        return points
 
     def drag_handle(self, name: str, scene_pos: QPointF, shift: bool) -> None:
         point = self.mapFromScene(scene_pos)
-        if name == "p1":
+        if name == "control":
+            self.prepareGeometryChange()
+            self._control = point
+            self.update()
+        elif name == "p1":
             self.set_points(constrain_45(self._p2, point) if shift else point, self._p2)
         else:
             self.set_points(self._p1, constrain_45(self._p1, point) if shift else point)
@@ -508,10 +605,13 @@ class LineItem(Annotation, QGraphicsItem):
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(style_pen(self.style))
-        p.drawLine(self._p1, self._p2)
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(self._path())
 
 
 class ArrowItem(LineItem):
+    """A line with a head at its end, its start or both, filled or an open V; straight or curved."""
+
     kind = "arrow"
 
     def _head(self) -> float:
@@ -520,21 +620,40 @@ class ArrowItem(LineItem):
     def _extra(self) -> float:
         return self._head() + self.style.width + HIT_SLOP
 
+    def _ends(self) -> list[tuple[QPointF, float]]:
+        """Each head's tip and the angle it points in (along the path, outwards)."""
+        control = self.control() if self.style.curve else None
+        ends = []
+        if self.style.heads in ("end", "both"):
+            towards = control if control is not None else self._p1
+            ends.append((self._p2, math.atan2(self._p2.y() - towards.y(), self._p2.x() - towards.x())))
+        if self.style.heads in ("start", "both"):
+            towards = control if control is not None else self._p2
+            ends.append((self._p1, math.atan2(self._p1.y() - towards.y(), self._p1.x() - towards.x())))
+        return ends
+
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         color = QColor(self.style.color)
-        angle = math.atan2(self._p2.y() - self._p1.y(), self._p2.x() - self._p1.x())
         head = min(self._head(), self.length() * 0.6)
         wing = math.pi / 7
-        tip = self._p2
-        left = QPointF(tip.x() - head * math.cos(angle - wing), tip.y() - head * math.sin(angle - wing))
-        right = QPointF(tip.x() - head * math.cos(angle + wing), tip.y() - head * math.sin(angle + wing))
-        neck = QPointF(tip.x() - head * 0.75 * math.cos(angle), tip.y() - head * 0.75 * math.sin(angle))
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(style_pen(self.style))
-        p.drawLine(self._p1, neck)
-        p.setPen(make_pen(color, 1.5))
-        p.setBrush(QBrush(color))
-        p.drawPolygon(QPolygonF([tip, left, neck, right]))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(self._path())
+        for tip, angle in self._ends():
+            left = QPointF(tip.x() - head * math.cos(angle - wing), tip.y() - head * math.sin(angle - wing))
+            right = QPointF(tip.x() - head * math.cos(angle + wing), tip.y() - head * math.sin(angle + wing))
+            if self.style.open_head:
+                p.setPen(make_pen(color, self.style.width))
+                p.drawLine(left, tip)
+                p.drawLine(right, tip)
+                continue
+            neck = QPointF(tip.x() - head * 0.75 * math.cos(angle), tip.y() - head * 0.75 * math.sin(angle))
+            p.setPen(make_pen(color, 1.5))
+            p.setBrush(QBrush(color))
+            p.drawPolygon(QPolygonF([tip, left, neck, right]))
+            p.setPen(style_pen(self.style))
+            p.setBrush(Qt.NoBrush)
 
 
 # ---------------------------------------------------------------------------
@@ -605,10 +724,60 @@ class StrokeItem(Annotation, QGraphicsItem):
         p.drawPath(self._path())
 
 
+class HighlightBoxItem(BoxItem):
+    """The highlighter's other form: a translucent box that multiplies like a marker over a whole area."""
+
+    kind = "highlight_box"
+    supports_shadow = False
+    keep_square_with_shift = False
+
+    def __init__(self, style: Style) -> None:
+        super().__init__(style)
+        self.setZValue(-100)  # under other markup, like highlighter strokes
+
+    def _margin(self) -> float:
+        return 2.0
+
+    def paint(self, p: QPainter, _opt, _widget=None) -> None:
+        color = QColor(self.style.color)
+        color.setAlpha(170)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setCompositionMode(QPainter.CompositionMode_Multiply)
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        p.drawRoundedRect(self._rect, 2, 2)
+
+
 # ---------------------------------------------------------------------------
 # Step badge
 # ---------------------------------------------------------------------------
+def roman(n: int) -> str:
+    """1 → I, 4 → IV, 14 → XIV; 0 and negatives stay digits."""
+    if n <= 0:
+        return str(n)
+    out, rest = "", n
+    for value, numeral in ((1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"), (50, "L"),
+                           (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")):
+        count, rest = divmod(rest, value)
+        out += numeral * count
+    return out
+
+
+def letters(n: int) -> str:
+    """1 → A, 26 → Z, 27 → AA; 0 and negatives stay digits."""
+    if n <= 0:
+        return str(n)
+    out, rest = "", n
+    while rest:
+        rest, r = divmod(rest - 1, 26)
+        out = chr(ord("A") + r) + out
+    return out
+
+
+
 class StepItem(Annotation, QGraphicsItem):
+    """A numbered badge: 1 2 3, A B C or I II III, in a circle, square or pill."""
+
     kind = "step"
 
     def __init__(self, style: Style, number: int = 1) -> None:
@@ -619,31 +788,53 @@ class StepItem(Annotation, QGraphicsItem):
     def _d(self) -> float:
         return 18.0 + self.style.width * 4
 
+    def label(self) -> str:
+        if self.style.numbering == "letters":
+            return letters(self.number)
+        if self.style.numbering == "roman":
+            return roman(self.number)
+        return str(self.number)
+
     def _geometry(self) -> dict:
         return {"number": self.number}
 
     def _set_geometry(self, state: dict) -> None:
         self.number = int(state["number"])
 
-    def boundingRect(self) -> QRectF:
+    def _badge_rect(self) -> QRectF:
+        """Wide enough for the label (a pill for XIV, say), never smaller than the circle."""
         d = self._d()
-        return QRectF(-d / 2 - 2, -d / 2 - 2, d + 4, d + 4)
+        text = QFontMetricsF(self._font()).horizontalAdvance(self.label())
+        w = max(d, text + d * 0.55) if self.style.badge == "pill" or len(self.label()) > 2 else d
+        return QRectF(-w / 2, -d / 2, w, d)
+
+    def _font(self):
+        font = ui_font(max(8, int(self._d() * 0.36)))
+        font.setBold(True)
+        return font
+
+    def boundingRect(self) -> QRectF:
+        return self._badge_rect().adjusted(-2, -2, 2, 2)
+
+    def _badge_path(self) -> QPainterPath:
+        r, path = self._badge_rect(), QPainterPath()
+        if self.style.badge == "square":
+            path.addRoundedRect(r, r.height() * 0.18, r.height() * 0.18)
+        else:
+            path.addRoundedRect(r, r.height() / 2, r.height() / 2)  # a circle, or a pill when wide
+        return path
 
     def shape(self) -> QPainterPath:
         path = QPainterPath()
-        path.addEllipse(self.boundingRect())
+        path.addRect(self.boundingRect())
         return path
 
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
-        d = self._d()
         color = QColor(self.style.color)
-        r = QRectF(-d / 2, -d / 2, d, d)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(QPen(QColor("#ffffff"), 2))
         p.setBrush(color)
-        p.drawEllipse(r)
-        font = ui_font(max(8, int(d * 0.36)))
-        font.setBold(True)
-        p.setFont(font)
+        p.drawPath(self._badge_path())
+        p.setFont(self._font())
         p.setPen(readable_on(color))
-        p.drawText(r, Qt.AlignCenter, str(self.number))
+        p.drawText(self._badge_rect(), Qt.AlignCenter, self.label())

@@ -3,6 +3,7 @@ active tool, with only the sections that tool uses."""
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -28,11 +29,13 @@ from .. import theme
 from ..icons import icon
 from ..widgets import Segmented, ToggleSwitch, screen_reader_name
 from ..wording import keys
+from . import custom_stamps
 from .edge_controls import CutoutControls, EdgeControls
 from .fill_controls import FillControls
 from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
-from .style import CALLOUT_SHAPES, COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style, line_style
+from .style import COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style, line_style
+from .variant_controls import ArrowControls, DimControls, ShapeControls, StepControls, TextFormatControls
 
 PANEL_WIDTH = 288
 TITLES = {
@@ -46,23 +49,27 @@ HINTS = {
     "select": f"Click any markup to change it. Drag to move, {keys('Ctrl+click')} to add to the selection, "
               f"Delete to remove, {keys('Ctrl+D')} to duplicate, {keys('Ctrl+C')} and {keys('Ctrl+V')} to copy "
               "and paste. Right-click for more. Turn, flip or resize the snip under Image.",
-    **dict.fromkeys(("arrow", "line", "rect", "ellipse", "pen"), DRAW_HINT),
+    **dict.fromkeys(("line", "ellipse", "pen"), DRAW_HINT),
+    "arrow": DRAW_HINT + " Heads go at either end, or both; Curved adds a bend you drag.",
+    "rect": DRAW_HINT + " Shape makes it a box, a diamond, a triangle or a star.",
     "crop": "Drag the edges in to cut and back out to restore. Drag inside to move. Enter applies, Esc cancels.",
-    "spotlight": "Drag over the area to keep lit. Everything else dims.",
+    "spotlight": "Drag over the area to keep lit. Everything else dims: choose how much, and the lit shape.",
     "cutout": "Drag across the part to take out. What's left is joined together.",
     "magnify": "Drag over what to enlarge. Drag the lens to move it, or inside the frame to show another area.",
-    "text": "Click to type. Esc finishes. Drag text to move it.",
+    "text": "Click to type. Esc finishes. Drag text to move it. Outline makes it read on any background.",
     "callout": "Drag a box, then type. Drag the pointer (or its orange dot) to aim it. Drag a callout to move it.",
-    "stamp": "Click to drop a stamp, or drag to size it. App name and date adds where and when you took the snip.",
-    "step": "Click to drop the next number.",
+    "stamp": "Click to drop a stamp, or drag to size it. Add your own pictures, too. App name and date adds where "
+             "and when you took the snip.",
+    "step": "Click to drop the next number: 1 2 3, A B C or I II III, in a circle, square or pill.",
     "blur": "Drag over anything private. Redact in the toolbar finds emails, phone and card numbers for you.",
     "pixelate": "Drag over anything private.",
     "erase": "Drag over something to remove it. The area is filled in from what's around it.",
     "move": "Drag over the part to move. Then drag the piece where you want it: where it was is filled in from "
             "what's around it.",
 }
-SHAPE_LABELS = {"rounded": "Rounded box", "rect": "Box", "ellipse": "Ellipse", "pill": "Pill"}
-SWITCHES = ("tail", "fill", "shadow")
+SWITCHES = ("tail", "open_head", "curve", "box", "fill", "rounded", "outline", "shadow")
+SWITCH_LABELS = {"tail": "Pointer", "open_head": "Open head", "curve": "Curved", "box": "Box, not a stroke",
+                 "fill": "Fill", "rounded": "Rounded corners", "outline": "Outline", "shadow": "Shadow"}
 LINE_STYLES = (("solid", "Solid"), ("dashed", "Dashed"), ("dotted", "Dotted"))
 LINE_CHANGES = {"solid": {"dash": False, "dotted": False}, "dashed": {"dash": True, "dotted": False},
                 "dotted": {"dash": True, "dotted": True}}  # dotted keeps dash: older versions draw dashes
@@ -119,6 +126,7 @@ class NoWheelSlider(QSlider):
 class PropertiesPanel(QScrollArea):
     changed = Signal(dict)          # style field -> new value
     crop_action = Signal(str)       # apply | cancel | reset
+    next_step = Signal(int)         # the Step tool's next number (the Numbering section)
     image_action = Signal(str)      # rotate_left | rotate_right | flip_horizontal | flip_vertical | resize
     pick_color = Signal()           # the eyedropper button: start (or stop) picking a color from the snip
     style_saved = Signal(str)       # the selection's look was saved as a quick style for this tool
@@ -139,6 +147,7 @@ class PropertiesPanel(QScrollArea):
         self.viewport().setFocusPolicy(Qt.NoFocus)
         self._loading = False
         self._kind = "select"
+        self._next_step = 1
         self._style_color = ""
         self._sections: dict[str, QWidget] = {}
         self._switches: dict[str, ToggleSwitch] = {}
@@ -151,12 +160,15 @@ class PropertiesPanel(QScrollArea):
         self._build_header()
         self._build_quick()
         self._build_shape()
+        self._build_arrow()
+        self._build_numbering()
         self._build_stamps()
         self._build_colors()
         self._build_size()
         self._build_text()
         self._build_effects()
         self._build_fill()  # right under the Fill switch, so turning it on doesn't move the switch
+        self._build_dim()
         self._build_crop()
         self._build_cutout()
         self._build_image()
@@ -169,6 +181,11 @@ class PropertiesPanel(QScrollArea):
         self._font.setFocusPolicy(Qt.StrongFocus)
         self._font.lineEdit().setFocusPolicy(Qt.StrongFocus)
         self._font.editingFinished.connect(self.editing_done)
+        self._steps.next.setFocusPolicy(Qt.StrongFocus)
+        self._steps.next.lineEdit().setFocusPolicy(Qt.StrongFocus)
+        self._steps.next.editingFinished.connect(self.editing_done)
+        self._format.font.setFocusPolicy(Qt.StrongFocus)
+        self._format.font.lineEdit().setFocusPolicy(Qt.StrongFocus)
         self.retheme()
 
     # ------------------------------------------------------------------ builders
@@ -217,17 +234,28 @@ class PropertiesPanel(QScrollArea):
 
     def _build_shape(self) -> None:
         col = self._section("shape", "Shape")
-        self._shapes = Segmented([(s, SHAPE_LABELS[s]) for s in CALLOUT_SHAPES], value=CALLOUT_SHAPES[0])
-        for shape in CALLOUT_SHAPES:
-            b = self._shapes.button(shape)
-            b.setToolTip(SHAPE_LABELS[shape])
-            b.setAccessibleName(SHAPE_LABELS[shape])
-            b.setText("")  # icon only; the name stays in the tooltip and for screen readers
-            b.setToolButtonStyle(Qt.ToolButtonIconOnly)
-            b.setIconSize(QSize(20, 20))
-            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._shapes.changed.connect(lambda shape: self._emit(shape=shape))
+        self._shapes = ShapeControls(NoWheelSlider)
+        self._shapes.changed.connect(lambda changes: self._emit(**changes))
         col.addWidget(self._shapes)
+
+    def _build_arrow(self) -> None:
+        col = self._section("arrow", "Heads")
+        self._arrow = ArrowControls()
+        self._arrow.changed.connect(lambda changes: self._emit(**changes))
+        col.addWidget(self._arrow)
+
+    def _build_numbering(self) -> None:
+        col = self._section("numbering", "Numbering")
+        self._steps = StepControls()
+        self._steps.changed.connect(lambda changes: self._emit(**changes))
+        self._steps.next_number.connect(self.next_step)
+        col.addWidget(self._steps)
+
+    def _build_dim(self) -> None:
+        col = self._section("dim", None)
+        self._dim = DimControls(NoWheelSlider)
+        self._dim.changed.connect(lambda changes: self._emit(**changes))
+        col.addWidget(self._dim)
 
     def _build_stamps(self) -> None:
         col = self._section("stamp", "Stamp")
@@ -236,23 +264,95 @@ class PropertiesPanel(QScrollArea):
         self._stamp_group = QButtonGroup(self)
         self._stamp_buttons: dict[str, QToolButton] = {}
         for i, (name, (label, _svg)) in enumerate(STAMPS.items()):
-            b = QToolButton()
-            b.setObjectName("StampChoice")
-            b.setIcon(stamp_icon(name, 64))
-            b.setIconSize(QSize(28, 28))
-            b.setCheckable(True)
-            b.setToolTip(label)
-            b.setAccessibleName(label)
-            b.clicked.connect(lambda _=False, n=name: self._emit(stamp=n))
-            self._stamp_group.addButton(b)
-            self._stamp_buttons[name] = b
-            grid.addWidget(b, i // STAMP_COLUMNS, i % STAMP_COLUMNS)
+            grid.addWidget(self._stamp_choice(name, label), i // STAMP_COLUMNS, i % STAMP_COLUMNS)
         col.addLayout(grid)
+        self._mine_label = QLabel("YOUR OWN")
+        self._mine_label.setProperty("sfRole", "section")
+        col.addWidget(self._mine_label)
+        self._mine_grid = QGridLayout()
+        self._mine_grid.setSpacing(4)
+        self._custom_buttons: dict[str, QToolButton] = {}
+        col.addLayout(self._mine_grid)
+        row = QHBoxLayout()
+        self._add_stamp = QPushButton("Add your own…")
+        self._add_stamp.setToolTip("Add a picture (PNG, JPG, WebP, SVG...) as a stamp of your own")
+        self._add_stamp.setAccessibleName("Add your own stamp")
+        self._add_stamp.clicked.connect(self._pick_stamp_files)
+        row.addWidget(self._add_stamp)
         self._source_stamp = QPushButton("App name and date")
         self._source_stamp.setAccessibleName("Add an app name and date stamp")
         self._source_stamp.clicked.connect(self.source_stamp)
-        col.addWidget(self._source_stamp)
+        row.addWidget(self._source_stamp)
+        col.addLayout(row)
         self.set_source_stamp_available(True)
+        self._fill_custom_stamps()
+        custom_stamps.notifier().changed.connect(self._fill_custom_stamps)
+
+    def _stamp_choice(self, name: str, label: str) -> QToolButton:
+        b = QToolButton()
+        b.setObjectName("StampChoice")
+        b.setIcon(stamp_icon(name, 64))
+        b.setIconSize(QSize(28, 28))
+        b.setCheckable(True)
+        b.setToolTip(label)
+        b.setAccessibleName(label)
+        b.clicked.connect(lambda _=False, n=name: self._emit(stamp=n))
+        self._stamp_group.addButton(b)
+        if custom_stamps.is_custom(name):
+            b.setContextMenuPolicy(Qt.CustomContextMenu)
+            b.customContextMenuRequested.connect(lambda pos, n=name, w=b: self._custom_stamp_menu(n, w, pos))
+            b.setToolTip(f"{label} (right-click to remove)")
+            self._custom_buttons[name] = b
+        else:
+            self._stamp_buttons[name] = b
+        return b
+
+    def _fill_custom_stamps(self) -> None:
+        """Your own stamps' buttons, after the built-in ones, following the Stamps folder."""
+        chosen = next((n for n, b in self._custom_buttons.items() if b.isChecked()), None)
+        for b in self._custom_buttons.values():
+            self._stamp_group.removeButton(b)
+            b.hide()
+            b.setParent(None)
+            b.deleteLater()
+        self._custom_buttons.clear()
+        names = custom_stamps.names()
+        for i, name in enumerate(names):
+            b = self._stamp_choice(name, custom_stamps.label_of(name))
+            b.setFocusPolicy(Qt.TabFocus)
+            self._mine_grid.addWidget(b, i // STAMP_COLUMNS, i % STAMP_COLUMNS)
+            if name == chosen:
+                b.setChecked(True)
+        self._mine_label.setVisible(bool(names))
+
+    def _custom_stamp_menu(self, name: str, button: QToolButton, pos) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        remove = menu.addAction(f"Remove {custom_stamps.label_of(name)}")
+        remove.triggered.connect(lambda: self.remove_custom_stamp(name))
+        menu.exec(button.mapToGlobal(pos))
+
+    def remove_custom_stamp(self, name: str) -> None:
+        custom_stamps.remove(name)
+
+    def _pick_stamp_files(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        paths, _chosen = QFileDialog.getOpenFileNames(
+            self, "Add your own stamps", str(Path.home() / "Pictures"),
+            "Pictures (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.svg)")
+        added = [n for n in (custom_stamps.add(Path(p)) for p in paths) if n]
+        if added:
+            self._emit(stamp=added[-1])  # the newest is picked for the next drop
+            for name, b in self._custom_buttons.items():
+                b.setChecked(name == added[-1])
+
+    def add_stamp_button(self) -> QPushButton:
+        return self._add_stamp
+
+    def custom_stamp_buttons(self) -> dict[str, QToolButton]:
+        return dict(self._custom_buttons)
 
     def _build_colors(self) -> None:
         col = self._section("color", None)
@@ -319,6 +419,9 @@ class PropertiesPanel(QScrollArea):
         self._font.valueChanged.connect(lambda v: self._emit(font_size=int(v)))
         row.addWidget(self._font)
         col.addLayout(row)
+        self._format = TextFormatControls()
+        self._format.changed.connect(lambda changes: self._emit(**changes))
+        col.addWidget(self._format)
 
     def _switch_row(self, col: QVBoxLayout, key: str, label: str) -> ToggleSwitch:
         row_widget = QWidget()
@@ -352,8 +455,8 @@ class PropertiesPanel(QScrollArea):
         self._line.changed.connect(self._line_chosen)
         row.addWidget(self._line)
         col.addWidget(self._line_row)
-        for key, label in (("tail", "Pointer"), ("fill", "Fill"), ("shadow", "Shadow")):
-            switch = self._switch_row(col, key, label)
+        for key in SWITCHES:
+            switch = self._switch_row(col, key, SWITCH_LABELS[key])
             switch.toggled.connect(lambda on, k=key: self._emit(**{k: on}))
 
     def _line_chosen(self, key: str) -> None:
@@ -422,9 +525,10 @@ class PropertiesPanel(QScrollArea):
         col.addLayout(row)
 
     # ------------------------------------------------------------------ state
-    def load(self, kind: str, style: Style | None, has_selection: bool) -> None:
+    def load(self, kind: str, style: Style | None, has_selection: bool, next_step: int = 1) -> None:
         self._loading = True
         self._kind = kind
+        self._next_step = next_step
         fields = STYLE_FIELDS.get(kind, ()) if style else ()
         self._title.setText(TITLES.get(kind, kind.title()))
         self._chip.setVisible(has_selection)
@@ -432,11 +536,12 @@ class PropertiesPanel(QScrollArea):
         self._hint.setVisible(bool(self._hint.text()))
         show = {
             "quick": bool(fields) and self._quick.worth_showing(kind, has_selection), "shape": "shape" in fields,
+            "arrow": "heads" in fields, "numbering": "numbering" in fields,
             "stamp": "stamp" in fields,
             "color": "color" in fields, "size": "width" in fields, "text": "font_size" in fields,
             "fill": "fill_color" in fields and bool(style and style.fill),
             "effects": any(f in fields for f in (*SWITCHES, "dash")), "crop": kind == "crop",
-            "image": kind == "select",
+            "image": kind == "select", "dim": "dim" in fields,
             "cutout": kind == "cutout", "edges": kind == "select",
         }
         for name, box in self._sections.items():
@@ -466,10 +571,13 @@ class PropertiesPanel(QScrollArea):
         self._line_loaded = line_style(style)
         self._line.set_value(self._line_loaded)
         self._fill.load(self._kind, style)
-        if style.shape in CALLOUT_SHAPES:
-            self._shapes.set_value(style.shape)
-        if style.stamp in self._stamp_buttons:
-            self._stamp_buttons[style.stamp].setChecked(True)
+        self._shapes.load(self._kind, style)
+        self._arrow.load(style)
+        self._steps.load(style, self._next_step)
+        self._format.load(self._kind, style)
+        self._dim.load(style)
+        for name, button in (*self._stamp_buttons.items(), *self._custom_buttons.items()):
+            button.setChecked(name == style.stamp)
 
     def set_source_stamp_available(self, available: bool) -> None:
         self._source_stamp.setEnabled(available)
@@ -497,8 +605,8 @@ class PropertiesPanel(QScrollArea):
         self._image_size.setText(f"{width} × {height} px")
 
     def retheme(self) -> None:
-        for shape in CALLOUT_SHAPES:
-            self._shapes.button(shape).setIcon(icon(f"shape_{shape}"))
+        for controls in (self._shapes, self._arrow, self._steps, self._format):
+            controls.retheme()
         for key, _label in LINE_STYLES:
             self._line.button(key).setIcon(icon(f"line_{key}"))
         self._custom.setIcon(icon("plus"))

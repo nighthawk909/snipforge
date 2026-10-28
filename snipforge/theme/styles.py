@@ -172,6 +172,8 @@ QWidget#PanelSection {{ background: transparent; border-top: 1px solid {p.border
 QLabel#Chip {{ background: {a.soft}; color: {a.text}; border-radius: 9px; padding: 1px 8px; font-size: 11px;
     font-weight: 600; }}
 QToolButton#StampChoice {{ border-radius: 6px; padding: 3px; }}
+QToolButton#FormatToggle {{ border-radius: 6px; padding: 3px; }}
+QToolButton#FormatToggle:checked {{ background: {a.soft}; border: 1px solid {a.fill}; }}
 QToolButton#StampChoice:checked {{ background: {a.soft}; border: 1px solid {a.fill}; }}
 QToolButton#CustomColor {{ border: 1px dashed {p.text3}; border-radius: 12px; padding: 3px; }}
 QToolButton#PickColor {{ border: 1px solid {p.border}; border-radius: 12px; padding: 3px; }}

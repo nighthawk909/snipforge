@@ -35,7 +35,8 @@ def test_saved_styles_keep_what_the_tool_shows_and_survive_a_reload(qapp):
     assert saved_styles.save("rect", MINE.with_changes(fill=True))
     loaded = saved_styles.load()
     assert saved_styles.fields_of("arrow", loaded["arrow"][0]) == {
-        "color": "#123456", "width": 9.0, "dash": True, "dotted": False, "shadow": False}
+        "color": "#123456", "width": 9.0, "dash": True, "dotted": False, "shadow": False,
+        "heads": "end", "open_head": False, "curve": False}
     assert loaded["rect"][0].fill is True
     saved_styles.delete("arrow", MINE)
     assert "arrow" not in saved_styles.load() and saved_styles.saved_for("rect")
@@ -45,7 +46,7 @@ def test_each_tool_keeps_at_most_a_few(qapp):
     for n in range(saved_styles.MAX_SAVED + 2):
         saved_styles.save("line", Style(width=float(n + 1)))
     assert len(saved_styles.saved_for("line")) == saved_styles.MAX_SAVED
-    assert not saved_styles.save("spotlight", Style())  # nothing to save for it
+    assert not saved_styles.save("erase", Style())  # nothing to save for it
 
 
 @pytest.mark.parametrize("raw", ["not json", "[1, 2]", json.dumps({"arrow": "x", "laser": [{}], "rect": [5, {}]})])
@@ -68,7 +69,8 @@ def test_save_the_selected_style_and_apply_it(qapp):
     panel.changed.connect(seen.append)
     panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], has_selection=False)
     click(panel.saved_tile(0))
-    assert seen == [{"color": "#123456", "width": 9.0, "dash": True, "dotted": False, "shadow": False}]
+    assert seen == [{"color": "#123456", "width": 9.0, "dash": True, "dotted": False, "shadow": False,
+                     "heads": "end", "open_head": False, "curve": False}]
     assert len([panel.quick_tile(i) for i in range(len(QUICK_STYLES))]) == 8  # built-ins stay
 
 
@@ -93,9 +95,9 @@ def test_tools_without_built_ins_can_still_save(qapp):
     assert not panel.section("quick").isHidden()
     assert all(panel.quick_tile(i).isHidden() for i in range(len(QUICK_STYLES)))
     click(panel.save_button())
-    assert saved_styles.fields_of("blur", saved_styles.saved_for("blur")[0]) == {"width": 12.0}
-    panel.load("spotlight", DEFAULT_TOOL_STYLES["spotlight"], has_selection=True)
-    assert panel.section("quick").isHidden()
+    assert saved_styles.fields_of("blur", saved_styles.saved_for("blur")[0]) == {"width": 12.0, "rounded": False}
+    panel.load("erase", DEFAULT_TOOL_STYLES["erase"], has_selection=True)
+    assert panel.section("quick").isHidden()  # nothing to save for it
 
 
 def test_delete_from_the_right_click_menu(qapp, monkeypatch):

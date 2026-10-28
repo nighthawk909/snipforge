@@ -17,6 +17,7 @@ from .items import (
     EffectItem,
     EllipseItem,
     HidesContent,
+    HighlightBoxItem,
     LineItem,
     RectItem,
     SpotlightItem,
@@ -124,6 +125,8 @@ class DrawMixin:
         tool, style = self.tool, self.tool_styles.get(self.tool)
         if tool in ("arrow", "line"):
             item = (ArrowItem if tool == "arrow" else LineItem)(style, pos)
+        elif tool == "highlight" and style.box:
+            item = HighlightBoxItem(style)
         elif tool in ("pen", "highlight"):
             item = StrokeItem(style, highlighter=tool == "highlight", start=pos)
         elif tool in ("rect", "ellipse"):
@@ -265,9 +268,21 @@ class DrawMixin:
         self._select([item])
         self.ensureVisible(item)
 
-    def _add_step(self, pos: QPointF) -> None:
+    def next_step_number(self) -> int:
+        """What the next click with the Step tool drops: one more than the biggest on the snip, or
+        the number you set (set_next_step_number) while it's still bigger than that."""
         numbers = [i.number for i in self.annotations() if isinstance(i, StepItem)]
-        item = StepItem(self.tool_styles["step"], max(numbers, default=0) + 1)
+        following = max(numbers, default=0) + 1
+        chosen = getattr(self, "_next_step", None)
+        return chosen if chosen is not None and chosen > following else following
+
+    def set_next_step_number(self, number: int | None) -> None:
+        """Start (or continue) the numbering from `number`; None goes back to following the snip."""
+        self._next_step = max(1, int(number)) if number is not None else None
+
+    def _add_step(self, pos: QPointF) -> None:
+        item = StepItem(self.tool_styles["step"], self.next_step_number())
+        self._next_step = None  # placed: the numbering follows the snip from here
         item.setPos(pos)
         item.setZValue(self._next_z())
         self.undo_stack.push(AddItemsCommand(self._scene, [item], "Add step"))

@@ -10,6 +10,17 @@ PALETTE = ("#ff3b30", "#ff9500", "#ffd60a", "#34c759", "#0a84ff", "#bf5af2", "#f
 COLOR_NAMES = {"#ff3b30": "Red", "#ff9500": "Orange", "#ffd60a": "Yellow", "#34c759": "Green",
                "#0a84ff": "Blue", "#bf5af2": "Purple", "#ffffff": "White", "#1c1c1e": "Black"}
 CALLOUT_SHAPES = ("rounded", "rect", "ellipse", "pill")
+RECT_SHAPES = ("rounded", "rect", "diamond", "triangle", "star")  # the Rectangle tool's shapes
+SPOTLIGHT_SHAPES = ("rect", "ellipse")
+SHAPES = tuple(dict.fromkeys((*CALLOUT_SHAPES, *RECT_SHAPES, *SPOTLIGHT_SHAPES)))  # every value `shape` can take
+ARROW_HEADS = ("end", "start", "both")  # where an arrow's heads are
+NUMBERINGS = ("digits", "letters", "roman")  # step numbers: 1 2 3, A B C, I II III
+BADGES = ("circle", "square", "pill")  # a step number's badge
+ALIGNMENTS = ("left", "center", "right")
+USUAL_CORNER = -1  # corner: the tool's usual rounding (a rectangle's small one)
+USUAL_DIM = -1  # dim: the spotlight's usual darkness
+CORNER_RANGE = (0, 60)
+DIM_RANGE = (0, 100)
 WIDTH_RANGE = (0.5, 200.0)  # wider than the panel's slider: a resized snip scales widths
 FONT_RANGE = (4, 400)
 USUAL_OPACITY = -1  # fill_opacity: the tool's usual fill (a light tint for shapes, solid otherwise)
@@ -31,7 +42,7 @@ def _clean(name: str, value):
     """`value` if it's a usable value for the field `name`, else None."""
     if name == "color":
         return value if isinstance(value, str) and QColor(value).isValid() else None
-    if name in ("width", "font_size", "fill_opacity"):
+    if name in ("width", "font_size", "fill_opacity", "corner", "dim"):
         number = _number(value)
         if number is None:
             return None
@@ -39,14 +50,21 @@ def _clean(name: str, value):
             return float(min(WIDTH_RANGE[1], max(WIDTH_RANGE[0], number)))
         if name == "font_size":
             return int(min(FONT_RANGE[1], max(FONT_RANGE[0], number)))
+        if name == "corner":
+            return USUAL_CORNER if number < 0 else int(round(min(CORNER_RANGE[1], number)))
+        if name == "dim":
+            return USUAL_DIM if number < 0 else int(round(min(DIM_RANGE[1], number)))
         return USUAL_OPACITY if number < 0 else int(round(min(100, number)))
     if name == "fill_color":  # "" means the outline's color
         return value if isinstance(value, str) and (value == "" or QColor(value).isValid()) else None
     if name == "shape":
-        return value if value in CALLOUT_SHAPES else None
-    if name == "stamp":
-        return value if isinstance(value, str) else None  # unknown names draw the check stamp
-    return value if isinstance(value, bool) else None  # shadow, fill, dash, dotted, tail
+        return value if value in SHAPES else None
+    if name in ("stamp", "font_family"):
+        return value if isinstance(value, str) else None  # an unknown stamp draws the check; an unknown font, the usual
+    words = {"heads": ARROW_HEADS, "numbering": NUMBERINGS, "badge": BADGES, "align": ALIGNMENTS}
+    if name in words:
+        return value if value in words[name] else None
+    return value if isinstance(value, bool) else None  # shadow, fill, dash, dotted, tail, and the switches below
 
 
 @dataclass(frozen=True)
@@ -64,6 +82,21 @@ class Style:
     tail: bool = True        # callout pointer
     stamp: str = "check"     # stamp artwork
     bold: bool = True        # text boxes (Edit text writes regular weight, to match the snip)
+    # Tool variants (document version 3 when any is used; see needs_version_3)
+    heads: str = "end"       # arrows: where the heads are
+    open_head: bool = False  # arrows: an open V instead of a filled head
+    curve: bool = False      # arrows and lines: a bend you drag
+    corner: int = USUAL_CORNER  # rectangles: corner rounding in px
+    numbering: str = "digits"  # step numbers
+    badge: str = "circle"    # step numbers' badge
+    box: bool = False        # highlighter: a translucent box instead of a stroke
+    font_family: str = ""    # text and callouts: "" is the usual font
+    align: str = "left"      # text and callouts
+    italic: bool = False
+    underline: bool = False
+    outline: bool = False    # text: a thin dark or light edge so it reads on anything
+    rounded: bool = False    # blur, pixelate and spotlight: rounded corners
+    dim: int = USUAL_DIM     # spotlight: how dark the rest is, in percent
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -100,23 +133,42 @@ DEFAULT_TOOL_STYLES: dict[str, Style] = {
 }
 
 # Which style controls the property bar shows for each annotation kind.
+TEXT_FORMAT = ("font_family", "align", "italic", "underline")
 STYLE_FIELDS: dict[str, tuple[str, ...]] = {
-    "arrow": ("color", "width", "dash", "dotted", "shadow"),
-    "line": ("color", "width", "dash", "dotted", "shadow"),
-    "rect": ("color", "width", "dash", "dotted", "fill", "fill_color", "fill_opacity", "shadow"),
+    "arrow": ("heads", "open_head", "curve", "color", "width", "dash", "dotted", "shadow"),
+    "line": ("curve", "color", "width", "dash", "dotted", "shadow"),
+    "rect": ("shape", "corner", "color", "width", "dash", "dotted", "fill", "fill_color", "fill_opacity", "shadow"),
     "ellipse": ("color", "width", "dash", "dotted", "fill", "fill_color", "fill_opacity", "shadow"),
     "pen": ("color", "width", "shadow"),
-    "highlight": ("color", "width"),
-    "text": ("color", "font_size", "fill", "fill_color", "fill_opacity", "shadow"),
-    "callout": ("shape", "tail", "color", "width", "font_size", "fill", "fill_color", "fill_opacity", "shadow"),
+    "highlight": ("box", "color", "width"),
+    "highlight_box": ("color",),
+    "text": ("color", "font_size", *TEXT_FORMAT, "bold", "outline", "fill", "fill_color", "fill_opacity", "shadow"),
+    "callout": ("shape", "tail", "color", "width", "font_size", *TEXT_FORMAT, "fill", "fill_color", "fill_opacity",
+                "shadow"),
     "stamp": ("stamp", "shadow"),
-    "step": ("color", "width", "shadow"),
-    "pixelate": ("width",),
-    "blur": ("width",),
-    "spotlight": (),
+    "step": ("numbering", "badge", "color", "width", "shadow"),
+    "pixelate": ("width", "rounded"),
+    "blur": ("width", "rounded"),
+    "spotlight": ("shape", "rounded", "dim"),
     "magnify": ("shape", "color", "width", "dash", "dotted", "shadow"),
     "erase": (),
 }
+VERSION_3_KINDS = {"highlight_box"}  # kinds older SnipForges can't draw
+VERSION_3_DEFAULTS = {"heads": "end", "open_head": False, "curve": False, "corner": USUAL_CORNER, "numbering": "digits",
+                      "badge": "circle", "box": False, "font_family": "", "align": "left", "italic": False,
+                      "underline": False, "outline": False, "rounded": False, "dim": USUAL_DIM}
+
+
+def needs_version_3(style: dict) -> bool:
+    """Whether a saved style uses a tool variant an older SnipForge would draw wrong (or not at all)."""
+    if not isinstance(style, dict):
+        return False
+    if any(style.get(k, v) != v for k, v in VERSION_3_DEFAULTS.items()):
+        return True
+    stamp = style.get("stamp")
+    if isinstance(stamp, str) and stamp.startswith("custom:"):  # your own stamp: version 1 draws the check
+        return True
+    return style.get("shape") in RECT_SHAPES[2:]  # diamond, triangle, star: version 1 draws a rounded box
 
 STRENGTH_KINDS = {"pixelate", "blur"}  # 'width' means redaction strength for these
 

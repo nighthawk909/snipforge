@@ -301,10 +301,10 @@ def test_pieces_need_a_newer_document_than_plain_markup(page):
     canvas.set_tool("move")
     gesture(canvas, (35, 35), (105, 85))
     document = canvas.to_document()
-    assert document["version"] == 2 == DOCUMENT_VERSION  # older ones open it read-only, as it looks
+    assert document["version"] == 2 < DOCUMENT_VERSION  # older ones open it read-only, as it looks
     make_canvas(page).load_document(document)
     with pytest.raises(UnsupportedDocument):
-        make_canvas(page).load_document({**document, "version": 3})
+        make_canvas(page).load_document({**document, "version": DOCUMENT_VERSION + 1})
 
 
 def test_smart_move_says_so_when_it_cant_keep_the_picture(page, monkeypatch):

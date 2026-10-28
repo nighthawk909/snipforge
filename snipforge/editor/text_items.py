@@ -4,12 +4,14 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QTextOption
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QTextCharFormat, QTextCursor, QTextOption
 from PySide6.QtWidgets import QGraphicsTextItem, QStyle, QStyleOptionGraphicsItem
 
 from ..fonts import ui_font
-from .items import HIT_SLOP, Annotation, BoxItem, fill_ink, make_pen, stroke_band
+from .items import HIT_SLOP, Annotation, BoxItem, fill_ink, make_pen, readable_on, stroke_band
 from .style import Style, fill_qcolor
+
+ALIGN = {"left": Qt.AlignLeft, "center": Qt.AlignHCenter, "right": Qt.AlignRight}
 
 
 class EditableText(QGraphicsTextItem):
@@ -71,10 +73,27 @@ class EditableText(QGraphicsTextItem):
         super().paint(p, opt, widget)
 
 
-def _font(size: int, weight: QFont.Weight) -> QFont:
+def _font(size: int, weight: QFont.Weight, style: Style | None = None) -> QFont:
+    """The text's font: the usual one or the family in `style`, at `size`, with its italic and underline."""
     font = ui_font(int(size))
+    if style is not None and style.font_family:
+        font.setFamily(style.font_family)
     font.setWeight(weight)
+    if style is not None:
+        font.setItalic(style.italic)
+        font.setUnderline(style.underline)
     return font
+
+
+def apply_alignment(text: QGraphicsTextItem, align: str, wrap: QTextOption.WrapMode | None = None) -> None:
+    """Align the text's lines; only when it changes, since a new option lays the document out again."""
+    current = text.document().defaultTextOption()
+    wanted = ALIGN.get(align, Qt.AlignLeft)
+    if current.alignment() == wanted and (wrap is None or current.wrapMode() == wrap):
+        return
+    option = QTextOption(wanted)
+    option.setWrapMode(wrap if wrap is not None else current.wrapMode())
+    text.document().setDefaultTextOption(option)
 
 
 # ---------------------------------------------------------------------------
@@ -89,18 +108,41 @@ class TextItem(Annotation, EditableText):
         EditableText.__init__(self)
         self.on_edit_finished = None
         self.is_new = False
+        self._outlining = False
         self.document().setDocumentMargin(8)
         self.setPlainText(text)
         self.init_annotation(style)
         self._apply_text_style()
+        self.document().contentsChanged.connect(self._apply_outline)  # new letters get the outline too
 
     def set_style(self, style: Style) -> None:
         super().set_style(style)
         self._apply_text_style()
 
     def _apply_text_style(self) -> None:
-        self.setFont(_font(self.style.font_size, QFont.Bold if self.style.bold else QFont.Normal))
+        self.setFont(_font(self.style.font_size, QFont.Bold if self.style.bold else QFont.Normal, self.style))
         self.setDefaultTextColor(fill_ink(self.kind, self.style) if self.style.fill else QColor(self.style.color))
+        apply_alignment(self, self.style.align)
+        self._apply_outline()
+
+    def _apply_outline(self) -> None:
+        """Outline: a thin edge in the opposite shade around every letter, so text reads on anything."""
+        if self._outlining:
+            return
+        self._outlining = True
+        try:
+            fmt = QTextCharFormat()
+            if self.style.outline:
+                edge = readable_on(QColor(self.style.color))
+                fmt.setTextOutline(QPen(edge, max(0.8, self.style.font_size / 14), Qt.SolidLine, Qt.RoundCap,
+                                        Qt.RoundJoin))
+            else:
+                fmt.setTextOutline(QPen(Qt.NoPen))
+            cursor = QTextCursor(self.document())
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.mergeCharFormat(fmt)
+        finally:
+            self._outlining = False
 
     def _geometry(self) -> dict:
         return {"text": self.toPlainText()}
@@ -135,9 +177,7 @@ class _CalloutText(EditableText):
     def __init__(self, callout: CalloutItem) -> None:
         super().__init__(callout)
         self.setAcceptedMouseButtons(Qt.NoButton)  # clicks go to the callout unless editing
-        option = QTextOption(Qt.AlignHCenter)
-        option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
-        self.document().setDefaultTextOption(option)
+        apply_alignment(self, "center", QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.document().setDocumentMargin(2)
 
     def owner(self):
@@ -182,8 +222,11 @@ class CalloutItem(BoxItem):
     def _apply_text_style(self) -> None:
         if self.text is None:
             return
-        self.text.setFont(_font(self.style.font_size, QFont.DemiBold))
+        self.text.setFont(_font(self.style.font_size, QFont.DemiBold, self.style))
         self.text.setDefaultTextColor(self._text_color())
+        # Callouts center their words unless you choose a side (their "left" is the usual centering)
+        apply_alignment(self.text, "center" if self.style.align == "left" else self.style.align,
+                        QTextOption.WrapAtWordBoundaryOrAnywhere)
         self._relayout()
 
     def _text_color(self) -> QColor:

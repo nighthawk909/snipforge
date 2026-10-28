@@ -222,6 +222,22 @@ _PATHS = {
     "line_solid": '<path d="M3 12h18" stroke-width="2.4"/>',
     "line_dashed": '<path d="M3 12h18" stroke-width="2.4" stroke-dasharray="4.5 3.5"/>',
     "line_dotted": '<path d="M3.5 12h17" stroke-width="2.6" stroke-dasharray="0.1 4.2"/>',
+    # Tool variants (editor/variant_controls.py)
+    "shape_diamond": '<path d="M12 3l9 9-9 9-9-9z"/>',
+    "shape_triangle": '<path d="M12 4l9 16H3z"/>',
+    "shape_star": '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+    "heads_end": '<path d="M4 12h15"/><path d="M14 7l5 5-5 5"/>',
+    "heads_start": '<path d="M20 12H5"/><path d="M10 7l-5 5 5 5"/>',
+    "heads_both": '<path d="M5 12h14"/><path d="M9 8l-4 4 4 4"/><path d="M15 8l4 4-4 4"/>',
+    "badge_circle": '<circle cx="12" cy="12" r="8"/>',
+    "badge_square": '<rect x="4" y="4" width="16" height="16" rx="3"/>',
+    "badge_pill": '<rect x="2" y="7" width="20" height="10" rx="5"/>',
+    "align_left": '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h14"/>',
+    "align_center": '<path d="M4 6h16"/><path d="M7 12h10"/><path d="M5 18h14"/>',
+    "align_right": '<path d="M4 6h16"/><path d="M10 12h10"/><path d="M6 18h14"/>',
+    "bold": '<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7z"/><path d="M7 12h7a3.5 3.5 0 0 1 0 7H7z"/>',
+    "italic": '<path d="M10 5h8"/><path d="M6 19h8"/><path d="M15 5l-6 14"/>',
+    "underline": '<path d="M6 4v6a6 6 0 0 0 12 0V4"/><path d="M4 20h16"/>',
 }
 
 _PATHS["magnify"] = _PATHS["zoom_in"]  # the Magnify tool
