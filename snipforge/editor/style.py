@@ -16,7 +16,7 @@ SHAPES = tuple(dict.fromkeys((*CALLOUT_SHAPES, *RECT_SHAPES, *SPOTLIGHT_SHAPES))
 ARROW_HEADS = ("end", "start", "both")  # where an arrow's heads are
 NUMBERINGS = ("digits", "letters", "roman")  # step numbers: 1 2 3, A B C, I II III
 BADGES = ("circle", "square", "pill")  # a step number's badge
-ALIGNMENTS = ("left", "center", "right")
+ALIGNMENTS = ("", "left", "center", "right")  # "": the usual one (text left, callouts centered)
 USUAL_CORNER = -1  # corner: the tool's usual rounding (a rectangle's small one)
 USUAL_DIM = -1  # dim: the spotlight's usual darkness
 CORNER_RANGE = (0, 60)
@@ -91,7 +91,7 @@ class Style:
     badge: str = "circle"    # step numbers' badge
     box: bool = False        # highlighter: a translucent box instead of a stroke
     font_family: str = ""    # text and callouts: "" is the usual font
-    align: str = "left"      # text and callouts
+    align: str = ""          # text and callouts: "" is the usual (usual_align)
     italic: bool = False
     underline: bool = False
     outline: bool = False    # text: a thin dark or light edge so it reads on anything
@@ -155,11 +155,11 @@ STYLE_FIELDS: dict[str, tuple[str, ...]] = {
 }
 VERSION_3_KINDS = {"highlight_box"}  # kinds older SnipForges can't draw
 VERSION_3_DEFAULTS = {"heads": "end", "open_head": False, "curve": False, "corner": USUAL_CORNER, "numbering": "digits",
-                      "badge": "circle", "box": False, "font_family": "", "align": "left", "italic": False,
+                      "badge": "circle", "box": False, "font_family": "", "align": "", "italic": False,
                       "underline": False, "outline": False, "rounded": False, "dim": USUAL_DIM}
 
 
-def needs_version_3(style: dict) -> bool:
+def needs_version_3(style: dict, kind: str | None = None) -> bool:
     """Whether a saved style uses a tool variant an older SnipForge would draw wrong (or not at all)."""
     if not isinstance(style, dict):
         return False
@@ -168,7 +168,19 @@ def needs_version_3(style: dict) -> bool:
     stamp = style.get("stamp")
     if isinstance(stamp, str) and stamp.startswith("custom:"):  # your own stamp: version 1 draws the check
         return True
-    return style.get("shape") in RECT_SHAPES[2:]  # diamond, triangle, star: version 1 draws a rounded box
+    shape = style.get("shape")
+    if kind in ("rect", "spotlight"):  # version 1 draws both as a rounded box whatever their shape
+        return shape not in (None, "rounded")
+    return shape in RECT_SHAPES[2:]  # diamond, triangle, star
+
+
+def usual_align(kind: str) -> str:
+    return "center" if kind == "callout" else "left"
+
+
+def text_align(kind: str, style: Style) -> str:
+    """How the text's lines line up: its own choice, else the tool's usual."""
+    return style.align or usual_align(kind)
 
 STRENGTH_KINDS = {"pixelate", "blur"}  # 'width' means redaction strength for these
 

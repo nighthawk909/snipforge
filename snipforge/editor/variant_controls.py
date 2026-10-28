@@ -33,6 +33,7 @@ from .style import (
     USUAL_CORNER,
     USUAL_DIM,
     Style,
+    text_align,
 )
 
 SHAPE_LABELS = {"rounded": "Rounded box", "rect": "Box", "ellipse": "Ellipse", "pill": "Pill", "diamond": "Diamond",
@@ -44,6 +45,35 @@ ALIGN_LABELS = {"left": "Align left", "center": "Center", "right": "Align right"
 SHAPES_FOR = {"rect": RECT_SHAPES, "callout": CALLOUT_SHAPES, "spotlight": SPOTLIGHT_SHAPES}
 ICON_SEGMENT_MIN_WIDTH = 34
 USUAL_RECT_CORNER = 3  # what the slider shows for a rectangle's usual rounding
+
+
+class FocusedSpinBox(QSpinBox):
+    """Changed by the wheel only once you've clicked or tabbed into it: scrolling the panel over it
+    mustn't change the markup."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.StrongFocus)  # the wheel doesn't focus it either
+
+    def wheelEvent(self, e) -> None:  # noqa: N802 - Qt API
+        if self.hasFocus():
+            super().wheelEvent(e)
+        else:
+            e.ignore()  # the panel scrolls instead
+
+
+class FocusedFontBox(QFontComboBox):
+    """The font list, changed by the wheel only once it's focused (see FocusedSpinBox)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def wheelEvent(self, e) -> None:  # noqa: N802 - Qt API
+        if self.hasFocus():
+            super().wheelEvent(e)
+        else:
+            e.ignore()
 
 
 def icon_segmented(options: tuple[str, ...], labels: dict[str, str], icon_prefix: str) -> Segmented:
@@ -189,7 +219,7 @@ class StepControls(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel("Next number"))
         row.addStretch(1)
-        self.next = QSpinBox()
+        self.next = FocusedSpinBox()
         self.next.setRange(1, 999)
         self.next.setToolTip("What the next click drops; the ones after follow on from it")
         screen_reader_name(self.next, "Next step number")
@@ -223,7 +253,7 @@ class TextFormatControls(QWidget):
         col = QVBoxLayout(self)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(8)
-        self.font = QFontComboBox()
+        self.font = FocusedFontBox()
         self.font.setToolTip("Font")
         screen_reader_name(self.font, "Font")
         self.font.setFocusPolicy(Qt.StrongFocus)
@@ -260,7 +290,7 @@ class TextFormatControls(QWidget):
         self.toggles["bold"].setVisible(kind == "text")  # callouts are always demi-bold
         for key, b in self.toggles.items():
             b.setChecked(bool(getattr(style, key)))
-        self.align.set_value(style.align)
+        self.align.set_value(text_align(kind, style))
         self._loading = False
 
     def _emit(self, **changes) -> None:

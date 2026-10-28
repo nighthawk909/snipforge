@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QGraphicsTextItem, QStyle, QStyleOptionGraphicsIte
 
 from ..fonts import ui_font
 from .items import HIT_SLOP, Annotation, BoxItem, fill_ink, make_pen, readable_on, stroke_band
-from .style import Style, fill_qcolor
+from .style import Style, fill_qcolor, text_align
 
 ALIGN = {"left": Qt.AlignLeft, "center": Qt.AlignHCenter, "right": Qt.AlignRight}
 
@@ -108,12 +108,13 @@ class TextItem(Annotation, EditableText):
         EditableText.__init__(self)
         self.on_edit_finished = None
         self.is_new = False
-        self._outlining = False
+        self._outlined = False
+        self._fitting = False
         self.document().setDocumentMargin(8)
         self.setPlainText(text)
         self.init_annotation(style)
         self._apply_text_style()
-        self.document().contentsChanged.connect(self._apply_outline)  # new letters get the outline too
+        self.document().contentsChanged.connect(self._fit_width)
 
     def set_style(self, style: Style) -> None:
         super().set_style(style)
@@ -122,33 +123,52 @@ class TextItem(Annotation, EditableText):
     def _apply_text_style(self) -> None:
         self.setFont(_font(self.style.font_size, QFont.Bold if self.style.bold else QFont.Normal, self.style))
         self.setDefaultTextColor(fill_ink(self.kind, self.style) if self.style.fill else QColor(self.style.color))
-        apply_alignment(self, self.style.align)
+        apply_alignment(self, text_align(self.kind, self.style))
+        self._fit_width()
         self._apply_outline()
 
-    def _apply_outline(self) -> None:
-        """Outline: a thin edge in the opposite shade around every letter, so text reads on anything."""
-        if self._outlining:
+    def _fit_width(self) -> None:
+        """Centered or right-aligned lines need a width to line up in: the longest line's. Left
+        alignment keeps Qt's free width, as before alignment was a choice."""
+        if self._fitting:
             return
-        self._outlining = True
+        self._fitting = True
         try:
-            fmt = QTextCharFormat()
-            if self.style.outline:
-                edge = readable_on(QColor(self.style.color))
-                fmt.setTextOutline(QPen(edge, max(0.8, self.style.font_size / 14), Qt.SolidLine, Qt.RoundCap,
-                                        Qt.RoundJoin))
-            else:
-                fmt.setTextOutline(QPen(Qt.NoPen))
-            cursor = QTextCursor(self.document())
-            cursor.select(QTextCursor.SelectionType.Document)
-            cursor.mergeCharFormat(fmt)
+            self.setTextWidth(-1)
+            if text_align(self.kind, self.style) != "left":
+                self.setTextWidth(self.document().idealWidth())
         finally:
-            self._outlining = False
+            self._fitting = False
+
+    def _apply_outline(self) -> None:
+        """Outline: a thin edge in the opposite shade around every letter, so text reads on anything.
+        Set on the letters there are and on the block, so what's typed next has it too. Only when the
+        outline is or was on: each merge is a step in the text's own Ctrl+Z while typing."""
+        if not self.style.outline and not self._outlined:
+            return
+        self._outlined = self.style.outline
+        fmt = QTextCharFormat()
+        if self.style.outline:
+            edge = readable_on(QColor(self.style.color))
+            fmt.setTextOutline(QPen(edge, max(0.8, self.style.font_size / 14), Qt.SolidLine, Qt.RoundCap,
+                                    Qt.RoundJoin))
+        else:
+            fmt.setTextOutline(QPen(Qt.NoPen))
+        cursor = QTextCursor(self.document())
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.mergeCharFormat(fmt)
+        cursor.mergeBlockCharFormat(fmt)
+        typing = self.textCursor()
+        typing.mergeCharFormat(fmt)
+        self.setTextCursor(typing)
 
     def _geometry(self) -> dict:
         return {"text": self.toPlainText()}
 
     def _set_geometry(self, state: dict) -> None:
         self.setPlainText(state["text"])
+        self._outlined = False  # new text: no formats
+        self._apply_outline()
 
     def is_degenerate(self) -> bool:
         return not self.toPlainText().strip()
@@ -224,9 +244,7 @@ class CalloutItem(BoxItem):
             return
         self.text.setFont(_font(self.style.font_size, QFont.DemiBold, self.style))
         self.text.setDefaultTextColor(self._text_color())
-        # Callouts center their words unless you choose a side (their "left" is the usual centering)
-        apply_alignment(self.text, "center" if self.style.align == "left" else self.style.align,
-                        QTextOption.WrapAtWordBoundaryOrAnywhere)
+        apply_alignment(self.text, text_align(self.kind, self.style), QTextOption.WrapAtWordBoundaryOrAnywhere)
         self._relayout()
 
     def _text_color(self) -> QColor:

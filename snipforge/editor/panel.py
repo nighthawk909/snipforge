@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
-    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -35,12 +34,20 @@ from .fill_controls import FillControls
 from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
 from .style import COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style, line_style
-from .variant_controls import ArrowControls, DimControls, ShapeControls, StepControls, TextFormatControls
+from .variant_controls import (
+    ArrowControls,
+    DimControls,
+    FocusedSpinBox,
+    ShapeControls,
+    StepControls,
+    TextFormatControls,
+)
 
 PANEL_WIDTH = 288
 TITLES = {
     "select": "Select", "arrow": "Arrow", "line": "Line", "rect": "Rectangle", "ellipse": "Ellipse",
-    "pen": "Pen", "highlight": "Highlighter", "text": "Text", "callout": "Callout", "stamp": "Stamp",
+    "pen": "Pen", "highlight": "Highlighter", "highlight_box": "Highlighter", "text": "Text", "callout": "Callout",
+    "stamp": "Stamp",
     "step": "Step number", "pixelate": "Pixelate", "blur": "Blur", "spotlight": "Spotlight", "crop": "Crop",
     "magnify": "Magnify", "cutout": "Cut out", "erase": "Smart erase", "move": "Smart Move", "piece": "Moved piece",
 }
@@ -331,8 +338,18 @@ class PropertiesPanel(QScrollArea):
 
         menu = QMenu(self)
         remove = menu.addAction(f"Remove {custom_stamps.label_of(name)}")
-        remove.triggered.connect(lambda: self.remove_custom_stamp(name))
+        remove.triggered.connect(lambda: self._confirm_remove_stamp(name))
         menu.exec(button.mapToGlobal(pos))
+
+    def _confirm_remove_stamp(self, name: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        label = custom_stamps.label_of(name)
+        answer = QMessageBox.question(
+            self, "Remove stamp", f"Remove the stamp \u201c{label}\u201d? Snips that use it show an empty frame "
+            "in its place.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            self.remove_custom_stamp(name)
 
     def remove_custom_stamp(self, name: str) -> None:
         custom_stamps.remove(name)
@@ -344,6 +361,13 @@ class PropertiesPanel(QScrollArea):
             self, "Add your own stamps", str(Path.home() / "Pictures"),
             "Pictures (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.svg)")
         added = [n for n in (custom_stamps.add(Path(p)) for p in paths) if n]
+        if len(added) < len(paths):
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "Add your own stamps",
+                                f"Couldn't add {len(paths) - len(added)} of the pictures: SnipForge couldn't read "
+                                f"them, an SVG links to other files, or you have {custom_stamps.MAX_STAMPS} stamps "
+                                "already.")
         if added:
             self._emit(stamp=added[-1])  # the newest is picked for the next drop
             for name, b in self._custom_buttons.items():
@@ -414,7 +438,7 @@ class PropertiesPanel(QScrollArea):
         label = QLabel("Font size")
         row.addWidget(label)
         row.addStretch(1)
-        self._font = QSpinBox()
+        self._font = FocusedSpinBox()
         self._font.setRange(8, 96)
         screen_reader_name(self._font, "Font size")
         self._font.valueChanged.connect(lambda v: self._emit(font_size=int(v)))

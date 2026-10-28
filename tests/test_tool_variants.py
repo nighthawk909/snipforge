@@ -34,7 +34,7 @@ def test_new_fields_have_quiet_defaults_and_validate():
     s = Style()
     assert (s.heads, s.open_head, s.curve, s.corner) == ("end", False, False, -1)
     assert (s.numbering, s.badge, s.box, s.font_family) == ("digits", "circle", False, "")
-    assert (s.align, s.italic, s.underline, s.outline, s.rounded, s.dim) == ("left", False, False, False, False, -1)
+    assert (s.align, s.italic, s.underline, s.outline, s.rounded, s.dim) == ("", False, False, False, False, -1)
     cleaned = Style.from_dict({"heads": "both", "open_head": True, "curve": True, "corner": 12.7, "numbering": "roman",
                                "badge": "square", "box": True, "font_family": "Georgia", "align": "center",
                                "italic": True, "underline": True, "outline": True, "rounded": True, "dim": 80})
@@ -199,6 +199,29 @@ def test_text_formatting(page):
     assert plain.document().defaultTextOption().alignment() == Qt.AlignLeft and not plain.font().italic()
 
 
+def _typed(canvas, keys):
+    from PySide6.QtTest import QTest
+
+    QTest.keyClicks(canvas.viewport(), keys)
+    return canvas.editing_text_item()
+
+
+def test_ctrl_z_while_typing_undoes_the_typing_with_or_without_an_outline(page):
+    from PySide6.QtTest import QTest
+
+    for outline in (False, True):
+        canvas = make_canvas(page)
+        canvas.set_tool("text")
+        canvas.apply_style(outline=outline)
+        gesture(canvas, (100, 100), (100, 100))
+        text = _typed(canvas, "abc")
+        assert text is not None and text.toPlainText() == "abc"
+        fmt = text.document().begin().begin().fragment().charFormat()
+        assert (fmt.textOutline().style() != Qt.NoPen) == outline, outline  # typed letters get the outline
+        QTest.keyClick(canvas.viewport(), Qt.Key_Z, Qt.ControlModifier)
+        assert text.toPlainText() == "", outline
+
+
 # ---------------------------------------------------------------- redactions and spotlight
 def test_rounded_redactions_and_spotlight_dimming(page):
     canvas = make_canvas(page)
@@ -286,3 +309,105 @@ def test_every_tools_panel_fits_its_width_with_the_app_style(qapp):
         panel.close()
     finally:
         qapp.setStyleSheet("")
+
+
+def _ink(item, size=(420, 120), red=True):
+    """The item rendered on white: its painted pixels' x range in the top rows, and the image."""
+    from PySide6.QtGui import QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    scene = QGraphicsScene()
+    scene.addItem(item)
+    img = QImage(*size, QImage.Format_ARGB32)
+    img.fill(QColor("white"))
+    painter = QPainter(img)
+    scene.render(painter, QRectF(0, 0, *size), QRectF(0, 0, *size))
+    painter.end()
+    scene.removeItem(item)
+    return img
+
+
+def test_text_lines_line_up_left_center_or_right(qapp):
+    def first_line(align):
+        img = _ink(TextItem(Style(align=align, shadow=False), "a\nmuch longer line here"))
+        xs = [x for x in range(img.width()) for y in range(8, 30) if img.pixelColor(x, y).green() < 150]
+        return min(xs), max(xs)
+
+    left, center, right = first_line("left"), first_line("center"), first_line("right")
+    assert left[0] < center[0] < right[0]
+    assert abs((center[0] + center[1]) / 2 - (left[0] + right[1]) / 2) < 6  # centered on the longest line
+
+
+def test_callouts_center_by_default_and_can_go_left(qapp):
+    from snipforge.editor.text_items import CalloutItem
+    from snipforge.editor.variant_controls import TextFormatControls
+
+    usual = CalloutItem(Style())
+    assert usual.text.document().defaultTextOption().alignment() == Qt.AlignHCenter
+    left = CalloutItem(Style(align="left"))
+    assert left.text.document().defaultTextOption().alignment() == Qt.AlignLeft
+    controls = TextFormatControls()
+    controls.load("callout", Style())
+    assert controls.align.value == "center"  # what you see is what's chosen
+    controls.load("text", Style())
+    assert controls.align.value == "left"
+    assert not needs_version_3(Style().to_dict()) and needs_version_3(Style(align="left").to_dict())
+
+
+def test_spotlight_and_rectangle_shapes_need_version_3(qapp):
+    def state(kind, shape):
+        return {"kind": kind, "pos": [0, 0], "z": 0, "size": [9, 9], "style": Style(shape=shape).to_dict()}
+
+    assert document_version([state("spotlight", "rounded")]) == 1
+    assert document_version([state("spotlight", "ellipse")]) == 3
+    assert document_version([state("spotlight", "rect")]) == 3
+    assert document_version([state("rect", "rect")]) == 3
+    assert document_version([state("callout", "ellipse")]) == 1  # a callout shape version 1 has
+
+
+def test_a_curves_bend_turns_flips_and_scales_with_the_snip(page):
+    canvas = make_canvas(page)
+    canvas.set_tool("line")
+    canvas.apply_style(curve=True)
+    line = drag(canvas, "line", (20, 20), (120, 20))
+    line.drag_handle("control", QPointF(70, 100), False)
+    bend = line.handle_points()["control"]
+    canvas.resize_image(page.width() // 2, page.height() // 2)
+    moved = canvas.annotations()[0].handle_points()["control"]
+    assert abs(moved.x() - bend.x() / 2) < 1.5 and abs(moved.y() - bend.y() / 2) < 1.5
+    canvas.rotate_image(clockwise=True)
+    item = canvas.annotations()[0]
+    points = item.handle_points()
+    # Turned clockwise, the bend stays on the same side of the line: below it before, left of it now
+    assert points["control"].x() < min(points["p1"].x(), points["p2"].x())
+
+
+def test_an_arrows_line_never_pokes_out_past_its_head(qapp):
+    for heads in ("end", "start", "both"):
+        for width in (4, 12):
+            arrow = ArrowItem(Style(width=width, shadow=False, heads=heads))
+            arrow.set_points(QPointF(50, 60), QPointF(300, 60))
+            img = _ink(arrow, (400, 120))
+            red = lambda x, y, img=img: img.pixelColor(x, y).green() < 150  # noqa: E731
+            if heads in ("end", "both"):
+                assert not any(red(x, y) for x in range(302, 400) for y in range(120)), (heads, width)
+            if heads in ("start", "both"):
+                assert not any(red(x, y) for x in range(0, 48) for y in range(120)), (heads, width)
+
+
+def test_the_wheel_over_the_font_and_next_number_boxes_scrolls_the_panel(qapp):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication
+
+    from snipforge.editor.variant_controls import StepControls, TextFormatControls
+
+    fonts, steps = TextFormatControls(), StepControls()
+    seen = []
+    fonts.changed.connect(seen.append)
+    steps.next.setValue(3)
+    for box in (fonts.font, steps.next):
+        pos = QPointF(box.rect().center())
+        QApplication.sendEvent(box, QWheelEvent(pos, box.mapToGlobal(pos), QPoint(0, 0), QPoint(0, -120),
+                                                Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+    assert seen == [] and steps.next.value() == 3
