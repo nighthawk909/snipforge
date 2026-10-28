@@ -11,6 +11,7 @@ from snipforge.editor.items import ArrowItem, EffectItem, RectItem, SpotlightIte
 from snipforge.editor.style import (
     ARROW_HEADS,
     BADGES,
+    DEFAULT_TOOL_STYLES,
     NUMBERINGS,
     SHAPES,
     STYLE_FIELDS,
@@ -265,3 +266,23 @@ def test_the_panel_shows_each_variant_for_its_tool(qapp):
     before = len(seen)
     panel.load("arrow", Style(heads="start", curve=True), has_selection=True)  # loading never echoes
     assert len(seen) == before and panel._arrow.heads.value == "start" and panel.switch("curve").isChecked()
+
+
+def test_every_tools_panel_fits_its_width_with_the_app_style(qapp):
+    """Five shape icons with the usual text padding were wider than the panel: it scrolled sideways."""
+    from snipforge.editor.panel import PropertiesPanel
+    from snipforge.editor.window import TOOLS
+    from snipforge.theme import styles, tokens
+
+    qapp.setStyleSheet(styles.build_stylesheet(tokens.resolve("light", tokens.BUILTIN_ACCENTS[tokens.DEFAULT_ACCENT])))
+    try:
+        panel = PropertiesPanel()
+        panel.resize(panel.width(), 700)
+        panel.show()
+        for tool in [t[0] for t in TOOLS if t]:
+            for selected in (False, True):
+                panel.load(tool, DEFAULT_TOOL_STYLES.get(tool, Style()), has_selection=selected)
+                assert panel.widget().minimumSizeHint().width() <= panel.viewport().width(), (tool, selected)
+        panel.close()
+    finally:
+        qapp.setStyleSheet("")

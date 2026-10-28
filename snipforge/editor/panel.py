@@ -273,7 +273,8 @@ class PropertiesPanel(QScrollArea):
         self._mine_grid.setSpacing(4)
         self._custom_buttons: dict[str, QToolButton] = {}
         col.addLayout(self._mine_grid)
-        row = QHBoxLayout()
+        row = QVBoxLayout()  # one above the other: side by side they're wider than the panel
+        row.setSpacing(6)
         self._add_stamp = QPushButton("Add your own…")
         self._add_stamp.setToolTip("Add a picture (PNG, JPG, WebP, SVG...) as a stamp of your own")
         self._add_stamp.setAccessibleName("Add your own stamp")

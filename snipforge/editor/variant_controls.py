@@ -42,6 +42,7 @@ NUMBERING_LABELS = {"digits": "1 2 3", "letters": "A B C", "roman": "I II III"}
 BADGE_LABELS = {"circle": "Circle", "square": "Square", "pill": "Pill"}
 ALIGN_LABELS = {"left": "Align left", "center": "Center", "right": "Align right"}
 SHAPES_FOR = {"rect": RECT_SHAPES, "callout": CALLOUT_SHAPES, "spotlight": SPOTLIGHT_SHAPES}
+ICON_SEGMENT_MIN_WIDTH = 34
 USUAL_RECT_CORNER = 3  # what the slider shows for a rectangle's usual rounding
 
 
@@ -56,6 +57,7 @@ def icon_segmented(options: tuple[str, ...], labels: dict[str, str], icon_prefix
         b.setToolButtonStyle(Qt.ToolButtonIconOnly)
         b.setIconSize(QSize(20, 20))
         b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        b.setMinimumWidth(ICON_SEGMENT_MIN_WIDTH)  # the text padding would make five icons wider than the panel
     seg.setProperty("iconPrefix", icon_prefix)
     return seg
 
