@@ -50,6 +50,7 @@ class CommandBar(QWidget):
     save = Signal()
     copy = Signal()
     toggle_theme = Signal()
+    find = Signal()  # Ctrl+K: find a tool or action by name
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -72,6 +73,8 @@ class CommandBar(QWidget):
         self.redo_button = self._tool("redo", f"Redo ({redo_keys()})", self.redo)
         row.addWidget(self.undo_button)
         row.addWidget(self.redo_button)
+        self.find_button = self._tool("search", f"Find a tool or action by name ({keys('Ctrl+K')})", self.find)
+        row.addWidget(self.find_button)
         row.addStretch(1)
         row.addWidget(self._tool("zoom_out", f"Zoom out ({keys('Ctrl+wheel')})", self.zoom_out))
         self.zoom_label = QLabel("100%")
