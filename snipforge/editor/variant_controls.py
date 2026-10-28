@@ -43,7 +43,7 @@ NUMBERING_LABELS = {"digits": "1 2 3", "letters": "A B C", "roman": "I II III"}
 BADGE_LABELS = {"circle": "Circle", "square": "Square", "pill": "Pill"}
 ALIGN_LABELS = {"left": "Align left", "center": "Center", "right": "Align right"}
 SHAPES_FOR = {"rect": RECT_SHAPES, "callout": CALLOUT_SHAPES, "spotlight": SPOTLIGHT_SHAPES}
-ICON_SEGMENT_MIN_WIDTH = 34
+ICON_SEGMENT_MIN_WIDTH = 34  # a segment's least width, whatever its icon's or text's padding
 USUAL_RECT_CORNER = 3  # what the slider shows for a rectangle's usual rounding
 
 
@@ -211,6 +211,7 @@ class StepControls(QWidget):
             b.setToolTip({"digits": "Numbers", "letters": "Letters", "roman": "Roman numerals"}[key])
             b.setAccessibleName(b.toolTip())
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.setMinimumWidth(ICON_SEGMENT_MIN_WIDTH)  # the panel's width shares out, not the text's
         self.numbering.changed.connect(lambda key: self._emit(numbering=key))
         col.addWidget(self.numbering)
         self.badge = icon_segmented(BADGES, BADGE_LABELS, "badge")
