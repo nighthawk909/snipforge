@@ -200,7 +200,8 @@ class EditorWindow(QMainWindow):
         """Lay the rail out as `chosen` says, on the side it says."""
         side_changed = chosen.side != self._palette.side
         self._palette = chosen
-        self.tool_rail.set_palette(chosen)
+        if chosen != self.tool_rail.palette():  # the rail was just built with it, at startup
+            self.tool_rail.set_palette(chosen)
         if side_changed or self.tool_rail.property("side") != chosen.side:
             self._middle.removeWidget(self.tool_rail)
             self._middle.insertWidget(0 if chosen.side == "left" else self._middle.count(), self.tool_rail)
@@ -214,6 +215,7 @@ class EditorWindow(QMainWindow):
 
         self.canvas.commit_text()
         self._palette_window = CommandPalette(self.commands_for_palette(), self)
+        self._palette_window.setAttribute(Qt.WA_DeleteOnClose)
         self._palette_window.finished.connect(lambda _r: self.canvas.setFocus())
         self._palette_window.open_over(self.canvas)
 
@@ -293,7 +295,9 @@ class EditorWindow(QMainWindow):
         them, to every open editor."""
         from .customize_tools import CustomizeToolsDialog
 
-        CustomizeToolsDialog(self._palette, self).exec()
+        dialog = CustomizeToolsDialog(self._palette, self)
+        dialog.exec()
+        dialog.deleteLater()
         self.canvas.setFocus()
 
     def _wire_commands(self) -> None:

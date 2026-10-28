@@ -67,6 +67,8 @@ class ToolRail(QWidget):
         self._customize.setAccessibleName("Customize tools")
         self._customize.clicked.connect(self.customize)
         self._customize.installEventFilter(self)
+        for name, action in actions.items():  # once: the actions outlive every layout of the rail
+            action.toggled.connect(lambda on, n=name: on and self._set_stop(n))
         self.set_palette(palette or Palette())
 
     # ------------------------------------------------------------------ the palette
@@ -81,7 +83,7 @@ class ToolRail(QWidget):
         self._groups = [[self._make_button(name) for name in group] for group in palette.rail_groups()]
         self._dividers = [self._make_divider() for _ in self._groups[1:]]
         checked = next((n for n, b in self._buttons.items() if b.defaultAction().isChecked()), None)
-        self._set_stop(checked or (next(iter(self._buttons)) if self._buttons else ""))
+        self._set_stop(checked or "")
         self.retheme()
         self.updateGeometry()
         self._relayout()
@@ -108,7 +110,6 @@ class ToolRail(QWidget):
             self._buttons[name + "#"] = button
         else:
             self._buttons[name] = button
-            action.toggled.connect(lambda on, n=name: on and self._set_stop(n))
         return button
 
     def _make_divider(self) -> QWidget:
@@ -123,7 +124,10 @@ class ToolRail(QWidget):
         return [*self._buttons.values(), self._customize]
 
     def _set_stop(self, name: str) -> None:
-        """Make `name`'s button the one Tab reaches."""
+        """Make `name`'s button the one Tab reaches: a hidden tool's (picked by its key) has none, so
+        then the first tool's, or Customize when every tool is hidden."""
+        if name != "customize" and name not in self._buttons:
+            name = next(iter(self._buttons), "customize")
         self._stop = name
         for other, button in self._buttons.items():
             button.setFocusPolicy(Qt.TabFocus if other == name else Qt.NoFocus)
@@ -163,7 +167,9 @@ class ToolRail(QWidget):
         return None
 
     def _menu_at(self, pos: QPoint) -> None:
-        self.menu_for(self._tool_at(pos)).exec(self.mapToGlobal(pos))
+        menu = self.menu_for(self._tool_at(pos))
+        menu.exec(self.mapToGlobal(pos))
+        menu.deleteLater()
 
     def menu_for(self, name: str | None) -> QMenu:
         """The right-click menu for the tool `name`, or for the rail itself when None."""
@@ -268,8 +274,6 @@ class ToolRail(QWidget):
 
     def _relayout(self) -> None:
         """The fewest columns that fit the rail's height; labels only when one labelled column does."""
-        if not self._groups:
-            return
         columns = next((n for n in range(1, MAX_COLUMNS) if self.height() >= self._height_for(n)), MAX_COLUMNS)
         labelled = self._palette.labels and columns == 1
         if columns != self._columns or labelled != self._labelled:

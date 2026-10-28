@@ -2,7 +2,7 @@
 import pytest
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QToolButton
 
 from snipforge.editor.window import TOOLS, EditorWindow
 from snipforge.library import Library
@@ -249,3 +249,43 @@ def test_keyboard_reaches_the_customize_button_too(make_editor):
     assert QApplication.focusWidget() is rail.customize_button()
     QTest.keyClick(rail.customize_button(), Qt.Key_Up)
     assert QApplication.focusWidget() is last
+
+
+def test_the_rail_keeps_one_tab_stop_however_often_the_palette_changes(make_editor):
+    editor = make_editor(1440, 1000)
+    rail = editor.tool_rail
+    action = editor._tool_actions["crop"]
+    before = action.receivers("2toggled(bool)")
+    for _ in range(5):
+        palette_store.save(Palette().toggled_favorite("text"))
+        palette_store.save(Palette())
+        QApplication.processEvents()
+    assert action.receivers("2toggled(bool)") == before  # connected once, not once per layout
+    palette_store.save(Palette().toggled_hidden("crop"))
+    QApplication.processEvents()
+    editor.canvas.set_tool("crop")  # its key still works...
+    stops = [b for b in rail.findChildren(QToolButton) if b.focusPolicy() & Qt.TabFocus]
+    assert len(stops) == 1  # ...and Tab still reaches the rail
+
+
+def test_with_every_tool_hidden_the_customize_button_is_the_tab_stop(make_editor):
+    editor = make_editor(1440, 1000)
+    hidden = Palette()
+    for name in TOOL_NAMES:
+        hidden = hidden.toggled_hidden(name)
+    palette_store.save(hidden)
+    QApplication.processEvents()
+    rail = editor.tool_rail
+    assert rail.shown() == []
+    assert rail.customize_button().focusPolicy() & Qt.TabFocus and rail.customize_button().isVisible()
+    assert rail.customize_button().y() < editor.tool_rail.height()
+
+
+def test_the_rail_is_laid_out_once_at_startup(make_editor, monkeypatch):
+    from snipforge.editor.tool_rail import ToolRail
+
+    calls = []
+    real = ToolRail.set_palette
+    monkeypatch.setattr(ToolRail, "set_palette", lambda self, p: calls.append(p) or real(self, p))
+    make_editor(1440, 1000)
+    assert len(calls) == 1

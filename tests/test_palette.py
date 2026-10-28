@@ -114,3 +114,17 @@ def test_tool_titles_and_keys():
     assert all(palette.key_of(name) for name in TOOL_NAMES)
     assert len({palette.key_of(name) for name in TOOL_NAMES}) == len(TOOL_NAMES)  # every tool its own key
     assert TOOLS[1] is None  # the divider after Select is still there for the window
+
+
+def test_a_new_tool_goes_beside_its_group_mates_wherever_you_put_them():
+    groups = Palette.default().groups
+    mates = next(g for g in groups if "magnify" in g)
+    others = [n for g in groups for n in g if n not in mates]
+    # Everything in one group, with magnify's group mates moved to the front
+    stored = {"groups": [[*[n for n in mates if n != "magnify"], *others]]}
+    app_settings().setValue(palette.SETTING, json.dumps(stored))
+    loaded = palette.load().groups
+    assert len(loaded) == 1
+    at = mates.index("magnify")
+    neighbour = mates[at - 1] if at else mates[1]
+    assert abs(loaded[0].index("magnify") - loaded[0].index(neighbour)) == 1

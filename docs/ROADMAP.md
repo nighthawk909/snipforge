@@ -71,7 +71,7 @@ Software Center) and the SnagIt features people miss most. Built in this order:
 ### Phase 6: the editor, version 3
 A tool palette that's yours, tools with variants, and a properties panel that does the rest of what
 SnagIt's does. Built in this order:
-- [ ] A tool palette that's yours: Favorites, hide tools, your order and groups, labels, the rail on
+- [x] A tool palette that's yours: Favorites, hide tools, your order and groups, labels, the rail on
   either side, and Ctrl+K to find any tool or action by name
 - [ ] Tool variants: arrow heads and curves, more shapes, step number styles, highlight boxes, text
   formatting, your own stamps, blur strength, spotlight shape

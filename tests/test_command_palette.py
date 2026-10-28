@@ -3,6 +3,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from shiboken6 import isValid
 
 from snipforge.editor import palette as palette_store
 from snipforge.editor.command_palette import Command, CommandPalette, ranked, score
@@ -65,7 +66,7 @@ def test_typing_filters_and_enter_runs(editor):
     assert palette.current().label == "Crop"
     QTest.keyClick(palette.field(), Qt.Key_Return)
     QApplication.processEvents()
-    assert editor.canvas.tool == "crop" and not palette.isVisible()
+    assert editor.canvas.tool == "crop" and not (isValid(palette) and palette.isVisible())  # closed, and let go
     assert editor.focusWidget() is editor.canvas  # the keyboard goes back to the snip
 
 

@@ -171,13 +171,28 @@ class Palette:
             return Palette()
         for name in TOOL_NAMES:
             if name not in seen:
-                where = Palette.default_group_of(name)
-                groups[min(where, len(groups) - 1)].append(name)
+                _place_new_tool(groups, name, seen)
+                seen.add(name)
         favorites = _names(data.get("favorites"))
         hidden = frozenset(_names(data.get("hidden")))
         labels = data.get("labels") is True
         side = data["side"] if data.get("side") in SIDES else "left"
         return Palette(groups=groups, favorites=favorites, hidden=hidden, labels=labels, side=side)
+
+
+def _place_new_tool(groups: list[list[str]], name: str, seen: set[str]) -> None:
+    """Put a tool the stored palette doesn't have next to its default group's tools, wherever you've
+    moved them: after the one before it, else before the one after it, else in the last group."""
+    mates = [n for n in TOOL_NAMES if Palette.default_group_of(n) == Palette.default_group_of(name)]
+    at = mates.index(name)
+    before = [n for n in mates[:at] if n in seen]
+    after = [n for n in mates[at + 1:] if n in seen]
+    if not before and not after:
+        groups[-1].append(name)
+        return
+    anchor, offset = (before[-1], 1) if before else (after[0], 0)
+    group = next(g for g in groups if anchor in g)
+    group.insert(group.index(anchor) + offset, name)
 
 
 def _names(value) -> list[str]:
