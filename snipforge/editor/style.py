@@ -161,8 +161,9 @@ _STYLE_FIELDS: dict[str, tuple[str, ...]] = {
 }
 LOOK_KINDS = {"arrow", "line", "rect", "ellipse", "pen", "highlight", "highlight_box", "text", "callout", "stamp",
               "step", "magnify", "piece"}  # markup that can be see-through or turned (not what hides the snip)
+LOOK_FIELDS = ("opacity", "rotation")
 STYLE_FIELDS: dict[str, tuple[str, ...]] = {
-    kind: (*fields, "opacity", "rotation") if kind in LOOK_KINDS else fields for kind, fields in _STYLE_FIELDS.items()}
+    kind: (*fields, *LOOK_FIELDS) if kind in LOOK_KINDS else fields for kind, fields in _STYLE_FIELDS.items()}
 VERSION_3_KINDS = {"highlight_box"}  # kinds older SnipForges can't draw
 VERSION_3_DEFAULTS = {"heads": "end", "open_head": False, "curve": False, "corner": USUAL_CORNER, "numbering": "digits",
                       "badge": "circle", "box": False, "font_family": "", "align": "", "italic": False,

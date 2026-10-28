@@ -7,7 +7,7 @@ added, removed, undone, reordered, hidden or locked shows at once.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -24,6 +24,7 @@ from shiboken6 import isValid
 from ..icons import icon
 from .commands import StateCommand
 
+TIE_STEP = 1e-3  # apart enough to order, too little to pass markup at another height
 ICON_FOR = {"highlight_box": "highlight", "piece": "move", "erase": "eraser"}
 MAX_ROWS_SHOWN = 8  # the list grows to this many rows, then scrolls
 
@@ -58,27 +59,41 @@ class _Row(QWidget):
         self.icon = QLabel()
         self.icon.setFixedSize(18, 18)
         row.addWidget(self.icon)
-        self.name = QLabel(label_for(item))
-        self.name.setProperty("sfRole", "muted" if item.hidden else "")
+        self.name = QLabel()
         row.addWidget(self.name, 1)
         self.eye = QToolButton()
         self.eye.setObjectName("LayerToggle")
         self.eye.setCheckable(True)
-        self.eye.setChecked(item.hidden)
-        self.eye.setToolTip("Hidden: click to show it" if item.hidden else "Hide it (it stays in the snip's markup)")
-        self.eye.setAccessibleName(f"Hide {self.name.text()}")
         self.eye.setFocusPolicy(Qt.TabFocus)
         self.eye.clicked.connect(on_hide)
         row.addWidget(self.eye)
         self.lock = QToolButton()
         self.lock.setObjectName("LayerToggle")
         self.lock.setCheckable(True)
-        self.lock.setChecked(item.locked)
-        self.lock.setToolTip("Locked: click to unlock it" if item.locked else "Lock it where it is")
-        self.lock.setAccessibleName(f"Lock {self.name.text()}")
         self.lock.setFocusPolicy(Qt.TabFocus)
         self.lock.clicked.connect(on_lock)
         row.addWidget(self.lock)
+        self.sync()
+
+    def sync(self) -> None:
+        """Show the markup as it is now: its name, and whether it's hidden or locked."""
+        item = self.item
+        shown = (label_for(item), item.hidden, item.locked)
+        if shown == getattr(self, "_shown", None):
+            return
+        self._shown = shown
+        self.name.setText(label_for(item))
+        role = "muted" if item.hidden else ""
+        if self.name.property("sfRole") != role:
+            self.name.setProperty("sfRole", role)
+            self.name.style().unpolish(self.name)  # the stylesheet looks at it again
+            self.name.style().polish(self.name)
+        self.eye.setChecked(item.hidden)
+        self.eye.setToolTip("Hidden: click to show it" if item.hidden else "Hide it (it stays in the snip's markup)")
+        self.eye.setAccessibleName(f"Hide {self.name.text()}")
+        self.lock.setChecked(item.locked)
+        self.lock.setToolTip("Locked: click to unlock it" if item.locked else "Lock it where it is")
+        self.lock.setAccessibleName(f"Lock {self.name.text()}")
         self.retheme()
 
     def retheme(self) -> None:
@@ -107,6 +122,7 @@ class LayersList(QWidget):
         self._list.setAccessibleName("Layers: the markup on the snip, top first")
         self._list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._list.currentRowChanged.connect(self._row_chosen)
+        self._list.installEventFilter(self)
         col.addWidget(self._list)
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -124,17 +140,31 @@ class LayersList(QWidget):
         self._empty.setProperty("sfRole", "secondary")
         col.addWidget(self._empty)
         self._items: list = []
+        self._stale = False  # the markup changed since the rows were built
 
     # ------------------------------------------------------------------ the canvas
     def attach(self, canvas) -> None:
         self._canvas = canvas
-        canvas.document_changed.connect(self.refresh)
+        canvas.document_changed.connect(self._changed)  # every edit, undo and redo
         canvas.selection_changed.connect(self._follow_selection)
-        canvas.undo_stack.indexChanged.connect(self._undo_moved)
         self.refresh()
 
-    def _undo_moved(self, _index: int) -> None:
-        self.refresh()
+    def _changed(self) -> None:
+        """Rows are rebuilt once the edit is done (a drag or held key makes many), and only while
+        they can be seen."""
+        if self._stale:
+            return
+        self._stale = True
+        if self.isVisible():
+            QTimer.singleShot(0, self._catch_up)
+
+    def _catch_up(self) -> None:
+        if self._stale and isValid(self) and self.isVisible():
+            self.refresh()
+
+    def showEvent(self, e) -> None:  # noqa: N802 - Qt API
+        super().showEvent(e)
+        self._catch_up()
 
     def _ordered(self) -> list:
         """The canvas's markup, top first."""
@@ -144,10 +174,17 @@ class LayersList(QWidget):
         # The canvas outlives the list while a window is torn down, and its signals still fire then.
         if self._canvas is None or not isValid(self._list):
             return
+        self._stale = False
+        ordered = self._ordered()
+        if ordered == self._items:  # the same markup in the same order (a move, a nudge): rows as they are
+            for n in range(self._list.count()):
+                self._list.itemWidget(self._list.item(n)).sync()
+            self._follow_selection()
+            return
         self._syncing = True
         current = self._list.currentItem()
         chosen = current.data(Qt.UserRole) if current is not None else None
-        self._items = self._ordered()
+        self._items = ordered
         self._list.clear()
         for item in self._items:
             entry = QListWidgetItem()
@@ -177,6 +214,8 @@ class LayersList(QWidget):
     def _follow_selection(self, prefer=None) -> None:
         if self._canvas is None or self._syncing or not isValid(self._list):
             return
+        if self._stale:
+            return  # the rows are about to be rebuilt, and they follow the selection then
         selected = self._canvas.selected_annotations()
         target = selected[0] if selected else None
         self._syncing = True
@@ -206,13 +245,17 @@ class LayersList(QWidget):
         if self._canvas is None or row < 0 or not 0 <= other < len(self._items):
             return
         a, b = self._items[row], self._items[other]
-        before = {a: a.get_state(), b: b.get_state()}
+        # Markup at the same height (drawn in order, or every spotlight) gets heights of its own first,
+        # just apart and in the order shown, so the swap moves it one row and no further
+        ties = [i for i in self._items if i.zValue() == a.zValue()] if a.zValue() == b.zValue() else []
+        changed = list(dict.fromkeys([a, b, *ties]))
+        before = {i: i.get_state() for i in changed}
+        for k, item in enumerate(ties):
+            item.setZValue(item.zValue() + (len(ties) - 1 - k) * TIE_STEP)
         za, zb = a.zValue(), b.zValue()
-        if za == zb:  # drawn in order: give them an order of their own
-            zb = za + (-1 if step > 0 else 1) * 0.5
         a.setZValue(zb)
         b.setZValue(za)
-        records = [(i, before[i], i.get_state()) for i in (a, b)]
+        records = [(i, before[i], i.get_state()) for i in changed]
         self._canvas.undo_stack.push(StateCommand(records, "Reorder"))
         self.refresh()
         self._syncing = True
@@ -234,11 +277,13 @@ class LayersList(QWidget):
     def toggle_locked(self, row: int) -> None:
         self.toggle_locked_item(self._items[row])
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802 - Qt API
-        if e.modifiers() & Qt.AltModifier and e.key() in (Qt.Key_Up, Qt.Key_Down):
+    def eventFilter(self, watched, e) -> bool:  # noqa: N802 - Qt API
+        """Alt+Up and Alt+Down in the list (which would take them as plain arrows) move the layer."""
+        if (watched is self._list and e.type() == QEvent.KeyPress and e.modifiers() & Qt.AltModifier
+                and e.key() in (Qt.Key_Up, Qt.Key_Down)):
             self.move_current(-1 if e.key() == Qt.Key_Up else 1)
-            return
-        super().keyPressEvent(e)
+            return True
+        return super().eventFilter(watched, e)
 
     def retheme(self) -> None:
         for n in range(self._list.count()):
@@ -247,10 +292,13 @@ class LayersList(QWidget):
                 widget.retheme()
 
     def has_rows(self) -> bool:
-        return bool(self._items)
+        """Whether there's markup to list (asked before the list is shown, so not from its rows)."""
+        return self._canvas is not None and bool(self._canvas.annotations())
 
     # ------------------------------------------------------------------ for tests
     def names(self) -> list[str]:
+        if self._stale:
+            self.refresh()
         return [label_for(i) for i in self._items]
 
     def list_widget(self) -> QListWidget:

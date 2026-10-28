@@ -114,7 +114,7 @@ class TextItem(Annotation, EditableText):
         self.setPlainText(text)
         self.init_annotation(style)
         self._apply_text_style()
-        self.document().contentsChanged.connect(self._fit_width)
+        self.document().contentsChanged.connect(self._contents_changed)
 
     def set_style(self, style: Style) -> None:
         super().set_style(style)
@@ -126,6 +126,10 @@ class TextItem(Annotation, EditableText):
         apply_alignment(self, text_align(self.kind, self.style))
         self._fit_width()
         self._apply_outline()
+
+    def _contents_changed(self) -> None:
+        self._fit_width()
+        self._apply_look()  # turned text keeps its place as it grows
 
     def _fit_width(self) -> None:
         """Centered or right-aligned lines need a width to line up in: the longest line's. Left

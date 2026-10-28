@@ -24,7 +24,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsItem
 
 from ..fonts import ui_font
-from .style import USUAL_CORNER, USUAL_DIM, USUAL_OPACITY, Style, fill_opacity, fill_qcolor
+from .style import LOOK_KINDS, USUAL_CORNER, USUAL_DIM, USUAL_OPACITY, Style, fill_opacity, fill_qcolor
 
 FLAGS = QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable
 HIT_SLOP = 8.0
@@ -139,15 +139,19 @@ class Annotation:
 
     def set_state(self, state: dict) -> None:
         self.prepareGeometryChange()
-        self.setPos(QPointF(*state["pos"]))
-        self.setZValue(state.get("z", 0))
-        # Style before geometry: layout that depends on style (callout text) must not resize the
-        # restored geometry using the style being replaced.
-        self.set_style(Style.from_dict(state["style"]))
-        self._set_geometry(state)
-        self.set_locked(state.get("locked") is True)
-        self.set_hidden(state.get("hidden") is True)
-        self._apply_look()
+        self._restoring = True  # the saved position is where it goes: no keeping it in place
+        try:
+            self.setPos(QPointF(*state["pos"]))
+            self.setZValue(state.get("z", 0))
+            # Style before geometry: layout that depends on style (callout text) must not resize the
+            # restored geometry using the style being replaced.
+            self.set_style(Style.from_dict(state["style"]))
+            self._set_geometry(state)
+            self.set_locked(state.get("locked") is True)
+            self.set_hidden(state.get("hidden") is True)
+            self._apply_look()
+        finally:
+            self._restoring = False
 
     # -- lock and hide -------------------------------------------------------
     def set_locked(self, on: bool) -> None:
@@ -166,10 +170,23 @@ class Annotation:
         return self.boundingRect().center()
 
     def _apply_look(self) -> None:
-        self.setOpacity(self.style.opacity / 100)
-        if self.style.rotation or self.rotation():
-            self.setTransformOriginPoint(self._center())
-            self.setRotation(self.style.rotation)
+        """Opacity, and the turn about its middle. When its shape changes while it's turned (typing,
+        a handle, a new point) the middle moves: it's moved back so what didn't change stays put on
+        the snip, and its saved position says where it is."""
+        looks = self.kind in LOOK_KINDS  # what hides the snip is never see-through or turned
+        self.setOpacity(self.style.opacity / 100 if looks else 1.0)
+        rotation = self.style.rotation if looks else 0
+        if not rotation and not self.rotation():
+            return
+        origin = self._center()
+        if origin == self.transformOriginPoint() and rotation == self.rotation():
+            return
+        keep = rotation == self.rotation() and not getattr(self, "_restoring", False)
+        anchor = self.mapToScene(QPointF(0, 0))
+        self.setTransformOriginPoint(origin)
+        self.setRotation(rotation)
+        if keep:
+            self.setPos(self.pos() + anchor - self.mapToScene(QPointF(0, 0)))
 
     def _geometry(self) -> dict:
         return {}
@@ -272,6 +289,8 @@ class BoxItem(Annotation, QGraphicsItem):
         return self._rect.width() < 4 or self._rect.height() < 4
 
     def _handles(self) -> dict[str, QPointF]:
+        if self.rotation():  # sized by its handles only upright: turned, Ctrl+arrow keys size it
+            return {}
         r = self.scene_rect()
         cx, cy = r.center().x(), r.center().y()
         points = {"tl": r.topLeft(), "tr": r.topRight(), "br": r.bottomRight(), "bl": r.bottomLeft()}
@@ -742,6 +761,7 @@ class StrokeItem(Annotation, QGraphicsItem):
     def extend(self, point: QPointF) -> None:
         self.prepareGeometryChange()
         self._points.append(QPointF(point))
+        self._apply_look()
         self.update()
 
     def is_degenerate(self) -> bool:

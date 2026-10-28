@@ -32,7 +32,7 @@ from .handles import HandleOverlay, OwnRubberBand
 from .image_ops import ImageGeometry
 from .items import Annotation, EffectItem
 from .mini_toolbar import MiniToolbar
-from .style import DEFAULT_TOOL_STYLES, STYLE_FIELDS, VERSION_3_KINDS, Style, needs_version_3
+from .style import DEFAULT_TOOL_STYLES, LOOK_FIELDS, LOOK_KINDS, STYLE_FIELDS, VERSION_3_KINDS, Style, needs_version_3
 from .text_items import EditableText, TextItem
 
 DUPLICATE_OFFSET = 16.0
@@ -44,6 +44,12 @@ DOCUMENT_VERSION = 3  # documents from newer versions are opened read-only (see 
 
 class UnsupportedDocument(ValueError):
     """Saved by a newer SnipForge, in a way this version can't show correctly."""
+
+
+def _edges(item) -> QRectF:
+    """What align and distribute line up: a box's own edges, or for anything else (and anything
+    turned) what it covers on the snip."""
+    return item.scene_rect() if hasattr(item, "scene_rect") and not item.rotation() else item.sceneBoundingRect()
 
 
 def document_version(states: list[dict]) -> int:
@@ -145,7 +151,7 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
         self._mini.lock.connect(lambda on: self.set_locked(self.selected_annotations(), on))
         self._mini.delete.connect(self.delete_selection)
         self._mini.set_swatches(colors.palette())
-        colors.notifier().changed.connect(lambda: self._mini.set_swatches(colors.palette()))
+        colors.notifier().changed.connect(self._palette_changed)  # a method: let go when the canvas goes
 
         self._scene.selectionChanged.connect(self._on_selection_changed)
         theme.on_change(self.retheme)
@@ -228,19 +234,27 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
 
     def apply_style(self, **changes) -> None:
         selected = self.selected_annotations()
+
+        def own(kind: str) -> dict:
+            """The changes `kind` takes: what hides the snip never takes opacity or rotation."""
+            return changes if kind in LOOK_KINDS else {k: v for k, v in changes.items() if k not in LOOK_FIELDS}
+
         for kind in {i.kind for i in selected} or {self.tool}:
-            if kind in self.tool_styles:
-                self.tool_styles[kind] = self.tool_styles[kind].with_changes(**changes)
+            if kind in self.tool_styles and own(kind):
+                self.tool_styles[kind] = self.tool_styles[kind].with_changes(**own(kind))
         editing = self.editing_text_item()
         editing_owner = editing.owner() if editing is not None else None
         records = []
         for item in selected:
+            mine = own(item.kind)
+            if not mine:
+                continue
             if item is editing_owner or getattr(item, "is_new", False):
                 # Text mid-edit: the edit's own Add/Edit undo step captures the style change.
-                item.set_style(item.style.with_changes(**changes))
+                item.set_style(item.style.with_changes(**mine))
                 continue
             before = item.get_state()
-            item.set_style(item.style.with_changes(**changes))
+            item.set_style(item.style.with_changes(**mine))
             records.append((item, before, item.get_state()))
         if records:
             key = ("style", tuple(id(r[0]) for r in records), tuple(sorted(changes)))
@@ -249,12 +263,20 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
         self.selection_changed.emit()
 
     # ------------------------------------------------------------------ edits
+    def _only_locked(self) -> bool:
+        """Whether everything selected is locked, saying so: nothing to move, size or delete."""
+        selected = self.selected_annotations()
+        if selected and all(i.locked for i in selected):
+            self.notice.emit("It's locked: unlock it first (right-click, or the Layers list)")
+            return True
+        return False
+
     def delete_selection(self) -> None:
         items = [i for i in self.selected_annotations() if not i.locked]
         if items:
             self.undo_stack.push(RemoveItemsCommand(self._scene, items))
-        elif self.selected_annotations():
-            self.notice.emit("It's locked: unlock it first (right-click, or the Layers list)")
+        else:
+            self._only_locked()
 
     def _state_change(self, items, text: str, change) -> None:
         """Apply `change(item)` to each of `items` as one undo step."""
@@ -284,7 +306,7 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
         items = [i for i in self.selected_annotations() if not i.locked]
         if not items:
             return
-        rects = {i: i.sceneBoundingRect() if not hasattr(i, "scene_rect") else i.scene_rect() for i in items}
+        rects = {i: _edges(i) for i in items}
         frame = self._crop_rect if len(items) == 1 else QRectF(rects[items[0]])
         for r in rects.values():
             if len(items) > 1:
@@ -304,7 +326,7 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
         items = [i for i in self.selected_annotations() if not i.locked]
         if len(items) < 3:
             return
-        rects = {i: i.sceneBoundingRect() if not hasattr(i, "scene_rect") else i.scene_rect() for i in items}
+        rects = {i: _edges(i) for i in items}
         horizontal = axis in ("horizontal", "h")
         key = (lambda r: r.left()) if horizontal else (lambda r: r.top())
         order = sorted(items, key=lambda i: key(rects[i]))
@@ -354,7 +376,11 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
 
     def nudge(self, dx: float, dy: float) -> None:
         records = []
+        if self._only_locked():
+            return
         for item in self.selected_annotations():
+            if item.locked:
+                continue
             before = item.get_state()
             item.moveBy(dx, dy)
             records.append((item, before, item.get_state()))
@@ -629,6 +655,9 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
         return max(zs, default=0) + 1
 
     # ------------------------------------------------------------------ the mini toolbar
+    def _palette_changed(self) -> None:
+        self._mini.set_swatches(colors.palette())
+
     def mini_toolbar(self) -> MiniToolbar:
         return self._mini
 

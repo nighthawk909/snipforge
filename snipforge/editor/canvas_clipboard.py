@@ -68,9 +68,9 @@ class ClipboardMixin:
     """For the Canvas: uses its scene, selection, undo stack, `notice` and `copy_requested`."""
 
     # ------------------------------------------------------------------ copy and cut
-    def markup_data(self) -> bytes | None:
-        """The selected markup in SnipForge's clipboard format, or None if nothing is selected."""
-        items = self.bottom_up(self.selected_annotations())
+    def markup_data(self, items=None) -> bytes | None:
+        """The selected markup (or `items`) in SnipForge's clipboard format, or None if there's none."""
+        items = self.bottom_up(self.selected_annotations() if items is None else items)
         states = [i.get_state() for i in items if not i.is_degenerate()]
         return json.dumps({"version": 1, "items": states}).encode("utf-8") if states else None
 
@@ -85,9 +85,10 @@ class ClipboardMixin:
 
     def cut_selection(self) -> bool:
         """Copy the selected markup and remove it (one undo step). False if nothing was selected."""
-        data = self.markup_data()
-        items = [i for i in self.selected_annotations() if not i.locked]  # locked markup stays
-        if data is None or not items:
+        items = [i for i in self.selected_annotations() if not i.locked]  # locked markup stays, and isn't copied
+        data = self.markup_data(items) if items else None
+        if data is None:
+            self._only_locked()
             return False
         mime = QMimeData()
         mime.setData(MARKUP_MIME, QByteArray(data))
