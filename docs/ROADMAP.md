@@ -75,7 +75,7 @@ SnagIt's does. Built in this order:
   either side, and Ctrl+K to find any tool or action by name
 - [x] Tool variants: arrow heads and curves, more shapes, step number styles, highlight boxes, text
   formatting, your own stamps, blur strength, spotlight shape
-- [ ] Properties panel 3.0: opacity and rotation for everything, a hex color box, recent and custom
+- [x] Properties panel 3.0: opacity and rotation for everything, a hex color box, recent and custom
   colors, "set as this tool's default", a mini toolbar over the selection, align and distribute,
   lock, and a Layers list
 
