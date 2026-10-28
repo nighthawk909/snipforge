@@ -44,12 +44,21 @@ def is_custom(name: str) -> bool:
 
 def _safe_stem(stem: str) -> str:
     """A file stem that's safe on any disk: letters, digits, spaces, dashes and underscores."""
-    cleaned = re.sub(r"[^\w \-]+", "", stem, flags=re.UNICODE).strip()
-    return cleaned[:40] or "stamp"
+    cleaned = re.sub(r" +", " ", re.sub(r"[^\w \-]+", "", stem, flags=re.UNICODE)).strip()
+    return cleaned[:40].strip() or "stamp"
+
+
+_STEM = re.compile(r"[\w\-]+(?: [\w\-]+)*", flags=re.UNICODE)  # what add() makes: never a path
 
 
 def _path_of(name: str) -> Path | None:
+    """The stamp's file in the stamps folder. A name from a document is untrusted: anything but a plain
+    stem (a path, "..", a drive or a share) is no stamp at all."""
+    if not is_custom(name):
+        return None
     stem = name[len(PREFIX):]
+    if len(stem) > 60 or not _STEM.fullmatch(stem):
+        return None
     for suffix in (".png", ".svg"):
         path = root() / f"{stem}{suffix}"
         if path.is_file():
@@ -86,6 +95,17 @@ def image(name: str) -> QImage | None:
     return None if picture.isNull() else picture
 
 
+_HREF = re.compile(r"""(?:href\s*=|url\()\s*["']?\s*([^"')\s>]*)""", flags=re.IGNORECASE)
+
+
+def _self_contained(svg: str) -> bool:
+    """Whether an SVG draws only from itself: Qt follows links to other files (and, on Windows, to
+    network shares), so a stamp may only link inside itself or to embedded data."""
+    if "<!entity" in svg.lower():
+        return False
+    return all(ref.startswith("#") or ref.lower().startswith("data:") for ref in _HREF.findall(svg))
+
+
 def add(source: Path) -> str | None:
     """Copy a picture in as a stamp. Returns its style name, or None if it couldn't be read or there's
     no room. A picture bigger than MAX_SIDE is scaled down; an SVG is kept as it is."""
@@ -107,14 +127,20 @@ def add(source: Path) -> str | None:
     stem = name[len(PREFIX):]
     try:
         if source.suffix.lower() == ".svg":
+            if not _self_contained(source.read_text(encoding="utf-8", errors="replace")):
+                log.warning("Not adding %s as a stamp: it links to other files", source.name)
+                return None
             shutil.copyfile(source, folder / f"{stem}.svg")
         else:
             reader = QImageReader(str(source))
             reader.setAutoTransform(True)
+            size = reader.size()  # a huge picture is read small: whole, it may be too big to load at all
+            if size.isValid() and max(size.width(), size.height()) > MAX_SIDE:
+                reader.setScaledSize(size.scaled(MAX_SIDE, MAX_SIDE, Qt.KeepAspectRatio))
             picture = reader.read()
             if picture.isNull():
                 return None
-            if max(picture.width(), picture.height()) > MAX_SIDE:
+            if max(picture.width(), picture.height()) > MAX_SIDE:  # turned, or a size the reader couldn't tell
                 picture = picture.scaled(MAX_SIDE, MAX_SIDE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             if not picture.save(str(folder / f"{stem}.png"), "PNG"):
                 return None
@@ -127,7 +153,7 @@ def add(source: Path) -> str | None:
 
 
 def remove(name: str) -> bool:
-    path = _path_of(name) if is_custom(name) else None
+    path = _path_of(name)
     if path is None:
         return False
     try:

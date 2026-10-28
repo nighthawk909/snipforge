@@ -676,6 +676,23 @@ class ArrowItem(LineItem):
             ends.append((self._p1, math.atan2(self._p1.y() - towards.y(), self._p1.x() - towards.x())))
         return ends
 
+    def _shaft(self, head: float) -> QPainterPath:
+        """The path up to each head's neck (a filled head) or just short of its tip (an open V), so the
+        line's round cap never pokes out past the point."""
+        path = self._path()
+        length = path.length()
+        cut = self.style.width / 2 if self.style.open_head else head * 0.75
+        start = cut if self.style.heads in ("start", "both") else 0.0
+        end = length - cut if self.style.heads in ("end", "both") else length
+        if end <= start:
+            return QPainterPath()
+        t0, t1 = path.percentAtLength(start), path.percentAtLength(end)
+        steps = 32 if self.style.curve else 1
+        shaft = QPainterPath(path.pointAtPercent(t0))
+        for n in range(1, steps + 1):
+            shaft.lineTo(path.pointAtPercent(t0 + (t1 - t0) * n / steps))
+        return shaft
+
     def paint(self, p: QPainter, _opt, _widget=None) -> None:
         color = QColor(self.style.color)
         head = min(self._head(), self.length() * 0.6)
@@ -683,7 +700,7 @@ class ArrowItem(LineItem):
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(style_pen(self.style))
         p.setBrush(Qt.NoBrush)
-        p.drawPath(self._path())
+        p.drawPath(self._shaft(head))
         for tip, angle in self._ends():
             left = QPointF(tip.x() - head * math.cos(angle - wing), tip.y() - head * math.sin(angle - wing))
             right = QPointF(tip.x() - head * math.cos(angle + wing), tip.y() - head * math.sin(angle + wing))

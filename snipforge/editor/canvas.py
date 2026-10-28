@@ -54,8 +54,8 @@ def document_version(states: list[dict]) -> int:
         if not isinstance(state, dict):  # kept unread from a damaged document
             continue
         style = state.get("style")
-        if state.get("kind") in VERSION_3_KINDS or needs_version_3(style) or state.get("locked") \
-                or state.get("hidden"):
+        if state.get("kind") in VERSION_3_KINDS or needs_version_3(style, state.get("kind")) \
+                or state.get("locked") or state.get("hidden"):
             return 3
         if state.get("kind") == "piece" or (isinstance(style, dict) and style.get("bold") is False):
             version = 2

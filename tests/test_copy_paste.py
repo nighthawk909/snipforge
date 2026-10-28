@@ -247,7 +247,7 @@ def test_right_click_menu_on_markup(editor):
     assert canvas.selected_annotations() == [rect]  # right-clicking markup selects it
     actions = {a.text(): a for a in menu.actions() if a.text()}
     assert list(actions) == ["Cut", "Copy", "Paste", "Duplicate", "Delete", "Bring to front", "Send to back",
-                             "Select all"]
+                             "Lock", "Hide", "Use as the tool's default", "Select all"]
     assert actions["Cut"].shortcut() == QKeySequence("Ctrl+X")
     actions["Duplicate"].trigger()
     assert kinds(canvas) == ["rect", "rect"]

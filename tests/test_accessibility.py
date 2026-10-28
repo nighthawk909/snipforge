@@ -82,6 +82,30 @@ def test_every_control_in_the_editor_has_a_name(editor):
     assert "snip" in editor.canvas.accessibleName().lower() and "Tab" in editor.canvas.accessibleDescription()
 
 
+def test_the_selection_controls_and_layers_have_names_and_the_layers_rows_are_tab_stops(editor):
+    from tests.test_editor import drag
+
+    canvas = editor.canvas
+    drag(canvas, "rect", (40, 40), (160, 120))
+    drag(canvas, "arrow", (200, 60), (320, 160))
+    canvas.select_all()  # the mini toolbar, Look, Arrange and the tool default buttons
+    QApplication.processEvents()
+    assert canvas.mini_toolbar().isVisible()
+    assert unnamed(editor) == []
+    canvas.set_tool("select")
+    for item in canvas.annotations():
+        item.setSelected(False)
+    QApplication.processEvents()
+    layers = editor.panel.layers_list()
+    assert layers.isVisibleTo(editor) and unnamed(editor) == []
+    stops, w = [], layers.list_widget()
+    for _ in range(40):  # Tab from the list goes through each row's eye and lock
+        w = w.nextInFocusChain()
+        if w.focusPolicy() & Qt.TabFocus and w.isVisibleTo(editor) and layers.isAncestorOf(w):
+            stops.append(w.accessibleName() or w.text())
+    assert stops[:6] == ["Hide Arrow", "Lock Arrow", "Hide Rectangle", "Lock Rectangle", "Move up", "Move down"]
+
+
 def test_every_control_in_the_library_and_settings_has_a_name(qapp, tmp_path, monkeypatch, snip):
     from snipforge import autostart
     from snipforge.home import HomeWindow

@@ -235,6 +235,9 @@ def mapped_state(item, remap: Remap) -> dict:
         p1, p2 = (remap.map(pos + QPointF(*state[key])) - new_pos for key in ("p1", "p2"))
         p2 = _long_enough(p1, p2)
         state["p1"], state["p2"] = [p1.x(), p1.y()], [p2.x(), p2.y()]
+        if "control" in state:  # a curve's bend moves with its ends
+            control = remap.map(pos + QPointF(*state["control"])) - new_pos
+            state["control"] = [control.x(), control.y()]
         state["pos"] = [new_pos.x(), new_pos.y()]
     elif "points" in state:
         new_pos = remap.map(pos)

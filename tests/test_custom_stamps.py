@@ -98,3 +98,45 @@ def test_the_panel_offers_your_stamps_and_adding_more(logo, monkeypatch):
     panel.remove_custom_stamp(name)
     QApplication.processEvents()
     assert list(panel.custom_stamp_buttons()) == ["custom:My Logo 2"]
+
+
+def test_a_stamp_name_from_a_document_never_reaches_outside_the_stamps_folder(logo, stamps_folder, tmp_path):
+    assert custom_stamps.add(logo) == "custom:My Logo"
+    outside = QImage(10, 10, QImage.Format_ARGB32)
+    outside.fill(QColor("red"))
+    outside.save(str(tmp_path / "secret.png"))
+    for name in ("custom:../secret", f"custom:{tmp_path / 'secret'}", "custom:\\\\server\\share\\secret",
+                 "custom:C:secret", "custom:", "custom: My Logo"):
+        assert custom_stamps.image(name) is None, name
+        assert not custom_stamps.remove(name), name
+    assert custom_stamps.image("custom:My Logo") is not None
+
+
+def test_an_svg_that_links_to_other_files_is_not_added(tmp_path, stamps_folder):
+    good = tmp_path / "good.svg"
+    good.write_text('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+                    'width="20" height="20"><defs><circle id="c" cx="10" cy="10" r="8"/></defs>'
+                    '<use xlink:href="#c" fill="red"/><image href="data:image/png;base64,AAAA"/></svg>')
+    assert custom_stamps.add(good) == "custom:good"
+    for n, body in enumerate(('<image href="file:///etc/passwd"/>', "<image xlink:href='\\\\server\\x.png'/>",
+                              '<rect style="fill: url(other.svg#g)"/>', '<image href = "pic.png"/>')):
+        bad = tmp_path / f"bad{n}.svg"
+        bad.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">{body}</svg>')
+        assert custom_stamps.add(bad) is None, body
+    entity = tmp_path / "entity.svg"
+    entity.write_text('<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg>&x;</svg>')
+    assert custom_stamps.add(entity) is None
+    assert custom_stamps.names() == ["custom:good"]
+
+
+def test_removing_a_stamp_from_the_panel_asks_first(logo, qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    name = custom_stamps.add(logo)
+    panel = PropertiesPanel()
+    answers = [QMessageBox.No, QMessageBox.Yes]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: answers.pop(0))
+    panel._confirm_remove_stamp(name)
+    assert custom_stamps.names() == [name]
+    panel._confirm_remove_stamp(name)
+    assert custom_stamps.names() == []

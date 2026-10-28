@@ -164,6 +164,13 @@ QWidget#Divider {{ background: {h.border}; }}
 
 QWidget#ToolRail {{ background: {p.surface}; border: none; border-right: 1px solid {p.border}; }}
 #ToolRail QToolButton {{ border-radius: 8px; padding: 7px; }}
+QWidget#MiniToolbar {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 10px; }}
+QToolButton#MiniButton {{ border-radius: 6px; padding: 0; }}
+QToolButton#LayerToggle {{ background: transparent; border: none; border-radius: 4px; padding: 0;
+    min-width: 22px; max-width: 22px; min-height: 22px; max-height: 22px; }}
+QToolButton#LayerToggle:hover {{ background: {p.surface2}; }}
+QListWidget#LayerList::item {{ padding: 0; }}
+QLineEdit#HexColor {{ padding: 2px 6px; }}
 QWidget#RailDivider {{ background: {p.border}; }}
 
 QScrollArea#PropertiesPanel {{ background: {p.surface}; border: none; border-left: 1px solid {p.border}; }}
@@ -171,7 +178,7 @@ QWidget#PanelBody {{ background: {p.surface}; }}
 QWidget#PanelSection {{ background: transparent; border-top: 1px solid {p.border}; }}
 QLabel#Chip {{ background: {a.soft}; color: {a.text}; border-radius: 9px; padding: 1px 8px; font-size: 11px;
     font-weight: 600; }}
-QToolButton#StampChoice {{ border-radius: 6px; padding: 3px; }}
+QToolButton#StampChoice {{ border-radius: 6px; padding: 2px; }}
 QToolButton#FormatToggle {{ border-radius: 6px; padding: 3px; }}
 QToolButton#FormatToggle:checked {{ background: {a.soft}; border: 1px solid {a.fill}; }}
 QToolButton#StampChoice:checked {{ background: {a.soft}; border: 1px solid {a.fill}; }}

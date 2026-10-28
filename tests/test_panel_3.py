@@ -281,3 +281,75 @@ def test_the_layers_list_mirrors_the_markup(page):
     canvas.undo_stack.undo()
     canvas.undo_stack.undo()
     assert layers.names() == ["Arrow", "Rectangle"] and not b.hidden and not a.locked
+
+
+# ---------------------------------------------------------------- the editor window
+@pytest.fixture
+def editor(page, tmp_path):
+    from snipforge.editor.window import EditorWindow
+    from snipforge.library import Library
+
+    library = Library(tmp_path)
+    window = EditorWindow(page, library, library.create(page))
+    window.resize(1100, 700)
+    window.show()
+    yield window
+    window.close()
+
+
+def test_the_panels_arrange_and_default_buttons_reach_the_canvas(editor):
+    canvas, panel = editor.canvas, editor.panel
+    a = drag(canvas, "rect", (20, 20), (60, 60))
+    b = drag(canvas, "rect", (100, 40), (180, 90))
+    canvas.select_all()
+    QApplication.processEvents()
+    assert panel.arrange_button("left").isEnabled()  # the window told the panel how many are selected
+    panel.arrange_button("left").click()
+    assert a.scene_rect().left() == b.scene_rect().left()
+    assert canvas.undo_stack.undoText() == "Align"
+    c = drag(canvas, "rect", (240, 20), (260, 40))
+    for item in (a, b, c):
+        item.setSelected(True)
+    QApplication.processEvents()
+    panel.arrange_button("h").click()  # three: spaced evenly left to right
+    assert canvas.undo_stack.undoText() == "Distribute"
+
+    canvas.select_all()
+    a.setSelected(False)
+    c.setSelected(False)
+    canvas.apply_style(color="#00ff00")
+    panel.default_button("use").click()
+    assert canvas.tool_styles["rect"].color == "#00ff00"
+    panel.default_button("reset").click()
+    assert canvas.tool_styles["rect"] == DEFAULT_TOOL_STYLES["rect"]
+
+
+def test_a_color_picked_from_the_snip_goes_into_recent(editor):
+    editor.canvas.color_picked.emit("#123456")
+    assert colors.recent()[0] == "#123456"
+
+
+def test_the_mini_toolbar_and_layers_follow_the_theme(editor, monkeypatch):
+    rethemed = []
+    monkeypatch.setattr(editor.canvas.mini_toolbar(), "retheme", lambda: rethemed.append("mini"))
+    editor._retheme()
+    assert rethemed == ["mini"]
+
+
+def test_closing_the_editor_with_layers_shown_is_quiet(page, tmp_path):
+    """The canvas's undo stack fires while the window comes down; the Layers list mustn't touch its
+    deleted rows then."""
+    from shiboken6 import delete
+
+    from snipforge.editor.window import EditorWindow
+    from snipforge.library import Library
+
+    library = Library(tmp_path)
+    window = EditorWindow(page, library, library.create(page))
+    window.show()
+    drag(window.canvas, "rect", (20, 20), (60, 60))
+    layers = window.panel.layers_list()
+    delete(layers.list_widget())
+    layers.refresh()  # no RuntimeError
+    window.canvas.undo_stack.undo()
+    window.close()

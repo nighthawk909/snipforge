@@ -50,6 +50,7 @@ Your snips and the markup on them keep their own colors: they're your content.
 | Ctrl+P, Ctrl+E, Ctrl+G | Pin, email, combine |
 | Ctrl+=, Ctrl+-, Ctrl+0, Ctrl+1 | Zoom in, out, fit, 100% |
 | Space (held) | Pan the snip with the mouse |
+| Alt+Up, Alt+Down | In the Layers list: move the chosen markup over the one above it, under the one below it. Tab goes on to each row's eye (hide) and lock |
 
 The pen, highlighter, Smart Move and Cut out follow the pointer, so they need a mouse, pen or touch
 (Enter with one of them says so). Edit text's line is chosen by clicking it; its new words are typed.

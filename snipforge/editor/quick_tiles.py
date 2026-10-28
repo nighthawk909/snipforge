@@ -18,7 +18,7 @@ from .. import theme
 from . import saved_styles
 from .items import readable_on
 from .quick_styles import QUICK_STYLES, QuickStyle, changes_for
-from .style import COLOR_NAMES, STRENGTH_KINDS, USUAL_CORNER, USUAL_DIM, USUAL_OPACITY, Style
+from .style import COLOR_NAMES, STRENGTH_KINDS, USUAL_CORNER, USUAL_DIM, USUAL_OPACITY, Style, usual_align
 from .style_sample import paint_sample
 
 COLUMNS = 4
@@ -120,8 +120,8 @@ def describe(kind: str, style: Style) -> str:
                       ("rounded", "rounded")):
         if found.get(key):
             parts.append(word)
-    if "align" in found and style.align != "left":
-        parts.append(f"{style.align} aligned" if style.align == "right" else "centered")
+    if "align" in found and style.align and style.align != usual_align(kind):
+        parts.append({"left": "left aligned", "center": "centered", "right": "right aligned"}[style.align])
     if "dim" in found and style.dim != USUAL_DIM:
         parts.append(f"dim {style.dim}%")
     if found.get("fill"):

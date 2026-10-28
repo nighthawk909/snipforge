@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from ..icons import icon
 from .commands import StateCommand
@@ -129,7 +130,10 @@ class LayersList(QWidget):
         self._canvas = canvas
         canvas.document_changed.connect(self.refresh)
         canvas.selection_changed.connect(self._follow_selection)
-        canvas.undo_stack.indexChanged.connect(lambda _i: self.refresh())
+        canvas.undo_stack.indexChanged.connect(self._undo_moved)
+        self.refresh()
+
+    def _undo_moved(self, _index: int) -> None:
         self.refresh()
 
     def _ordered(self) -> list:
@@ -137,7 +141,8 @@ class LayersList(QWidget):
         return list(reversed(self._canvas.bottom_up(self._canvas.annotations())))
 
     def refresh(self) -> None:
-        if self._canvas is None:
+        # The canvas outlives the list while a window is torn down, and its signals still fire then.
+        if self._canvas is None or not isValid(self._list):
             return
         self._syncing = True
         current = self._list.currentItem()
@@ -153,6 +158,14 @@ class LayersList(QWidget):
             widget = _Row(item, lambda _=False, i=item: self.toggle_hidden_item(i),
                           lambda _=False, i=item: self.toggle_locked_item(i))
             self._list.setItemWidget(entry, widget)
+        previous = self._list  # Tab: the list, each row's eye and lock top to bottom, then Move up/down
+        for n in range(self._list.count()):
+            row = self._list.itemWidget(self._list.item(n))
+            for button in (row.eye, row.lock):
+                QWidget.setTabOrder(previous, button)
+                previous = button
+        QWidget.setTabOrder(previous, self._up)
+        QWidget.setTabOrder(self._up, self._down)
         rows = len(self._items)
         self._list.setVisible(rows > 0)
         self._empty.setVisible(rows == 0)
@@ -162,7 +175,7 @@ class LayersList(QWidget):
         self.changed.emit()
 
     def _follow_selection(self, prefer=None) -> None:
-        if self._canvas is None or self._syncing:
+        if self._canvas is None or self._syncing or not isValid(self._list):
             return
         selected = self._canvas.selected_annotations()
         target = selected[0] if selected else None
