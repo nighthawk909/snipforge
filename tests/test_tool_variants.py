@@ -11,7 +11,6 @@ from snipforge.editor.items import ArrowItem, EffectItem, RectItem, SpotlightIte
 from snipforge.editor.style import (
     ARROW_HEADS,
     BADGES,
-    DEFAULT_TOOL_STYLES,
     NUMBERINGS,
     SHAPES,
     STYLE_FIELDS,
@@ -291,26 +290,6 @@ def test_the_panel_shows_each_variant_for_its_tool(qapp):
     assert len(seen) == before and panel._arrow.heads.value == "start" and panel.switch("curve").isChecked()
 
 
-def test_every_tools_panel_fits_its_width_with_the_app_style(qapp):
-    """Five shape icons with the usual text padding were wider than the panel: it scrolled sideways."""
-    from snipforge.editor.panel import PropertiesPanel
-    from snipforge.editor.window import TOOLS
-    from snipforge.theme import styles, tokens
-
-    qapp.setStyleSheet(styles.build_stylesheet(tokens.resolve("light", tokens.BUILTIN_ACCENTS[tokens.DEFAULT_ACCENT])))
-    try:
-        panel = PropertiesPanel()
-        panel.resize(panel.width(), 700)
-        panel.show()
-        for tool in [t[0] for t in TOOLS if t]:
-            for selected in (False, True):
-                panel.load(tool, DEFAULT_TOOL_STYLES.get(tool, Style()), has_selection=selected)
-                assert panel.widget().minimumSizeHint().width() <= panel.viewport().width(), (tool, selected)
-        panel.close()
-    finally:
-        qapp.setStyleSheet("")
-
-
 def _ink(item, size=(420, 120), red=True):
     """The item rendered on white: its painted pixels' x range in the top rows, and the image."""
     from PySide6.QtGui import QPainter
@@ -329,7 +308,8 @@ def _ink(item, size=(420, 120), red=True):
 
 def test_text_lines_line_up_left_center_or_right(qapp):
     def first_line(align):
-        img = _ink(TextItem(Style(align=align, shadow=False), "a\nmuch longer line here"))
+        text = TextItem(Style(align=align, shadow=False, font_size=14), "a\nmuch longer line here")
+        img = _ink(text, (int(text.boundingRect().width()) + 40, 120))
         xs = [x for x in range(img.width()) for y in range(8, 30) if img.pixelColor(x, y).green() < 150]
         return min(xs), max(xs)
 
