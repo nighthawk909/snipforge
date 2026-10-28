@@ -5,6 +5,7 @@ from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from snipforge.editor import colors
 from tests.test_editor import drag, make_canvas, send
 
 
@@ -156,7 +157,8 @@ def test_eyedropper_button_picks_into_the_color_row(editor):
     click(canvas, (150, 50))
     assert canvas.tool_styles["rect"].color == "#2cb1bc"
     assert not panel.pick_button().isChecked()
-    assert not any(s.isChecked() for s in panel._swatches.values())  # a custom color, so no swatch ring
+    assert not any(s.isChecked() for s in panel._swatches)  # a custom color, so no swatch ring
+    assert colors.recent()[0] == "#2cb1bc"  # and it's first in Recent
     assert "#2CB1BC" in editor.statusBar().currentMessage()
 
 

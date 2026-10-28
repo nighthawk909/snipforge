@@ -144,8 +144,8 @@ class MagnifyItem(BoxItem):
         return super().is_degenerate() or self._source.width() < 2 or self._source.height() < 2
 
     # -- handles ---------------------------------------------------------------------------
-    def handle_points(self) -> dict[str, QPointF]:
-        lens = {name: point for name, point in super().handle_points().items() if name in LENS_HANDLES}
+    def _handles(self) -> dict[str, QPointF]:
+        lens = {name: point for name, point in super()._handles().items() if name in LENS_HANDLES}
         s = self._source
         return {**lens, "s_tl": s.topLeft(), "s_tr": s.topRight(), "s_br": s.bottomRight(), "s_bl": s.bottomLeft()}
 

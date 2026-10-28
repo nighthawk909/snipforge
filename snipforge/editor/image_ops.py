@@ -225,6 +225,8 @@ def mapped_state(item, remap: Remap) -> dict:
     pos = QPointF(*state["pos"])
     old_style = state["style"]
     state["style"] = scaled_style(kind, old_style, remap.sx, remap.sy)
+    if remap.cut is None and remap.transform.determinant() < 0 and state["style"].get("rotation"):
+        state["style"] = {**state["style"], "rotation": -state["style"]["rotation"] % 360}  # a mirror turns it back
     if kind in UPRIGHT_KINDS:
         _map_upright(item, state, pos, remap)
     elif "size" in state:

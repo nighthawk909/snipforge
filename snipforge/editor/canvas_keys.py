@@ -34,7 +34,7 @@ class KeyboardMixin:
 
     def step_selection(self, forward: bool) -> bool:
         """Select the next (or previous) markup; False past the end, or when there's none."""
-        items = [i for i in self.bottom_up(self.annotations())
+        items = [i for i in self.bottom_up(self.annotations()) if not i.hidden
                  if i.isVisible() and i.flags() & QGraphicsItem.ItemIsSelectable]
         if not items:
             return False
@@ -87,7 +87,11 @@ class KeyboardMixin:
     def resize_selection(self, dw: float, dh: float) -> None:
         """Make the selected boxes and lines `dw` wider and `dh` taller (one undo step)."""
         records = []
+        if self._only_locked():
+            return
         for item in self.selected_annotations():
+            if item.locked:
+                continue
             before = item.get_state()
             after = dict(before)
             if "size" in before:
@@ -104,7 +108,10 @@ class KeyboardMixin:
             else:
                 continue
             if after != before:
+                corner = item.mapToScene(QPointF(0, 0))
                 item.set_state(after)
+                if item.rotation():  # turned: grows from its corner, which stays where it is
+                    item.setPos(item.pos() + corner - item.mapToScene(QPointF(0, 0)))
                 records.append((item, before, item.get_state()))
         if records:
             key = ("size", tuple(id(r[0]) for r in records))  # held or repeated presses are one step, as nudges are

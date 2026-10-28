@@ -32,7 +32,7 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from ..wording import keys
-from . import beautify, palette, regions
+from . import beautify, colors, palette, regions
 from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
@@ -131,6 +131,9 @@ class EditorWindow(QMainWindow):
         self.panel.changed.connect(lambda changes: self.canvas.apply_style(**changes))
         self.panel.crop_action.connect(self._crop_action)
         self.panel.next_step.connect(self.canvas.set_next_step_number)
+        self.panel.arrange.connect(self._arrange)
+        self.panel.tool_default.connect(self._tool_default)
+        self.panel.layers_list().attach(self.canvas)
         self.panel.image_action.connect(self.image_action)
         self.panel.pick_color.connect(self._toggle_picking)
         self.panel.edges_changed.connect(self.canvas.set_edges)
@@ -145,6 +148,7 @@ class EditorWindow(QMainWindow):
         self.canvas.choosing_changed.connect(self._show_choosing)
         self.canvas.color_picked.connect(
             lambda color: self.statusBar().showMessage(f"Picked {color.upper()}", 3000))
+        self.canvas.color_picked.connect(colors.remember)
         self.panel.editing_done.connect(self.canvas.setFocus)
         self.tray.beautify_changed.connect(beautify.set_enabled)
         beautify.switch().changed.connect(self._show_beautify)  # from any editor or Settings
@@ -400,6 +404,7 @@ class EditorWindow(QMainWindow):
         self.tool_rail.retheme()
         self.commands.retheme()
         self.panel.retheme()
+        self.canvas.mini_toolbar().retheme()
         manager = theme.get_manager()  # the system's high contrast decides the colors: no light/dark switch
         self.commands.theme_button.setVisible(manager is None or not manager.high_contrast)
 
@@ -515,9 +520,23 @@ class EditorWindow(QMainWindow):
 
     def _refresh_props(self) -> None:
         kind, style = self.canvas.style_target()
-        self.panel.load(kind, style, bool(self.canvas.selected_annotations()), self.canvas.next_step_number())
+        selected = self.canvas.selected_annotations()
+        self.panel.load(kind, style, bool(selected), self.canvas.next_step_number(), selected_count=len(selected))
         self.panel.load_edges(self.canvas.edges())
         self.panel.load_cutout(self.canvas.cutout_options)
+
+    def _arrange(self, how: str) -> None:
+        if how.startswith("distribute_"):
+            self.canvas.distribute_selection(how.removeprefix("distribute_"))
+        else:
+            self.canvas.align_selection(how)
+
+    def _tool_default(self, action: str) -> None:
+        if action == "use":
+            self.canvas.use_selection_as_default()
+        elif action == "reset":
+            kind, _ = self.canvas.style_target()
+            self.canvas.reset_tool_style(kind)
 
     def _mark_unsaved(self) -> None:
         if self._autosave_enabled:

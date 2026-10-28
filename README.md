@@ -55,7 +55,14 @@ choices, and every snip still lands in the Library.
 properties panel on the right with **quick styles**, colors, sizes and effects for whatever you've
 selected. **Save this style** keeps the selected markup's look as one of your own quick styles for
 that tool (right-click one to delete it). The **eyedropper** beside the colors picks any color from
-the snip, with a magnified view of the pixels under the pointer. Everything you add stays editable:
+the snip, with a magnified view of the pixels under the pointer; type a **hex** color in the box beside
+the colors, find the ones you used last under **Recent**, and right-click a swatch to make the palette
+your own. Anything you draw can be see-through (**Opacity**) and turned (**Rotation**); **Use as
+default** makes the selection's look what its tool draws next, and **Reset tool** brings back the
+usual look. A **mini toolbar** over the selection changes its color, duplicates it, moves it forward
+or back, locks it or deletes it. **Arrange** lines several pieces of markup up or spaces them evenly,
+and the **Layers** list (with Select and nothing selected) shows everything top first, with an eye to
+hide a piece and a lock to keep one where it is. Everything you add stays editable:
 
 | Tool | Key | |
 |---|---|---|

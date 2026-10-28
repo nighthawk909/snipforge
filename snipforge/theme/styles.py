@@ -166,6 +166,13 @@ QWidget#ToolRail {{ background: {p.surface}; border: none; border-right: 1px sol
 QWidget#ToolRail[side="right"] {{ border-right: none; border-left: 1px solid {p.border}; }}
 #ToolRail QToolButton {{ border-radius: 8px; padding: 7px; }}
 #ToolRail QToolButton#RailCustomize {{ color: {p.text2}; }}
+QWidget#MiniToolbar {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 10px; }}
+QToolButton#MiniButton {{ border-radius: 6px; padding: 0; }}
+QToolButton#LayerToggle {{ background: transparent; border: none; border-radius: 4px; padding: 0;
+    min-width: 22px; max-width: 22px; min-height: 22px; max-height: 22px; }}
+QToolButton#LayerToggle:hover {{ background: {p.surface2}; }}
+QListWidget#LayerList::item {{ padding: 0; }}
+QLineEdit#HexColor {{ padding: 2px 6px; }}
 QWidget#RailDivider {{ background: {p.border}; }}
 QDialog#CommandPalette {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 12px; }}
 QDialog#CommandPalette QLineEdit#CommandSearch {{ font-size: 14px; padding: 8px 10px; }}

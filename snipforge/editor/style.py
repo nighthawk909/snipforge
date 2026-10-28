@@ -42,10 +42,14 @@ def _clean(name: str, value):
     """`value` if it's a usable value for the field `name`, else None."""
     if name == "color":
         return value if isinstance(value, str) and QColor(value).isValid() else None
-    if name in ("width", "font_size", "fill_opacity", "corner", "dim"):
+    if name in ("width", "font_size", "fill_opacity", "corner", "dim", "opacity", "rotation"):
         number = _number(value)
         if number is None:
             return None
+        if name == "opacity":
+            return int(round(min(100, max(0, number))))
+        if name == "rotation":
+            return int(round(number)) % 360
         if name == "width":
             return float(min(WIDTH_RANGE[1], max(WIDTH_RANGE[0], number)))
         if name == "font_size":
@@ -97,6 +101,8 @@ class Style:
     outline: bool = False    # text: a thin dark or light edge so it reads on anything
     rounded: bool = False    # blur, pixelate and spotlight: rounded corners
     dim: int = USUAL_DIM     # spotlight: how dark the rest is, in percent
+    opacity: int = 100       # any markup: how solid it is, in percent
+    rotation: int = 0        # any markup: degrees clockwise, about its middle
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -134,7 +140,7 @@ DEFAULT_TOOL_STYLES: dict[str, Style] = {
 
 # Which style controls the property bar shows for each annotation kind.
 TEXT_FORMAT = ("font_family", "align", "italic", "underline")
-STYLE_FIELDS: dict[str, tuple[str, ...]] = {
+_STYLE_FIELDS: dict[str, tuple[str, ...]] = {
     "arrow": ("heads", "open_head", "curve", "color", "width", "dash", "dotted", "shadow"),
     "line": ("curve", "color", "width", "dash", "dotted", "shadow"),
     "rect": ("shape", "corner", "color", "width", "dash", "dotted", "fill", "fill_color", "fill_opacity", "shadow"),
@@ -153,10 +159,16 @@ STYLE_FIELDS: dict[str, tuple[str, ...]] = {
     "magnify": ("shape", "color", "width", "dash", "dotted", "shadow"),
     "erase": (),
 }
+LOOK_KINDS = {"arrow", "line", "rect", "ellipse", "pen", "highlight", "highlight_box", "text", "callout", "stamp",
+              "step", "magnify", "piece"}  # markup that can be see-through or turned (not what hides the snip)
+LOOK_FIELDS = ("opacity", "rotation")
+STYLE_FIELDS: dict[str, tuple[str, ...]] = {
+    kind: (*fields, *LOOK_FIELDS) if kind in LOOK_KINDS else fields for kind, fields in _STYLE_FIELDS.items()}
 VERSION_3_KINDS = {"highlight_box"}  # kinds older SnipForges can't draw
 VERSION_3_DEFAULTS = {"heads": "end", "open_head": False, "curve": False, "corner": USUAL_CORNER, "numbering": "digits",
                       "badge": "circle", "box": False, "font_family": "", "align": "", "italic": False,
-                      "underline": False, "outline": False, "rounded": False, "dim": USUAL_DIM}
+                      "underline": False, "outline": False, "rounded": False, "dim": USUAL_DIM, "opacity": 100,
+                      "rotation": 0}
 
 
 def needs_version_3(style: dict, kind: str | None = None) -> bool:
