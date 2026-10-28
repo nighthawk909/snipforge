@@ -163,7 +163,9 @@ QLabel[sfRole="heading"] {{ font-size: 15px; font-weight: 600; }}
 QWidget#Divider {{ background: {h.border}; }}
 
 QWidget#ToolRail {{ background: {p.surface}; border: none; border-right: 1px solid {p.border}; }}
+QWidget#ToolRail[side="right"] {{ border-right: none; border-left: 1px solid {p.border}; }}
 #ToolRail QToolButton {{ border-radius: 8px; padding: 7px; }}
+#ToolRail QToolButton#RailCustomize {{ color: {p.text2}; }}
 QWidget#MiniToolbar {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 10px; }}
 QToolButton#MiniButton {{ border-radius: 6px; padding: 0; }}
 QToolButton#LayerToggle {{ background: transparent; border: none; border-radius: 4px; padding: 0;
@@ -172,6 +174,14 @@ QToolButton#LayerToggle:hover {{ background: {p.surface2}; }}
 QListWidget#LayerList::item {{ padding: 0; }}
 QLineEdit#HexColor {{ padding: 2px 6px; }}
 QWidget#RailDivider {{ background: {p.border}; }}
+QDialog#CommandPalette {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 12px; }}
+QDialog#CommandPalette QLineEdit#CommandSearch {{ font-size: 14px; padding: 8px 10px; }}
+QDialog#CommandPalette QListWidget#CommandList::item {{ padding: 6px 8px; }}
+QListWidget#ToolList {{ border: 1px solid {p.border}; border-radius: 8px; padding: 4px; }}
+QListWidget#ToolList::item {{ padding: 5px 6px; }}
+QListWidget#ToolList::indicator {{
+    width: 16px; height: 16px; border: 1px solid {p.text3}; border-radius: 4px; background: {p.surface}; }}
+QListWidget#ToolList::indicator:checked {{ background: {a.fill}; border-color: {a.fill}; {check} }}
 
 QScrollArea#PropertiesPanel {{ background: {p.surface}; border: none; border-left: 1px solid {p.border}; }}
 QWidget#PanelBody {{ background: {p.surface}; }}

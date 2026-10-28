@@ -84,6 +84,13 @@ hide a piece and a lock to keep one where it is. Everything you add stays editab
 
 Undo/redo, duplicate (Ctrl+D), nudge with arrow keys, zoom with Ctrl+wheel.
 
+**Make the tools yours.** Right-click a tool to add it to **Favorites** (a group of its own at the
+top of the rail) or hide it (its key still works), and right-click the rail for labels beside the
+icons or to put the tools on the right. **Customize tools** (the button under the tools) arranges
+everything: drag tools into your order, add dividers to regroup them, tick what to show, and Reset
+puts it all back. **Ctrl+K** finds any tool or action by name — "cro", "rot", "save as", "blur" —
+including tools you've hidden, and shows each one's key.
+
 **Edit text.** **Edit text** in the toolbar (Ctrl+Shift+E) finds the snip's lines of text; click
 one and type its new words. The old line is smart-erased and the new words are written in a
 matching size and colour, as a text box you can still change (Windows' built-in text recognition,

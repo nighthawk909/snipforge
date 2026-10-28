@@ -32,7 +32,7 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from ..wording import keys
-from . import beautify, colors, regions
+from . import beautify, colors, palette, regions
 from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
@@ -40,6 +40,8 @@ from .canvas_clipboard import MARKUP_MIME
 from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
 from .export import SAVE_FILTERS, ExportError, filter_for, save_image, with_suffix
 from .export import fits as export_fits
+from .palette import TOOL_NAMES as ALL_TOOLS
+from .palette import TOOLS, Palette, key_of, short_title, title_of, tooltip_of  # noqa: F401 - TOOLS: tests
 from .panel import PropertiesPanel
 from .quick_tiles import TOOL_NAMES
 from .resize_dialog import ResizeDialog
@@ -50,22 +52,6 @@ from .tool_rail import ToolRail
 
 log = logging.getLogger(__name__)
 
-TOOLS = [
-    ("select", "Select and move (V)"),
-    None,
-    ("arrow", "Arrow (A)"), ("line", "Line (L)"), ("rect", "Rectangle (R)"), ("ellipse", "Ellipse (E)"),
-    ("spotlight", "Spotlight (S)"), ("magnify", "Magnify: enlarge part of the snip (M)"),
-    None,
-    ("text", "Text (T)"), ("callout", "Callout: text in a bubble or box (K)"), ("stamp", "Stamp / icon (I)"),
-    ("step", "Step number (N)"), ("pen", "Pen (P)"), ("highlight", "Highlighter (H)"),
-    None,
-    # Groups that fill whole rows of 3 keep the rail's 3-column layout short enough for a 1080p screen
-    # at 200% scaling (tests/test_tool_rail.py).
-    ("blur", "Blur (B)"), ("pixelate", "Pixelate (X)"), ("erase", "Smart erase: fill an area from around it (W)"),
-    None,
-    ("crop", "Crop (C)"), ("cutout", "Cut out: remove a strip and join the rest (U)"),
-    ("move", "Smart Move: drag out part of the snip, then put it anywhere; where it was is filled in (G)"),
-]
 AUTOSAVE_MS = 700
 META_TRIES, META_RETRY_S = 4, 0.05  # reading a snip's details: tries, and the first wait between them
 PICK_HINT = ("Click anywhere on the snip to pick its color, or move with the arrow keys and press Enter. "
@@ -111,6 +97,7 @@ class EditorWindow(QMainWindow):
         self.panel = PropertiesPanel()
         self.tray = Tray()
         self._tool_actions: dict[str, QAction] = {}
+        self._palette = Palette()
 
         root = QWidget()
         root.setObjectName("Root")
@@ -118,12 +105,12 @@ class EditorWindow(QMainWindow):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         column.addWidget(self.commands)
-        middle = QHBoxLayout()
+        middle = self._middle = QHBoxLayout()
         middle.setSpacing(0)
         self.tool_rail = self._build_tool_rail()
-        middle.addWidget(self.tool_rail)
         middle.addWidget(self.canvas, 1)
         middle.addWidget(self.panel)
+        self._apply_palette(self._palette)  # puts the rail on its side
         column.addLayout(middle, 1)
         column.addWidget(self.tray)
         self.setCentralWidget(root)
@@ -196,22 +183,127 @@ class EditorWindow(QMainWindow):
 
     def _build_tool_rail(self) -> ToolRail:
         group = QActionGroup(self)
-        groups: list[list[tuple[str, QAction]]] = [[]]
-        for spec in TOOLS:
-            if spec is None:
-                groups.append([])
-                continue
-            name, tip = spec
-            act = QAction(tip, self)
+        for name in ALL_TOOLS:  # every tool has an action, shown on the rail or not: its key always works
+            act = QAction(tooltip_of(name), self)
             act.setCheckable(True)
             act.triggered.connect(lambda _=False, n=name: self._choose_tool(n))
             group.addAction(act)
-            groups[-1].append((name, act))
             self._tool_actions[name] = act
         self._tool_actions["select"].setChecked(True)
-        rail = ToolRail(groups)
+        self._palette = palette.load()
+        rail = ToolRail(self._tool_actions, self._palette)
         rail.picked.connect(lambda: self.canvas.setFocus(Qt.OtherFocusReason))
+        rail.palette_edited.connect(palette.save)
+        rail.customize.connect(self.customize_tools)
+        palette.notifier().changed.connect(self._follow_palette)  # this editor's, and every other's
         return rail
+
+    def _follow_palette(self) -> None:
+        self._apply_palette(palette.load())
+
+    def _apply_palette(self, chosen: Palette) -> None:
+        """Lay the rail out as `chosen` says, on the side it says."""
+        side_changed = chosen.side != self._palette.side
+        self._palette = chosen
+        if chosen != self.tool_rail.palette():  # the rail was just built with it, at startup
+            self.tool_rail.set_palette(chosen)
+        if side_changed or self.tool_rail.property("side") != chosen.side:
+            self._middle.removeWidget(self.tool_rail)
+            self._middle.insertWidget(0 if chosen.side == "left" else self._middle.count(), self.tool_rail)
+            self.tool_rail.setProperty("side", chosen.side)
+            self.tool_rail.style().unpolish(self.tool_rail)
+            self.tool_rail.style().polish(self.tool_rail)
+
+    def find_command(self) -> None:
+        """Ctrl+K: find a tool or action by name and run it."""
+        from .command_palette import CommandPalette
+
+        self.canvas.commit_text()
+        self._palette_window = CommandPalette(self.commands_for_palette(), self)
+        self._palette_window.setAttribute(Qt.WA_DeleteOnClose)
+        self._palette_window.finished.connect(lambda _r: self.canvas.setFocus())
+        self._palette_window.open_over(self.canvas)
+
+    def commands_for_palette(self) -> list:
+        """Everything Ctrl+K can find: every tool (hidden ones too), the editor's actions, and the
+        quick styles the current tool or selection can take."""
+        from .command_palette import Command
+        from .quick_styles import QUICK_STYLES, changes_for
+
+        tools = [Command(short_title(name), lambda n=name: self._choose_tool(n), "tool", key_of(name), name,
+                         keywords=(title_of(name), "hidden" if name in self._palette.hidden else ""))
+                 for name in ALL_TOOLS]
+        p = self._palette
+        bar = self.commands
+        actions = [
+            Command("Undo", self.canvas.undo_stack.undo, key=keys("Ctrl+Z"), icon="undo"),
+            Command("Redo", self.canvas.undo_stack.redo, key=keys("Ctrl+Y"), icon="redo"),
+            Command("Copy", self.copy_to_clipboard, key=keys("Ctrl+C"), icon="copy", keywords=("clipboard",)),
+            Command("Cut", self.cut, key=keys("Ctrl+X"), keywords=("clipboard",)),
+            Command("Paste", self.paste, key=keys("Ctrl+V"), keywords=("clipboard",)),
+            Command("Save", self.save, key=keys("Ctrl+S"), icon="save", keywords=("export", "file")),
+            Command("Save as…", self.save_as, key=keys("Ctrl+Shift+S"), icon="save", keywords=("export", "file")),
+            Command("Pin on top", self.pin, key=keys("Ctrl+P"), icon="pin", keywords=("float", "always")),
+            Command("Grab text", self.grab_text, key=keys("Ctrl+Shift+T"), icon="ocr", keywords=("ocr", "copy")),
+            Command("Edit text in the snip", self.edit_text, key=keys("Ctrl+Shift+E"), icon="text",
+                    keywords=("retype", "ocr")),
+            Command("Redact: blur private details", self.auto_redact, icon="redact",
+                    keywords=("email", "phone", "card", "private", "blur")),
+            Command("Email this snip", self.share_email, key=keys("Ctrl+E"), icon="mail", keywords=("share", "send")),
+            Command("Select all markup", self.canvas.select_all, key=keys("Ctrl+A")),
+            Command("Duplicate the selection", self.canvas.duplicate_selection, key=keys("Ctrl+D")),
+            Command("Bring forward", lambda: self.canvas.reorder_selection(True), key=keys("Ctrl+]"),
+                    keywords=("front", "order", "layer")),
+            Command("Send backward", lambda: self.canvas.reorder_selection(False), key=keys("Ctrl+["),
+                    keywords=("back", "order", "layer")),
+            Command("Rotate right", lambda: self.image_action("rotate_right"), key=keys("Ctrl+R"), icon="rotate_right",
+                    keywords=("turn", "image")),
+            Command("Rotate left", lambda: self.image_action("rotate_left"), key=keys("Ctrl+Shift+R"),
+                    icon="rotate_left", keywords=("turn", "image")),
+            Command("Flip horizontal", lambda: self.image_action("flip_horizontal"), icon="flip",
+                    keywords=("mirror", "image")),
+            Command("Flip vertical", lambda: self.image_action("flip_vertical"), icon="flip_vertical",
+                    keywords=("mirror", "image")),
+            Command("Resize the snip…", lambda: self.image_action("resize"), keywords=("scale", "size", "image")),
+            Command("Fit to window", self.canvas.fit_image, key=keys("Ctrl+0"), icon="fit", keywords=("zoom",)),
+            Command("Zoom to 100%", lambda: self.canvas.set_zoom(1.0), key=keys("Ctrl+1"), keywords=("actual",)),
+            Command("Zoom in", self._zoom_in, key=keys("Ctrl+="), icon="zoom_in"),
+            Command("Zoom out", self._zoom_out, key=keys("Ctrl+-"), icon="zoom_out"),
+            Command("Beautify: turn off" if self._beautify else "Beautify: turn on",
+                    lambda: beautify.set_enabled(not self._beautify), keywords=("border", "shadow", "background")),
+            Command("Customize tools…", self.customize_tools, icon="sliders",
+                    keywords=("rail", "palette", "arrange", "hide", "favorites", "favourite")),
+            Command("Hide tool labels" if p.labels else "Show tool labels",
+                    lambda: palette.save(p.with_changes(labels=not p.labels)), keywords=("rail", "names")),
+            Command("Tools on the left" if p.side == "right" else "Tools on the right",
+                    lambda: palette.save(p.with_changes(side="left" if p.side == "right" else "right")),
+                    keywords=("rail", "side", "move")),
+            Command("Reset the tools to default", palette.reset, keywords=("rail", "palette")),
+        ]
+        if bar.combine_button.isVisible():
+            actions.append(Command("Combine with other snips…", self.combine, key=keys("Ctrl+G"), icon="grid",
+                                   keywords=("grid", "steps", "stack")))
+        if self._on_new_snip:
+            actions.append(Command("New capture", self._on_new_snip, key=keys("Ctrl+N"), icon="plus",
+                                   keywords=("snip", "screenshot")))
+        if bar.theme_button.isVisible():
+            actions.append(Command("Switch to light" if theme.current().dark else "Switch to dark",
+                                   self._toggle_theme, keywords=("theme", "appearance")))
+        kind, _style = self.canvas.style_target()
+        styles = [Command(quick.label, lambda c=changes: self.canvas.apply_style(**c), "style", color=quick.color,
+                          keywords=("quick", "style", TOOL_NAMES.get(kind, kind)))
+                  for quick in QUICK_STYLES if (changes := changes_for(kind, quick))]
+        return [*tools, *actions, *styles]
+
+    def customize_tools(self) -> None:
+        """The Customize tools window: arrange, hide and favorite the tools. Changes apply as you make
+        them, to every open editor."""
+        from .customize_tools import CustomizeToolsDialog
+
+        dialog = CustomizeToolsDialog(self._palette, self)
+        dialog.exec()
+        dialog.deleteLater()
+        self.canvas.setFocus()
 
     def _wire_commands(self) -> None:
         bar = self.commands
@@ -233,6 +325,7 @@ class EditorWindow(QMainWindow):
         bar.save.connect(self.save)
         bar.copy.connect(self.copy_to_clipboard)
         bar.toggle_theme.connect(self._toggle_theme)
+        bar.find.connect(self.find_command)
         bar.theme_button.setVisible(theme.get_manager() is not None)
         bar.insert_before_share(DragOutButton(self.final_image), "drag")
         bar.share_button.setMenu(self._build_share_menu(bar.share_button))
@@ -273,6 +366,7 @@ class EditorWindow(QMainWindow):
         add("Ctrl+R", lambda: self.image_action("rotate_right"))
         add("Ctrl+Shift+R", lambda: self.image_action("rotate_left"))
         add("Ctrl+W", self.close)
+        add("Ctrl+K", self.find_command)
         if self._on_new_snip:
             add("Ctrl+N", self._on_new_snip)
 
@@ -307,6 +401,7 @@ class EditorWindow(QMainWindow):
     def _retheme(self, _theme=None) -> None:
         for name, act in self._tool_actions.items():
             act.setIcon(icon(name))
+        self.tool_rail.retheme()
         self.commands.retheme()
         self.panel.retheme()
         self.canvas.mini_toolbar().retheme()
@@ -661,8 +756,10 @@ class EditorWindow(QMainWindow):
         self._save_to_library()
         styles = {k: v.to_dict() for k, v in self.canvas.tool_styles.items()}
         self._settings.setValue("tool_styles", json.dumps(styles))
-        try:
-            beautify.switch().changed.disconnect(self._show_beautify)  # a closed editor stops following it
-        except (RuntimeError, TypeError):
-            pass  # already disconnected (closed twice)
+        for signal, slot in ((beautify.switch().changed, self._show_beautify),
+                             (palette.notifier().changed, self._follow_palette)):
+            try:
+                signal.disconnect(slot)  # a closed editor stops following it
+            except (RuntimeError, TypeError):
+                pass  # already disconnected (closed twice)
         super().closeEvent(e)

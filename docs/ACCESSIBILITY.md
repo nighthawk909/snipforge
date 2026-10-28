@@ -33,7 +33,8 @@ Your snips and the markup on them keep their own colors: they're your content.
 |---|---|
 | F6, Shift+F6 | Go to the next (previous) part of the window: the snip, the properties panel, the command bar, the tools |
 | Tab, Shift+Tab | Move through the controls of the part you're in. On the snip, select the markup one at a time; past the last, go on to the next part |
-| Arrow keys, Home, End | In the tools: move between tools. Enter or Space picks one and goes to the snip; Esc goes back without picking |
+| Arrow keys, Home, End | In the tools: move between tools (and the Customize tools button under them). Enter or Space picks one and goes to the snip; Esc goes back without picking. Shift+F10 or the Menu key opens a tool's menu: favorite, hide, labels, Customize tools |
+| Ctrl+K | Find a tool or action by name: type a few letters, Up and Down move through the matches, Enter runs one, Esc closes. Hidden tools are found too |
 | V, A, L, R, E, S, M, T, K, I, N, P, H, B, X, W, C, U, G | Pick a tool (they're shown in each tool's tip) |
 | Enter | With a drawing tool: add its markup in the middle of the snip you can see, selected. With text selected: edit it (F2 too) |
 | Arrow keys | Move what's selected by a pixel (Shift: 10). While cropping (C), move the crop |
