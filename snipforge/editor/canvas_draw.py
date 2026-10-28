@@ -111,7 +111,10 @@ class DrawMixin:
                 hit.setSelected(True)
             else:
                 self._select([hit])
-        moving = self.selected_annotations()
+        moving = [i for i in self.selected_annotations() if not i.locked]
+        if not moving:
+            self._drag = None  # locked: a drag selects it and leaves it where it is
+            return None
         self._drag = {"type": "move", "origin": drag["origin"], "before": {i: i.get_state() for i in moving}}
         return self._drag
 

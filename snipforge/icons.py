@@ -235,6 +235,17 @@ _PATHS = {
     "align_left": '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h14"/>',
     "align_center": '<path d="M4 6h16"/><path d="M7 12h10"/><path d="M5 18h14"/>',
     "align_right": '<path d="M4 6h16"/><path d="M10 12h10"/><path d="M6 18h14"/>',
+    "eye": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    "eye_off": ('<path d="M10.7 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.6 3.6"/>'
+                '<path d="M6.6 6.6A16.5 16.5 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 5.4-1.6"/>'
+                '<path d="M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M2 2l20 20"/>'),
+    "unlock": '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+    "chevron_up": '<path d="m18 15-6-6-6 6"/>',
+    "align_top": '<path d="M4 4h16"/><rect x="6" y="8" width="4" height="12" rx="1"/><rect x="14" y="8" width="4" height="7" rx="1"/>',
+    "align_middle": '<path d="M4 12h16"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="8.5" width="4" height="7" rx="1"/>',
+    "align_bottom": '<path d="M4 20h16"/><rect x="6" y="4" width="4" height="12" rx="1"/><rect x="14" y="9" width="4" height="7" rx="1"/>',
+    "distribute_h": '<path d="M3 4v16"/><path d="M21 4v16"/><rect x="8" y="8" width="3" height="8" rx="1"/><rect x="13" y="8" width="3" height="8" rx="1"/>',
+    "distribute_v": '<path d="M4 3h16"/><path d="M4 21h16"/><rect x="8" y="8" width="8" height="3" rx="1"/><rect x="8" y="13" width="8" height="3" rx="1"/>',
     "bold": '<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7z"/><path d="M7 12h7a3.5 3.5 0 0 1 0 7H7z"/>',
     "italic": '<path d="M10 5h8"/><path d="M6 19h8"/><path d="M15 5l-6 14"/>',
     "underline": '<path d="M6 4v6a6 6 0 0 0 12 0V4"/><path d="M4 20h16"/>',

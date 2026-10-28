@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem, QGraphicsScene,
 
 from .. import theme
 from ..wording import keys
+from . import colors
 from .beautify import BeautifyStyle
 from .canvas_choose import ChooseMixin
 from .canvas_clipboard import ClipboardMixin
@@ -30,7 +31,8 @@ from .factory import create_item
 from .handles import HandleOverlay, OwnRubberBand
 from .image_ops import ImageGeometry
 from .items import Annotation, EffectItem
-from .style import DEFAULT_TOOL_STYLES, VERSION_3_KINDS, Style, needs_version_3
+from .mini_toolbar import MiniToolbar
+from .style import DEFAULT_TOOL_STYLES, STYLE_FIELDS, VERSION_3_KINDS, Style, needs_version_3
 from .text_items import EditableText, TextItem
 
 DUPLICATE_OFFSET = 16.0
@@ -52,7 +54,8 @@ def document_version(states: list[dict]) -> int:
         if not isinstance(state, dict):  # kept unread from a damaged document
             continue
         style = state.get("style")
-        if state.get("kind") in VERSION_3_KINDS or needs_version_3(style):
+        if state.get("kind") in VERSION_3_KINDS or needs_version_3(style) or state.get("locked") \
+                or state.get("hidden"):
             return 3
         if state.get("kind") == "piece" or (isinstance(style, dict) and style.get("bold") is False):
             version = 2
@@ -134,13 +137,26 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
         self._pick_by_key = False  # the keys placed it (not the pointer), so zooming keeps it
         self._refreshing = False
         self._loupe = Loupe(self.viewport())
+        self._mini = MiniToolbar(self.viewport())
+        self._mini.color_picked.connect(lambda color: self.apply_style(color=color))
+        self._mini.duplicate.connect(self.duplicate_selection)
+        self._mini.forward.connect(lambda: self.reorder_selection(True))
+        self._mini.backward.connect(lambda: self.reorder_selection(False))
+        self._mini.lock.connect(lambda on: self.set_locked(self.selected_annotations(), on))
+        self._mini.delete.connect(self.delete_selection)
+        self._mini.set_swatches(colors.palette())
+        colors.notifier().changed.connect(lambda: self._mini.set_swatches(colors.palette()))
 
         self._scene.selectionChanged.connect(self._on_selection_changed)
         theme.on_change(self.retheme)
         self.undo_stack.indexChanged.connect(self._on_undo_index)
         for bar in (self.horizontalScrollBar(), self.verticalScrollBar()):
             bar.valueChanged.connect(self._refresh_loupe)
+            bar.valueChanged.connect(self.refresh_mini_toolbar)
         self.zoom_changed.connect(self._refresh_loupe)
+        self.zoom_changed.connect(self.refresh_mini_toolbar)
+        self.selection_changed.connect(self.refresh_mini_toolbar)
+        self.document_changed.connect(self.refresh_mini_toolbar)
         self._apply_drag_mode()
         self.setAccessibleName("Snip")
         self.setAccessibleDescription(
@@ -234,9 +250,92 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
 
     # ------------------------------------------------------------------ edits
     def delete_selection(self) -> None:
-        items = self.selected_annotations()
+        items = [i for i in self.selected_annotations() if not i.locked]
         if items:
             self.undo_stack.push(RemoveItemsCommand(self._scene, items))
+        elif self.selected_annotations():
+            self.notice.emit("It's locked: unlock it first (right-click, or the Layers list)")
+
+    def _state_change(self, items, text: str, change) -> None:
+        """Apply `change(item)` to each of `items` as one undo step."""
+        records = []
+        for item in items:
+            before = item.get_state()
+            change(item)
+            after = item.get_state()
+            if after != before:
+                records.append((item, before, after))
+        if records:
+            self.undo_stack.push(StateCommand(records, text))
+            self._overlay.update()
+            self.selection_changed.emit()
+
+    def set_locked(self, items, on: bool) -> None:
+        """Lock markup so it can't be moved, resized or deleted (or unlock it)."""
+        self._state_change(items, "Lock" if on else "Unlock", lambda i: i.set_locked(on))
+
+    def set_hidden(self, items, on: bool) -> None:
+        """Hide markup (it stays in the snip's document, out of the picture) or show it again."""
+        self._state_change(items, "Hide" if on else "Show", lambda i: i.set_hidden(on))
+
+    def align_selection(self, how: str) -> None:
+        """Line the selected markup up: left, center, right, top, middle or bottom. Two or more
+        align to each other's edges; one aligns to the snip's."""
+        items = [i for i in self.selected_annotations() if not i.locked]
+        if not items:
+            return
+        rects = {i: i.sceneBoundingRect() if not hasattr(i, "scene_rect") else i.scene_rect() for i in items}
+        frame = self._crop_rect if len(items) == 1 else QRectF(rects[items[0]])
+        for r in rects.values():
+            if len(items) > 1:
+                frame = frame.united(r)
+        def shift(item):
+            r = rects[item]
+            dx = {"left": frame.left() - r.left(), "center": frame.center().x() - r.center().x(),
+                  "right": frame.right() - r.right()}.get(how, 0.0)
+            dy = {"top": frame.top() - r.top(), "middle": frame.center().y() - r.center().y(),
+                  "bottom": frame.bottom() - r.bottom()}.get(how, 0.0)
+            item.moveBy(dx, dy)
+        self._state_change(items, "Align", shift)
+
+    def distribute_selection(self, axis: str) -> None:
+        """Space three or more pieces of markup evenly between the two outermost, left to right or
+        top to bottom."""
+        items = [i for i in self.selected_annotations() if not i.locked]
+        if len(items) < 3:
+            return
+        rects = {i: i.sceneBoundingRect() if not hasattr(i, "scene_rect") else i.scene_rect() for i in items}
+        horizontal = axis in ("horizontal", "h")
+        key = (lambda r: r.left()) if horizontal else (lambda r: r.top())
+        order = sorted(items, key=lambda i: key(rects[i]))
+        first, last = rects[order[0]], rects[order[-1]]
+        span = (last.right() - first.left()) if horizontal else (last.bottom() - first.top())
+        total = sum((rects[i].width() if horizontal else rects[i].height()) for i in order)
+        gap = (span - total) / (len(order) - 1)
+        targets = {}
+        at = first.left() if horizontal else first.top()
+        for item in order:
+            targets[item] = at
+            at += (rects[item].width() if horizontal else rects[item].height()) + gap
+        def shift(item):
+            r = rects[item]
+            if horizontal:
+                item.moveBy(targets[item] - r.left(), 0)
+            else:
+                item.moveBy(0, targets[item] - r.top())
+        self._state_change(items, "Distribute", shift)
+
+    def use_selection_as_default(self) -> None:
+        """The selected markup's look becomes what its tool draws next."""
+        for item in self.selected_annotations():
+            if item.kind in self.tool_styles:
+                self.tool_styles[item.kind] = item.style
+        self.selection_changed.emit()
+
+    def reset_tool_style(self, kind: str) -> None:
+        if kind in DEFAULT_TOOL_STYLES:
+            self.tool_styles[kind] = DEFAULT_TOOL_STYLES[kind]
+            self.selection_changed.emit()
 
     def duplicate_selection(self) -> None:
         sources = self.bottom_up(self.selected_annotations())
@@ -280,7 +379,7 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
     def select_all(self) -> None:
         if self.editing_text_item() is None:
             for item in self.annotations():
-                if self._visible_in_crop(item):
+                if not item.hidden and self._visible_in_crop(item):
                     item.setSelected(True)
 
     def _visible_in_crop(self, item) -> bool:
@@ -528,6 +627,29 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
     def _next_z(self) -> float:
         zs = [i.zValue() for i in self.annotations() if i.zValue() > -100]
         return max(zs, default=0) + 1
+
+    # ------------------------------------------------------------------ the mini toolbar
+    def mini_toolbar(self) -> MiniToolbar:
+        return self._mini
+
+    def refresh_mini_toolbar(self, *_args) -> None:
+        """Show the mini toolbar over the selection, or hide it while there's nothing selected,
+        a drag or crop is under way, or you're typing (it would cover the words)."""
+        selected = [i for i in self.selected_annotations() if i.scene() is self._scene]
+        busy = self._drag is not None or self.editing_text_item() is not None or self._mask.editing \
+            or self.picking() or self.choosing() or self.closing
+        if not selected or busy:
+            self._mini.show_for(None, None, False)
+            return
+        bounds = QRectF()
+        for item in selected:
+            bounds = bounds.united(item.sceneBoundingRect()) if not bounds.isNull() else item.sceneBoundingRect()
+        top_left = self.mapFromScene(bounds.topLeft())
+        bottom_right = self.mapFromScene(bounds.bottomRight())
+        kinds = {i.kind for i in selected}
+        colorable = all("color" in STYLE_FIELDS.get(k, ()) for k in kinds)
+        color = selected[0].style.color if colorable else None
+        self._mini.show_for(QRect(top_left, bottom_right).normalized(), color, all(i.locked for i in selected))
 
     # ------------------------------------------------------------------ signals
     def _on_selection_changed(self) -> None:

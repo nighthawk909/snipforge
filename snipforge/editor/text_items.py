@@ -285,8 +285,8 @@ class CalloutItem(BoxItem):
     def is_degenerate(self) -> bool:
         return self._rect.width() < self.MIN_SIZE or self._rect.height() < self.MIN_SIZE
 
-    def handle_points(self) -> dict[str, QPointF]:
-        points = super().handle_points()
+    def _handles(self) -> dict[str, QPointF]:
+        points = super()._handles()
         if self.style.tail:
             points["tail"] = self.mapToScene(self._tail)
         return points

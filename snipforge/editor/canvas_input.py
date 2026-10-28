@@ -228,6 +228,8 @@ class InputMixin:
         pos = self.mapToScene(view_pos)
         shift = bool(e.modifiers() & Qt.ShiftModifier)
         drag = self._drag
+        if (drag is not None or e.buttons() & Qt.LeftButton) and self._mini.isVisible():
+            self._mini.hide()  # out of the way while you drag (a selection move is Qt's own drag)
         if self.choosing() and not self._panning:
             self._choose_hover(pos)
             return
@@ -307,6 +309,7 @@ class InputMixin:
             if self.tool == "select":
                 self._commit_moves(self._press_states)
                 self._press_states = {}
+            self.refresh_mini_toolbar()
             return
         kind = drag["type"]
         if kind == "pending":
@@ -334,6 +337,7 @@ class InputMixin:
         else:
             self._finish_create(drag)
         self._overlay.update()
+        self.refresh_mini_toolbar()
 
     # ------------------------------------------------------------------ hit testing and hover
     def _area_handle_at(self, view_pos, scene_pos: QPointF) -> str | None:

@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -29,12 +31,13 @@ from .. import theme
 from ..icons import icon
 from ..widgets import Segmented, ToggleSwitch, screen_reader_name
 from ..wording import keys
-from . import custom_stamps
+from . import colors, custom_stamps
 from .edge_controls import CutoutControls, EdgeControls
 from .fill_controls import FillControls
+from .layers import LayersList
 from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
-from .style import COLOR_NAMES, PALETTE, STRENGTH_KINDS, STYLE_FIELDS, Style, line_style
+from .style import COLOR_NAMES, STRENGTH_KINDS, STYLE_FIELDS, Style, line_style
 from .variant_controls import ArrowControls, DimControls, ShapeControls, StepControls, TextFormatControls
 
 PANEL_WIDTH = 288
@@ -75,6 +78,13 @@ LINE_CHANGES = {"solid": {"dash": False, "dotted": False}, "dashed": {"dash": Tr
                 "dotted": {"dash": True, "dotted": True}}  # dotted keeps dash: older versions draw dashes
 STAMP_COLUMNS = 6
 EDGE_SWATCHES = {"#ffffff", "#1c1c1e"}  # need an outline to show against the panel
+ARRANGE_ACTIONS = {"left": "left", "center": "center", "right": "right", "top": "top", "middle": "middle",
+                   "bottom": "bottom", "h": "distribute_horizontal", "v": "distribute_vertical"}
+ARRANGE_TIPS = {"left": "Align left edges", "center": "Align centers", "right": "Align right edges",
+                "top": "Align top edges", "middle": "Align middles", "bottom": "Align bottom edges",
+                "h": "Space evenly left to right (three or more)", "v": "Space evenly top to bottom (three or more)"}
+ARRANGE_ICONS = {"left": "align_left", "center": "align_center", "right": "align_right", "top": "align_top",
+                 "middle": "align_middle", "bottom": "align_bottom", "h": "distribute_h", "v": "distribute_v"}
 # action, icon, tooltip: the snip's own buttons in the Image section
 IMAGE_ACTIONS = (
     ("rotate_left", "rotate_left", f"Rotate left ({keys('Ctrl+Shift+R')})"),
@@ -98,9 +108,14 @@ class Swatch(QPushButton):
         self.setFixedSize(24, 24)
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
-        name = COLOR_NAMES.get(color.lower(), color)
+        self.set_color(color)
+
+    def set_color(self, color: str) -> None:
+        self.color = color
+        name = COLOR_NAMES.get(color.lower(), color.upper())
         self.setToolTip(name)
         self.setAccessibleName(f"Color: {name}")
+        self.update()
 
     def paintEvent(self, _e) -> None:
         t = theme.current()
@@ -134,6 +149,8 @@ class PropertiesPanel(QScrollArea):
     source_stamp = Signal()         # add the "App name and date" text stamp
     cutout_changed = Signal(dict)   # the Cut out tool's direction or seam
     editing_done = Signal()         # finished typing in a field: give the keyboard back to the canvas
+    arrange = Signal(str)           # align left|center|right|top|middle|bottom, distribute_horizontal|_vertical
+    tool_default = Signal(str)      # "use": the selection's look becomes the tool's; "reset": the usual look
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -148,6 +165,7 @@ class PropertiesPanel(QScrollArea):
         self._loading = False
         self._kind = "select"
         self._next_step = 1
+        self._selected_count = 0
         self._style_color = ""
         self._sections: dict[str, QWidget] = {}
         self._switches: dict[str, ToggleSwitch] = {}
@@ -158,6 +176,7 @@ class PropertiesPanel(QScrollArea):
         self._column.setContentsMargins(0, 0, 0, 16)
         self._column.setSpacing(0)
         self._build_header()
+        self._build_default()
         self._build_quick()
         self._build_shape()
         self._build_arrow()
@@ -165,14 +184,17 @@ class PropertiesPanel(QScrollArea):
         self._build_stamps()
         self._build_colors()
         self._build_size()
+        self._build_look()
         self._build_text()
         self._build_effects()
         self._build_fill()  # right under the Fill switch, so turning it on doesn't move the switch
         self._build_dim()
         self._build_crop()
         self._build_cutout()
+        self._build_arrange()
         self._build_image()
         self._build_edges()
+        self._build_layers()
         self._column.addStretch(1)
         self.setWidget(body)
         # Controls are reachable with Tab but don't take the keyboard when clicked; you can type a font size.
@@ -186,6 +208,12 @@ class PropertiesPanel(QScrollArea):
         self._steps.next.editingFinished.connect(self.editing_done)
         self._format.font.setFocusPolicy(Qt.StrongFocus)
         self._format.font.lineEdit().setFocusPolicy(Qt.StrongFocus)
+        self._hex.setFocusPolicy(Qt.StrongFocus)
+        self._hex.editingFinished.connect(self.editing_done)
+        self._rotation.setFocusPolicy(Qt.StrongFocus)
+        self._rotation.lineEdit().setFocusPolicy(Qt.StrongFocus)
+        self._rotation.editingFinished.connect(self.editing_done)
+        colors.notifier().changed.connect(self._refresh_colors)
         self.retheme()
 
     # ------------------------------------------------------------------ builders
@@ -223,6 +251,20 @@ class PropertiesPanel(QScrollArea):
         self._hint.setProperty("sfRole", "secondary")
         col.addWidget(self._hint)
         self._column.addWidget(head)
+
+    def _build_default(self) -> None:
+        col = self._section("default", None)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self._default_buttons: dict[str, QPushButton] = {}
+        for key, label, tip in (("use", "Use as default", "This look becomes what the tool draws next"),
+                                ("reset", "Reset tool", "The tool's usual look (what you've drawn keeps its own)")):
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, k=key: self.tool_default.emit(k))
+            self._default_buttons[key] = b
+            row.addWidget(b, 1)
+        col.addLayout(row)
 
     def _build_quick(self) -> None:
         col = self._section("quick", "Quick styles")
@@ -362,6 +404,15 @@ class PropertiesPanel(QScrollArea):
         label.setProperty("sfRole", "section")
         head.addWidget(label)
         head.addStretch(1)
+        self._hex = QLineEdit()
+        self._hex.setObjectName("HexColor")
+        self._hex.setPlaceholderText("#rrggbb")
+        self._hex.setMaxLength(7)
+        self._hex.setFixedWidth(78)
+        self._hex.setToolTip("The color as hex: type one, like #1a73e8")
+        screen_reader_name(self._hex, "Color as hex")
+        self._hex.editingFinished.connect(self._hex_typed)
+        head.addWidget(self._hex)
         self._custom = QToolButton()
         self._custom.setObjectName("CustomColor")
         self._custom.setToolTip("Custom color")
@@ -378,12 +429,81 @@ class PropertiesPanel(QScrollArea):
         col.addLayout(head)
         row = QHBoxLayout()
         row.setSpacing(2)
-        self._swatches = {c: Swatch(c) for c in PALETTE}
-        for color, swatch in self._swatches.items():  # checked by hand: a custom color clears every ring
-            swatch.clicked.connect(lambda _=False, c=color: self._pick_swatch(c))
+        self._swatches: list[Swatch] = []
+        for n, color in enumerate(colors.palette()):  # checked by hand: a custom color clears every ring
+            swatch = Swatch(color)
+            swatch.clicked.connect(lambda _=False, i=n: self._pick_swatch(self._swatches[i].color))
+            swatch.setContextMenuPolicy(Qt.CustomContextMenu)
+            swatch.customContextMenuRequested.connect(lambda pos, i=n: self._swatch_menu(i, pos))
+            swatch.setToolTip(swatch.toolTip() + " (right-click to change it)")
+            self._swatches.append(swatch)
             row.addWidget(swatch)
         row.addStretch(1)
         col.addLayout(row)
+        self._recent_label = QLabel("RECENT")
+        self._recent_label.setProperty("sfRole", "section")
+        col.addWidget(self._recent_label)
+        self._recent_row = QHBoxLayout()
+        self._recent_row.setSpacing(2)
+        self._recent_row.addStretch(1)
+        self._recent: list[Swatch] = []
+        col.addLayout(self._recent_row)
+        self._refresh_colors()
+
+    def _refresh_colors(self) -> None:
+        """The swatches follow your palette and the colors you've used lately."""
+        for swatch, color in zip(self._swatches, colors.palette(), strict=True):
+            if swatch.color != color:
+                swatch.set_color(color)
+                swatch.setToolTip(swatch.toolTip() + " (right-click to change it)")
+        for old in self._recent:
+            self._recent_row.removeWidget(old)
+            old.hide()
+            old.deleteLater()
+        self._recent = []
+        for color in colors.recent():
+            swatch = Swatch(color)
+            swatch.setFocusPolicy(Qt.TabFocus)
+            swatch.clicked.connect(lambda _=False, c=color: self._pick_swatch(c))
+            self._recent_row.insertWidget(len(self._recent), swatch)
+            self._recent.append(swatch)
+        self._recent_label.setVisible(bool(self._recent))
+        self._check_swatches(self._style_color)
+
+    def _check_swatches(self, color: str) -> None:
+        """Ring the swatch that is `color` (one at most: the palette's first, else a recent one)."""
+        found = False
+        for swatch in (*self._swatches, *self._recent):
+            on = not found and swatch.color.lower() == (color or "").lower()
+            swatch.setChecked(on)
+            found = found or on
+
+    def _swatch_menu(self, index: int, pos) -> None:
+        swatch = self._swatches[index]
+        menu = QMenu(self)
+        change = menu.addAction("Change this color…")
+        change.triggered.connect(lambda: self._change_swatch(index))
+        reset = menu.addAction("Reset the palette")
+        reset.setEnabled(colors.palette() != list(colors.DEFAULT_PALETTE))
+        reset.triggered.connect(colors.reset_palette)
+        menu.exec(swatch.mapToGlobal(pos))
+
+    def _change_swatch(self, index: int) -> None:
+        color = QColorDialog.getColor(QColor(self._swatches[index].color), self, "Palette color")
+        if color.isValid():
+            colors.set_palette_color(index, color.name())
+
+    def _hex_typed(self) -> None:
+        color = colors.normalize(self._hex.text())
+        if color is None:
+            self._hex.setText(self._style_color)  # not a color: back to what it was
+            return
+        self._hex.setText(color)
+        if color != (self._style_color or "").lower():
+            self._style_color = color
+            self._check_swatches(color)
+            colors.remember(color)
+            self._emit(color=color)
 
     def _build_fill(self) -> None:
         col = self._section("fill", None)
@@ -406,6 +526,64 @@ class PropertiesPanel(QScrollArea):
         self._slider.setRange(1, 20)
         self._slider.valueChanged.connect(lambda v: self._emit(width=float(v)))
         col.addWidget(self._slider)
+
+    def _build_look(self) -> None:
+        col = self._section("look", None)
+        head = QHBoxLayout()
+        label = QLabel("OPACITY")
+        label.setProperty("sfRole", "section")
+        self._opacity_value = QLabel()
+        self._opacity_value.setProperty("sfRole", "secondary")
+        head.addWidget(label)
+        head.addStretch(1)
+        head.addWidget(self._opacity_value)
+        col.addLayout(head)
+        self._opacity = NoWheelSlider(Qt.Horizontal)
+        self._opacity.setRange(5, 100)
+        self._opacity.setAccessibleName("Opacity")
+        self._opacity.valueChanged.connect(self._opacity_moved)
+        col.addWidget(self._opacity)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Rotation"))
+        row.addStretch(1)
+        self._rotation = QSpinBox()
+        self._rotation.setRange(-359, 359)
+        self._rotation.setSuffix("°")
+        self._rotation.setWrapping(True)
+        self._rotation.setToolTip("Turn it about its middle, in degrees")
+        screen_reader_name(self._rotation, "Rotation in degrees")
+        self._rotation.valueChanged.connect(lambda v: self._emit(rotation=int(v) % 360))
+        row.addWidget(self._rotation)
+        col.addLayout(row)
+
+    def _opacity_moved(self, value: int) -> None:
+        self._opacity_value.setText(f"{value}%")
+        self._emit(opacity=int(value))
+
+    def _build_arrange(self) -> None:
+        col = self._section("arrange", "Arrange")
+        self._arrange_buttons: dict[str, QToolButton] = {}
+        for keys_ in (("left", "center", "right", "top", "middle", "bottom"), ("h", "v")):
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            for key in keys_:
+                b = QToolButton()
+                b.setObjectName("ImageAction")
+                b.setIconSize(QSize(18, 18))
+                b.setCursor(Qt.PointingHandCursor)
+                tip = ARRANGE_TIPS[key]
+                b.setToolTip(tip)
+                b.setAccessibleName(tip)
+                b.clicked.connect(lambda _=False, k=key: self.arrange.emit(ARRANGE_ACTIONS[k]))
+                self._arrange_buttons[key] = b
+                row.addWidget(b)
+            row.addStretch(1)
+            col.addLayout(row)
+
+    def _build_layers(self) -> None:
+        col = self._section("layers", "Layers")
+        self._layers = LayersList()
+        col.addWidget(self._layers)
 
     def _build_text(self) -> None:
         col = self._section("text", "Text")
@@ -525,10 +703,12 @@ class PropertiesPanel(QScrollArea):
         col.addLayout(row)
 
     # ------------------------------------------------------------------ state
-    def load(self, kind: str, style: Style | None, has_selection: bool, next_step: int = 1) -> None:
+    def load(self, kind: str, style: Style | None, has_selection: bool, next_step: int = 1,
+             selected_count: int | None = None) -> None:
         self._loading = True
         self._kind = kind
         self._next_step = next_step
+        self._selected_count = (1 if has_selection else 0) if selected_count is None else selected_count
         fields = STYLE_FIELDS.get(kind, ()) if style else ()
         self._title.setText(TITLES.get(kind, kind.title()))
         self._chip.setVisible(has_selection)
@@ -541,8 +721,11 @@ class PropertiesPanel(QScrollArea):
             "color": "color" in fields, "size": "width" in fields, "text": "font_size" in fields,
             "fill": "fill_color" in fields and bool(style and style.fill),
             "effects": any(f in fields for f in (*SWITCHES, "dash")), "crop": kind == "crop",
-            "image": kind == "select", "dim": "dim" in fields,
+            "image": kind == "select", "dim": "dim" in fields, "look": "opacity" in fields,
             "cutout": kind == "cutout", "edges": kind == "select",
+            "arrange": has_selection and kind not in ("crop", "cutout"),
+            "default": bool(fields) and kind in self._tool_kinds(),
+            "layers": kind == "select" and self._layers.has_rows(),
         }
         for name, box in self._sections.items():
             box.setVisible(show[name])
@@ -554,15 +737,27 @@ class PropertiesPanel(QScrollArea):
             {"text": "Background", "callout": "Filled"}.get(kind, "Fill"))
         self._size_label.setText(self.size_label().upper())
         self._slider.setAccessibleName(self.size_label())
+        self._default_buttons["use"].setVisible(has_selection)
+        count = self._selected_count
+        for key, b in self._arrange_buttons.items():
+            b.setEnabled(count >= (3 if key in ("h", "v") else 2))
         if style:
             self._load_style(style)
         self._quick.load(kind, style, has_selection)
         self._loading = False
 
+    @staticmethod
+    def _tool_kinds() -> set[str]:
+        from .style import DEFAULT_TOOL_STYLES
+        return set(DEFAULT_TOOL_STYLES)
+
     def _load_style(self, style: Style) -> None:
         self._style_color = style.color
-        for color, swatch in self._swatches.items():
-            swatch.setChecked(color.lower() == style.color.lower())
+        self._check_swatches(style.color)
+        self._hex.setText(style.color.lower())
+        self._opacity.setValue(int(style.opacity))
+        self._opacity_value.setText(f"{int(style.opacity)}%")
+        self._rotation.setValue(int(style.rotation))
         self._slider.setValue(int(round(style.width)))
         self._size_value.setText(f"{int(round(style.width))}")
         self._font.setValue(int(style.font_size))
@@ -615,14 +810,18 @@ class PropertiesPanel(QScrollArea):
         self._picker.setIcon(icon("pipette"))
         for action, icon_name, _tip in IMAGE_ACTIONS:
             self._image_buttons[action].setIcon(icon(icon_name))
+        for key, b in self._arrange_buttons.items():
+            b.setIcon(icon(ARRANGE_ICONS[key]))
+        self._layers.retheme()
         self.viewport().update()
-        for w in (*self._swatches.values(), *self._fill.swatches.values(), self._fill.same, *self._tiles,
+        for w in (*self._swatches, *self._recent, *self._fill.swatches.values(), self._fill.same, *self._tiles,
                   *self._quick.saved_tiles, *self._switches.values()):
             w.update()
 
     def _pick_swatch(self, color: str) -> None:
-        for c, swatch in self._swatches.items():
-            swatch.setChecked(c == color)
+        self._style_color = color
+        self._check_swatches(color)
+        self._hex.setText(color.lower())
         self._emit(color=color)
 
     def _emit(self, **changes) -> None:
@@ -643,7 +842,8 @@ class PropertiesPanel(QScrollArea):
     def _pick_custom(self) -> None:
         color = QColorDialog.getColor(QColor(self._style_color or "#ff3b30"), self, "Annotation color")
         if color.isValid():
-            self._emit(color=color.name())
+            colors.remember(color.name())
+            self._pick_swatch(color.name())
 
     # ------------------------------------------------------------------ for tests and callers
     def title(self) -> str:
@@ -672,7 +872,31 @@ class PropertiesPanel(QScrollArea):
         return self._fill
 
     def swatch(self, color: str) -> Swatch:
-        return self._swatches[color]
+        return next(s for s in self._swatches if s.color.lower() == color.lower())
+
+    def swatch_at(self, index: int) -> Swatch:
+        return self._swatches[index]
+
+    def recent_swatches(self) -> list[Swatch]:
+        return list(self._recent)
+
+    def hex_field(self) -> QLineEdit:
+        return self._hex
+
+    def opacity_slider(self) -> QSlider:
+        return self._opacity
+
+    def rotation_box(self) -> QSpinBox:
+        return self._rotation
+
+    def arrange_button(self, key: str) -> QToolButton:
+        return self._arrange_buttons[key]
+
+    def default_button(self, key: str) -> QPushButton:
+        return self._default_buttons[key]
+
+    def layers_list(self) -> LayersList:
+        return self._layers
 
     def quick_tile(self, index: int) -> QuickStyleTile:
         return self._tiles[index]

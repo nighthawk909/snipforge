@@ -102,7 +102,7 @@ def test_custom_color_clears_the_swatch_ring(qapp):
     panel = PropertiesPanel()
     panel.load("rect", Style(color="#ff3b30"), has_selection=True)
     panel.load("rect", Style(color="#123456"), has_selection=True)
-    assert [c for c, s in panel._swatches.items() if s.isChecked()] == []
+    assert [s.color for s in panel._swatches if s.isChecked()] == []
 
 
 def test_wheel_over_the_size_slider_scrolls_the_panel_instead(qapp):

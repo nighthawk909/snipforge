@@ -117,17 +117,24 @@ class Annotation:
 
     kind = ""
     supports_shadow = True
+    locked = False  # can't be moved, resized or deleted until unlocked (Lock in the menu or the Layers list)
+    hidden = False  # not shown, saved or selected until shown again (the Layers list's eye)
 
     def init_annotation(self, style: Style) -> None:
         self.style = style
         self.setFlags(FLAGS)
         self._apply_shadow()
+        self._apply_look()
 
     # -- state -------------------------------------------------------------
     def get_state(self) -> dict:
         state = {"kind": self.kind, "pos": [self.pos().x(), self.pos().y()],
                  "z": self.zValue(), "style": self.style.to_dict()}
         state.update(self._geometry())
+        if self.locked:
+            state["locked"] = True
+        if self.hidden:
+            state["hidden"] = True
         return state
 
     def set_state(self, state: dict) -> None:
@@ -138,6 +145,31 @@ class Annotation:
         # restored geometry using the style being replaced.
         self.set_style(Style.from_dict(state["style"]))
         self._set_geometry(state)
+        self.set_locked(state.get("locked") is True)
+        self.set_hidden(state.get("hidden") is True)
+        self._apply_look()
+
+    # -- lock and hide -------------------------------------------------------
+    def set_locked(self, on: bool) -> None:
+        self.locked = bool(on)
+        self.setFlag(QGraphicsItem.ItemIsMovable, not self.locked)
+
+    def set_hidden(self, on: bool) -> None:
+        self.hidden = bool(on)
+        if self.hidden:
+            self.setSelected(False)
+        self.setVisible(not self.hidden)
+
+    # -- opacity and rotation ------------------------------------------------
+    def _center(self) -> QPointF:
+        """What it turns about, in its own coordinates."""
+        return self.boundingRect().center()
+
+    def _apply_look(self) -> None:
+        self.setOpacity(self.style.opacity / 100)
+        if self.style.rotation or self.rotation():
+            self.setTransformOriginPoint(self._center())
+            self.setRotation(self.style.rotation)
 
     def _geometry(self) -> dict:
         return {}
@@ -150,6 +182,7 @@ class Annotation:
         self.prepareGeometryChange()
         self.style = style
         self._apply_shadow()
+        self._apply_look()
         self.update()
 
     def _apply_shadow(self) -> None:
@@ -164,7 +197,10 @@ class Annotation:
 
     # -- handles -----------------------------------------------------------
     def handle_points(self) -> dict[str, QPointF]:
-        """Handle name -> position in scene coordinates."""
+        """Handle name -> position in scene coordinates; none while it's locked."""
+        return {} if self.locked else self._handles()
+
+    def _handles(self) -> dict[str, QPointF]:
         return {}
 
     def begin_handle_drag(self) -> None:
@@ -200,7 +236,11 @@ class BoxItem(Annotation, QGraphicsItem):
         self.setPos(rect.topLeft())
         self._rect = QRectF(0, 0, rect.width(), rect.height())
         self._geometry_changed()
+        self._apply_look()  # turned markup keeps turning about its middle as it's resized
         self.update()
+
+    def _center(self) -> QPointF:
+        return self._rect.center()
 
     def _geometry_changed(self) -> None:
         pass
@@ -231,7 +271,7 @@ class BoxItem(Annotation, QGraphicsItem):
     def is_degenerate(self) -> bool:
         return self._rect.width() < 4 or self._rect.height() < 4
 
-    def handle_points(self) -> dict[str, QPointF]:
+    def _handles(self) -> dict[str, QPointF]:
         r = self.scene_rect()
         cx, cy = r.center().x(), r.center().y()
         points = {"tl": r.topLeft(), "tr": r.topRight(), "br": r.bottomRight(), "bl": r.bottomLeft()}
@@ -534,7 +574,11 @@ class LineItem(Annotation, QGraphicsItem):
     def set_points(self, p1: QPointF, p2: QPointF) -> None:
         self.prepareGeometryChange()
         self._p1, self._p2 = QPointF(p1), QPointF(p2)
+        self._apply_look()
         self.update()
+
+    def _center(self) -> QPointF:
+        return (self._p1 + self._p2) / 2
 
     def set_end_scene(self, scene_pos: QPointF, shift: bool) -> None:
         end = self.mapFromScene(scene_pos)
@@ -585,7 +629,7 @@ class LineItem(Annotation, QGraphicsItem):
     def shape(self) -> QPainterPath:
         return stroke_band(self._path(), self.style.width + HIT_SLOP * 2)
 
-    def handle_points(self) -> dict[str, QPointF]:
+    def _handles(self) -> dict[str, QPointF]:
         points = {"p1": self.mapToScene(self._p1), "p2": self.mapToScene(self._p2)}
         if self.style.curve:
             points["control"] = self.mapToScene(self.control())
@@ -787,6 +831,9 @@ class StepItem(Annotation, QGraphicsItem):
 
     def _d(self) -> float:
         return 18.0 + self.style.width * 4
+
+    def _center(self) -> QPointF:
+        return QPointF(0, 0)
 
     def label(self) -> str:
         if self.style.numbering == "letters":

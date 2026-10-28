@@ -34,7 +34,7 @@ class KeyboardMixin:
 
     def step_selection(self, forward: bool) -> bool:
         """Select the next (or previous) markup; False past the end, or when there's none."""
-        items = [i for i in self.bottom_up(self.annotations())
+        items = [i for i in self.bottom_up(self.annotations()) if not i.hidden
                  if i.isVisible() and i.flags() & QGraphicsItem.ItemIsSelectable]
         if not items:
             return False

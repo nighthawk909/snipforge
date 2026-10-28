@@ -86,7 +86,7 @@ class ClipboardMixin:
     def cut_selection(self) -> bool:
         """Copy the selected markup and remove it (one undo step). False if nothing was selected."""
         data = self.markup_data()
-        items = self.selected_annotations()
+        items = [i for i in self.selected_annotations() if not i.locked]  # locked markup stays
         if data is None or not items:
             return False
         mime = QMimeData()
@@ -212,17 +212,23 @@ class ClipboardMixin:
         self.commit_text()
         if hit is not None and not hit.isSelected():
             self._select([hit])
-        selected = bool(self.selected_annotations())
+        chosen = self.selected_annotations()
+        selected = bool(chosen)
+        locked = selected and all(i.locked for i in chosen)
         menu = QMenu(self)
         entries = (
-            ("Cut", "Ctrl+X", self.cut_selection, selected),
+            ("Cut", "Ctrl+X", self.cut_selection, selected and not locked),
             ("Copy" if selected else "Copy snip", "Ctrl+C", self.copy_requested.emit, True),
             ("Paste", "Ctrl+V", self.paste, self.can_paste()),
             ("Duplicate", "Ctrl+D", self.duplicate_selection, selected),
-            ("Delete", "Del", self.delete_selection, selected),
+            ("Delete", "Del", self.delete_selection, selected and not locked),
             None,
             ("Bring to front", "Ctrl+]", lambda: self.reorder_selection(True), selected),
             ("Send to back", "Ctrl+[", lambda: self.reorder_selection(False), selected),
+            None,
+            ("Unlock" if locked else "Lock", "", lambda: self.set_locked(chosen, not locked), selected),
+            ("Hide", "", lambda: self.set_hidden(chosen, True), selected),
+            ("Use as the tool's default", "", self.use_selection_as_default, selected),
             None,
             ("Select all", "Ctrl+A", self.select_all, bool(self.annotations())),
         )
@@ -232,7 +238,8 @@ class ClipboardMixin:
                 continue
             label, shortcut, slot, enabled = entry
             action = menu.addAction(label, slot)
-            action.setShortcut(QKeySequence(shortcut))  # shown beside it; the window owns the real shortcut
-            action.setShortcutVisibleInContextMenu(True)
+            if shortcut:
+                action.setShortcut(QKeySequence(shortcut))  # shown beside it; the window owns the real shortcut
+                action.setShortcutVisibleInContextMenu(True)
             action.setEnabled(enabled)
         return menu
