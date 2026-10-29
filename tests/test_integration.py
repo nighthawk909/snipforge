@@ -162,6 +162,39 @@ def test_capture_opens_editor_and_library_entry(forge, white_image):
     assert len(forge._windows) == 1
 
 
+def _editors(forge):
+    return [w for w in forge._windows if type(w).__name__ == "EditorWindow" and w.isVisible()]
+
+
+def test_a_new_snip_replaces_the_open_editor(forge, white_image):
+    """Snip after snip leaves one editor, with the newest snip; the ones before are kept in the
+    Library, markup and all."""
+    from tests.test_editor import drag
+
+    forge._on_captured(white_image)
+    first = _editors(forge)[0]
+    drag(first.canvas, "rect", (20, 20), (80, 60))
+    forge._on_captured(white_image)
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    editors = _editors(forge)
+    assert len(editors) == 1 and editors[0] is not first
+    assert len(forge.library.entries()) == 2
+    older = min(forge.library.entries(), key=lambda e: e.created)
+    assert forge.library.load_document(older) is not None  # its rectangle was saved as it closed
+    forge.open_entry(older.id)  # opening one from the Library replaces it too
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert len(_editors(forge)) == 1 and _editors(forge)[0]._entry.id == older.id
+
+
+def test_an_editor_that_cant_autosave_stays_open(forge, white_image, no_dialogs):
+    entry = forge.library.create(white_image)
+    (entry.path / "document.json").write_text("{broken", encoding="utf-8")
+    forge.open_entry(entry.id)  # autosave off: closing it could lose what's changed
+    forge._on_captured(white_image)
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert len(_editors(forge)) == 2
+
+
 def test_open_entry_focuses_existing_editor(forge, white_image):
     forge._on_captured(white_image)
     entry = forge.library.entries()[0]

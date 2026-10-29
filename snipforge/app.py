@@ -553,9 +553,13 @@ class SnipForgeApp:
                               on_open_entry=self.open_entry, on_pin=self.pin, autosave=autosave,
                               on_open_library=self.show_home, beautify_on=beautify_on,
                               on_combine=lambda entry_id, window: self.combine([entry_id], window))
+        earlier = [w for w in self._windows if isinstance(w, EditorWindow)]
         self._track(editor)
         editor.show()
         self._bring_to_front(editor)
+        for window in earlier:  # one editor at a time: the newest snip replaces the one before
+            if window.keeps_itself():
+                window.close()  # it saves to the Library as it closes
 
     def pin(self, image: QImage) -> None:
         window = PinWindow(image, QPoint(*self._pin_position()))
