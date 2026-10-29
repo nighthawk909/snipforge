@@ -37,6 +37,7 @@ from .layers import LayersList
 from .quick_tiles import QuickStyles, QuickStyleTile, SavedStyleTile
 from .stamps import STAMPS, stamp_icon
 from .style import COLOR_NAMES, STRENGTH_KINDS, STYLE_FIELDS, Style, line_style
+from .text_color_controls import TextColorControls
 from .variant_controls import (
     ArrowControls,
     DimControls,
@@ -625,6 +626,9 @@ class PropertiesPanel(QScrollArea):
         self._format = TextFormatControls()
         self._format.changed.connect(lambda changes: self._emit(**changes))
         col.addWidget(self._format)
+        self._text_color = TextColorControls(Swatch)  # callouts: a text box's Color is its text's
+        self._text_color.changed.connect(lambda changes: self._emit(**changes))
+        col.addWidget(self._text_color)
 
     def _switch_row(self, col: QVBoxLayout, key: str, label: str) -> ToggleSwitch:
         row_widget = QWidget()
@@ -795,6 +799,8 @@ class PropertiesPanel(QScrollArea):
         self._arrow.load(style)
         self._steps.load(style, self._next_step)
         self._format.load(self._kind, style)
+        self._text_color.setVisible("text_color" in STYLE_FIELDS.get(self._kind, ()))
+        self._text_color.load(self._kind, style)
         self._dim.load(style)
         for name, button in (*self._stamp_buttons.items(), *self._custom_buttons.items()):
             button.setChecked(name == style.stamp)
@@ -831,6 +837,7 @@ class PropertiesPanel(QScrollArea):
             self._line.button(key).setIcon(icon(f"line_{key}"))
         self._custom.setIcon(icon("plus"))
         self._fill.custom.setIcon(icon("plus"))
+        self._text_color.retheme(icon("plus"))
         self._cutout.retheme()
         self._picker.setIcon(icon("pipette"))
         for action, icon_name, _tip in IMAGE_ACTIONS:
@@ -919,6 +926,9 @@ class PropertiesPanel(QScrollArea):
 
     def default_button(self, key: str) -> QPushButton:
         return self._default_buttons[key]
+
+    def text_color_controls(self) -> TextColorControls:
+        return self._text_color
 
     def layers_list(self) -> LayersList:
         return self._layers

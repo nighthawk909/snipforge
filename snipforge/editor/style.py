@@ -59,7 +59,7 @@ def _clean(name: str, value):
         if name == "dim":
             return USUAL_DIM if number < 0 else int(round(min(DIM_RANGE[1], number)))
         return USUAL_OPACITY if number < 0 else int(round(min(100, number)))
-    if name == "fill_color":  # "" means the outline's color
+    if name in ("fill_color", "text_color"):  # "": the outline's color, or text that reads on the fill
         return value if isinstance(value, str) and (value == "" or QColor(value).isValid()) else None
     if name == "shape":
         return value if value in SHAPES else None
@@ -103,6 +103,7 @@ class Style:
     dim: int = USUAL_DIM     # spotlight: how dark the rest is, in percent
     opacity: int = 100       # any markup: how solid it is, in percent
     rotation: int = 0        # any markup: degrees clockwise, about its middle
+    text_color: str = ""     # callouts: "" = dark or white, whichever reads on the fill
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -149,8 +150,8 @@ _STYLE_FIELDS: dict[str, tuple[str, ...]] = {
     "highlight": ("box", "color", "width"),
     "highlight_box": ("color",),
     "text": ("color", "font_size", *TEXT_FORMAT, "bold", "outline", "fill", "fill_color", "fill_opacity", "shadow"),
-    "callout": ("shape", "tail", "color", "width", "font_size", *TEXT_FORMAT, "fill", "fill_color", "fill_opacity",
-                "shadow"),
+    "callout": ("shape", "tail", "color", "width", "font_size", *TEXT_FORMAT, "text_color", "fill", "fill_color",
+                "fill_opacity", "shadow"),
     "stamp": ("stamp", "shadow"),
     "step": ("numbering", "badge", "color", "width", "shadow"),
     "pixelate": ("width", "rounded"),
@@ -168,7 +169,7 @@ VERSION_3_KINDS = {"highlight_box"}  # kinds older SnipForges can't draw
 VERSION_3_DEFAULTS = {"heads": "end", "open_head": False, "curve": False, "corner": USUAL_CORNER, "numbering": "digits",
                       "badge": "circle", "box": False, "font_family": "", "align": "", "italic": False,
                       "underline": False, "outline": False, "rounded": False, "dim": USUAL_DIM, "opacity": 100,
-                      "rotation": 0}
+                      "rotation": 0, "text_color": ""}
 
 
 def needs_version_3(style: dict, kind: str | None = None) -> bool:
