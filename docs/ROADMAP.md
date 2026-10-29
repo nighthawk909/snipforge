@@ -78,6 +78,8 @@ SnagIt's does. Built in this order:
 - [x] Properties panel 3.0: opacity and rotation for everything, a hex color box, recent and custom
   colors, "set as this tool's default", a mini toolbar over the selection, align and distribute,
   lock, and a Layers list
+- [x] Pick a color from anywhere on screen: the tray's Pick a color (or a shortcut of your own), a
+  pixel-exact loupe on every monitor, copied as HEX, RGB or HSL and kept in the editor's Recent colors
 
 ### Across the app
 - [x] Privacy: private-window titles never kept, in many browsers and languages (#65, #70, #77)

@@ -10,12 +10,21 @@ bar) icon instead. The macOS shortcut is planned in docs/MAC-PLAN.md.
 from __future__ import annotations
 
 import ctypes
+import logging
 import sys
 import threading
+import time
 
 from PySide6.QtCore import QObject, Signal
 
+log = logging.getLogger(__name__)
+
 SUPPORTED = sys.platform == "win32"
+# A key that reaches the hook this late means SnipForge was busy: another of its threads held
+# Python's lock, so the hook couldn't answer. Windows quietly removes a hook that answers too slowly
+# (its limit can be as short as 300 ms), so it's put back at once.
+HOOK_LATE_MS = 250
+LOG_EVERY_S = 60  # the log says so at most this often (a key stamped with an old time could repeat it)
 
 WH_KEYBOARD_LL = 13
 WM_KEYDOWN = 0x0100
@@ -68,6 +77,7 @@ if SUPPORTED:
     _user32.keybd_event.argtypes = [ctypes.c_ubyte, ctypes.c_ubyte, wintypes.DWORD, ULONG_PTR]
     _kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
     _kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+    _kernel32.GetTickCount.restype = wintypes.DWORD  # the clock a key event's `time` is stamped with
 else:  # importable everywhere; none of this is used unless the hook is installed
     HOOKPROC = None
     _user32 = _kernel32 = None
@@ -94,6 +104,9 @@ class HotkeyListener(QObject):
         self._print_screen = True
         self._held = 0  # the shortcut key being held: Windows repeats it, but it's one snip
         self._held_at = 0  # when it was last seen (ms, the event's own clock)
+        self.late_ms = 0  # how late a key reached the hook, until the hook is put back (0: on time)
+        self.stalls = 0  # times a late key had the hook put back
+        self._logged_at = -LOG_EVERY_S  # when the log last said so (time.monotonic())
 
     @property
     def keys(self) -> tuple[bool, bool]:
@@ -139,6 +152,7 @@ class HotkeyListener(QObject):
                 if fresh:
                     _user32.UnhookWindowsHookEx(self._hook)
                     self._hook = fresh
+                self._reinstalled(bool(fresh))
                 continue
             _user32.TranslateMessage(ctypes.byref(msg))
             _user32.DispatchMessageW(ctypes.byref(msg))
@@ -148,6 +162,7 @@ class HotkeyListener(QObject):
     def _callback(self, n_code, w_param, l_param):
         if n_code >= 0:
             info = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+            self._check_timing(info.time, _kernel32.GetTickCount())
             if w_param in (WM_KEYUP, WM_SYSKEYUP) and info.vkCode == self._held:
                 self._held = 0  # released: the next press is a new snip (the key-up passes on)
             elif w_param in (WM_KEYDOWN, WM_SYSKEYDOWN) and not info.flags & LLKHF_INJECTED and \
@@ -158,6 +173,24 @@ class HotkeyListener(QObject):
                     self.triggered.emit()
                 return 1  # swallow: the shell never sees it (repeats included)
         return _user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+    def _check_timing(self, event_time: int, now: int) -> None:
+        """Put the hook back if this key reached it late (both times are Windows' 32-bit tick count,
+        which wraps after 49 days). Once per busy spell: later keys in it wait for that reinstall."""
+        late = (now - event_time) & 0xFFFFFFFF
+        if HOOK_LATE_MS <= late < 0x8000_0000 and not self.late_ms:  # past 2**31: stamped after now
+            self.late_ms = late
+            self.stalls += 1
+            self.refresh()
+
+    def _reinstalled(self, ok: bool = True) -> None:
+        """On the hook thread, once it's been put back (or tried): say why in the log if a late key
+        asked for it, at most once a minute."""
+        if self.late_ms and ok and time.monotonic() - self._logged_at >= LOG_EVERY_S:
+            self._logged_at = time.monotonic()
+            log.info("SnipForge was busy for %d ms when a key was pressed, so the snip key's keyboard "
+                     "hook was put back in case Windows had removed it", self.late_ms)
+        self.late_ms = 0
 
     def _repeat(self, vk: int, when: int) -> bool:
         """Whether this key-down is Windows repeating a held key. A key-down long after the last

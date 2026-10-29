@@ -2,7 +2,7 @@
 import json
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -242,7 +242,9 @@ def test_tiles_keep_focus_and_tab_in_place(qapp):
         while not widget.focusPolicy() & Qt.TabFocus:
             widget = widget.nextInFocusChain()
         return widget
-    assert next_stop(panel.quick_tile(len(QUICK_STYLES) - 1)) is first
+    # Where they are on screen: the SAVED header's Remove all, then the saved tiles, then Save.
+    assert next_stop(panel.quick_tile(len(QUICK_STYLES) - 1)) is panel.remove_all_button()
+    assert next_stop(panel.remove_all_button()) is first
     assert next_stop(first) is panel.saved_tile(1) and next_stop(panel.saved_tile(1)) is panel.save_button()
     panel.load("arrow", MINE, has_selection=True)  # as after applying one: the same tiles stay
     assert panel.saved_tile(0) is first
@@ -284,3 +286,199 @@ def test_samples_stay_visible_on_either_theme(qapp):
             p.end()
             changed = sum(1 for x in range(48) for y in range(40) if image.pixelColor(x, y) != QColor(background))
             assert changed > 30, (kind, background)
+
+
+# --- removing: the × on hover, and Remove all --------------------------------------------------
+def enter(widget, pos=None):
+    """The pointer is over it, as when it slides under a pointer that isn't moving."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QEnterEvent
+    at = QPointF(pos if pos is not None else widget.rect().center())
+    QApplication.sendEvent(widget, QEnterEvent(at, at, QPointF(widget.mapToGlobal(at.toPoint()))))
+
+
+def move(widget, pos):
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    at = QPointF(pos)
+    QApplication.sendEvent(widget, QMouseEvent(QEvent.MouseMove, at, QPointF(widget.mapToGlobal(pos)),
+                                               Qt.NoButton, Qt.NoButton, Qt.NoModifier))
+
+
+def hover(widget, pos=None):
+    """The pointer moves onto it."""
+    pos = pos if pos is not None else widget.rect().center()
+    enter(widget, pos)
+    move(widget, pos)
+
+
+def unhover(widget):
+    from PySide6.QtCore import QEvent
+    QApplication.sendEvent(widget, QEvent(QEvent.Leave))
+
+
+def away_from_x(tile):
+    """The bottom-left corner: on the tile, well clear of the × at its top right."""
+    from PySide6.QtCore import QPoint
+    spot = QPoint(6, tile.height() - 6)
+    assert not tile.remove_rect().contains(spot)
+    return spot
+
+
+def arrow_panel():
+    panel = PropertiesPanel()
+    panel.show()
+    panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], has_selection=False)
+    QApplication.processEvents()
+    return panel
+
+
+def test_delete_all_keeps_other_tools(qapp):
+    saved_styles.save("arrow", MINE)
+    saved_styles.save("arrow", Style(color="#0a84ff"))
+    saved_styles.save("rect", MINE)
+    saved_styles.delete_all("arrow")
+    assert not saved_styles.saved_for("arrow") and saved_styles.saved_for("rect")
+
+
+def test_hovering_a_saved_style_shows_an_x_that_removes_just_that_one(qapp):
+    saved_styles.save("arrow", MINE)
+    saved_styles.save("arrow", Style(color="#0a84ff"))
+    panel = arrow_panel()
+    seen = []
+    panel.changed.connect(seen.append)
+    tile = panel.saved_tile(0)
+    assert not tile.remove_shown()
+    hover(tile)
+    assert tile.remove_shown()
+    click_at = tile.remove_rect().center()
+    QTest.mouseClick(tile, Qt.LeftButton, Qt.NoModifier, click_at)
+    assert panel.saved_count() == 1 and saved_styles.saved_for("arrow")[0].color == "#0a84ff"
+    assert seen == []  # removing isn't applying
+
+
+def test_the_x_hides_again_when_the_mouse_leaves(qapp):
+    saved_styles.save("arrow", MINE)
+    panel = arrow_panel()
+    tile = panel.saved_tile(0)
+    hover(tile)
+    unhover(tile)
+    assert not tile.remove_shown()
+
+
+def test_a_focused_tile_shows_its_x_too(qapp):
+    saved_styles.save("arrow", MINE)
+    panel = arrow_panel()
+    tile = panel.saved_tile(0)
+    tile.setFocus(Qt.TabFocusReason)
+    QApplication.processEvents()
+    assert tile.remove_shown()
+
+
+def test_clicking_the_tile_away_from_the_x_still_applies_it(qapp):
+    saved_styles.save("arrow", MINE)
+    panel = arrow_panel()
+    seen = []
+    panel.changed.connect(seen.append)
+    tile = panel.saved_tile(0)
+    hover(tile)
+    QTest.mouseClick(tile, Qt.LeftButton, Qt.NoModifier, away_from_x(tile))
+    assert panel.saved_count() == 1 and len(seen) == 1
+
+
+def test_pressing_on_the_x_and_releasing_elsewhere_does_nothing(qapp):
+    saved_styles.save("arrow", MINE)
+    panel = arrow_panel()
+    seen = []
+    panel.changed.connect(seen.append)
+    tile = panel.saved_tile(0)
+    hover(tile)
+    QTest.mousePress(tile, Qt.LeftButton, Qt.NoModifier, tile.remove_rect().center())
+    QTest.mouseRelease(tile, Qt.LeftButton, Qt.NoModifier, away_from_x(tile))
+    assert panel.saved_count() == 1 and seen == []
+
+
+def test_remove_all_asks_first_then_clears_only_this_tool(qapp, monkeypatch):
+    from snipforge.editor.quick_tiles import QuickStyles
+    for color in ("#123456", "#0a84ff", "#34c759"):
+        saved_styles.save("arrow", Style(color=color))
+    saved_styles.save("rect", MINE)
+    panel = arrow_panel()
+    button = panel.remove_all_button()
+    assert button.isVisible() and "3" in button.toolTip() and "arrows" in button.toolTip()
+    asked = []
+    monkeypatch.setattr(QuickStyles, "_confirm", lambda self, text: asked.append(text) or False)
+    click(button)
+    assert asked and "3" in asked[0] and panel.saved_count() == 3  # said no: all still there
+    monkeypatch.setattr(QuickStyles, "_confirm", lambda self, text: True)
+    click(button)
+    assert panel.saved_count() == 0 and not saved_styles.saved_for("arrow") and saved_styles.saved_for("rect")
+    assert not button.isVisible()  # nothing left to remove
+
+
+def test_remove_all_is_hidden_without_saved_styles(qapp):
+    panel = arrow_panel()
+    assert not panel.remove_all_button().isVisible()
+
+
+def test_remove_all_from_the_right_click_menu(qapp, monkeypatch):
+    from snipforge.editor.quick_tiles import QuickStyles, SavedStyleTile
+    saved_styles.save("arrow", MINE)
+    saved_styles.save("arrow", Style(color="#0a84ff"))
+    panel = arrow_panel()
+    tile = panel.saved_tile(0)
+    monkeypatch.setattr(QuickStyles, "_confirm", lambda self, text: True)
+    monkeypatch.setattr(SavedStyleTile, "_choose",
+                        staticmethod(lambda menu, _pos: next(a for a in menu.actions() if "all" in a.text())))
+    pos = tile.rect().center()
+    QApplication.sendEvent(tile, QContextMenuEvent(QContextMenuEvent.Mouse, pos, tile.mapToGlobal(pos)))
+    assert panel.saved_count() == 0 and not saved_styles.saved_for("arrow")
+
+
+# --- review: no double removals, focus after Remove all, a lost release -----------------------
+def test_a_quick_second_click_does_not_remove_the_next_style(qapp):
+    for color in ("#123456", "#0a84ff", "#34c759"):
+        saved_styles.save("arrow", Style(color=color))
+    panel = arrow_panel()
+    tile = panel.saved_tile(0)
+    hover(tile, tile.remove_rect().center())
+    QTest.mouseClick(tile, Qt.LeftButton, Qt.NoModifier, tile.remove_rect().center())
+    assert panel.saved_count() == 2
+    under = panel.saved_tile(0)  # slid into the place the pointer is
+    enter(under, under.remove_rect().center())  # Windows says the pointer is over it at once
+    QTest.mouseClick(under, Qt.LeftButton, Qt.NoModifier, under.remove_rect().center())
+    QTest.mouseDClick(under, Qt.LeftButton, Qt.NoModifier, under.remove_rect().center())
+    assert panel.saved_count() == 2  # its × waits for the pointer to move first
+    move(under, under.remove_rect().center() + QPoint(1, 0))
+    QTest.mouseClick(under, Qt.LeftButton, Qt.NoModifier, under.remove_rect().center())
+    assert panel.saved_count() == 1
+
+
+def test_remove_all_from_the_keyboard_leaves_focus_on_something_you_can_use(qapp, monkeypatch):
+    from snipforge.editor.quick_tiles import QuickStyles
+    saved_styles.save("arrow", MINE)
+    panel = arrow_panel()  # nothing selected: Save this style is off
+    button = panel.remove_all_button()
+    button.setFocus(Qt.TabFocusReason)
+    QApplication.processEvents()
+
+    def answer_yes(self, _text):
+        QApplication.focusWidget() and QApplication.focusWidget().clearFocus()  # a dialog takes focus
+        return True
+    monkeypatch.setattr(QuickStyles, "_confirm", answer_yes)
+    click(button)
+    focused = QApplication.focusWidget()
+    assert focused is not None and focused.isEnabled() and focused.isVisible()
+    assert focused.accessibleName() or getattr(focused, "text", lambda: "")()
+
+
+def test_a_press_on_the_x_whose_release_went_missing_does_not_eat_the_next_click(qapp):
+    saved_styles.save("arrow", MINE)
+    panel = arrow_panel()
+    seen = []
+    panel.changed.connect(seen.append)
+    tile = panel.saved_tile(0)
+    hover(tile)
+    QTest.mousePress(tile, Qt.LeftButton, Qt.NoModifier, tile.remove_rect().center())  # no release arrives
+    QTest.mouseClick(tile, Qt.LeftButton, Qt.NoModifier, away_from_x(tile))
+    assert len(seen) == 1 and panel.saved_count() == 1
