@@ -247,46 +247,13 @@ def test_lookup_failures_stop_without_publishing(is_draft, latest):
     assert edits(calls) == []
 
 
-# --- the Mac version ships in every release (docs/CROSS-PLATFORM.md) --------------------------------
+# --- Windows only: SnipForge no longer ships a Mac version ------------------------------------------
 
-def test_a_release_is_published_only_with_its_mac_version():
-    text = RELEASE_YML.read_text(encoding="utf-8")
-    publish = text[text.index("\n  publish:"):]
-    assert "needs: [release-please, build, mac]" in publish
-    assert "needs.mac.result == 'success'" in publish
-    upload = step_script("Attach to the release")
-    assert "dist/SnipForge-*.dmg" in upload and "dist/SnipForge.dmg" in upload
-    add = step_script("Add the Mac version")
-    assert "SnipForge.dmg" in add and "sha256sum" in add and "SHA256SUMS.txt" in add
-
-
-def test_a_release_attests_its_mac_version():
-    text = RELEASE_YML.read_text(encoding="utf-8")
-    provenance = text[text.index("- name: Build provenance"):text.index("- name: Attach to the release")]
-    assert "dist/SnipForge-*.dmg" in provenance and "dist/SnipForge.dmg" in provenance
-
-
-def test_ci_never_cancels_a_releases_mac_build():
-    """CI and the Release workflow both build the Mac version of a push to main: separate groups."""
-    mac = (ROOT / ".github" / "workflows" / "mac.yml").read_text(encoding="utf-8")
-    group = next(line for line in mac.splitlines() if line.strip().startswith("group:"))
-    assert "github.workflow" in group and "github.ref" in group
-
-
-def test_previews_carry_the_mac_version():
+def test_releases_and_previews_wait_only_for_the_windows_build():
+    """A Mac build that never gets a runner must never hold a release back: there isn't one."""
+    assert not (ROOT / ".github" / "workflows" / "mac.yml").exists()
+    release = RELEASE_YML.read_text(encoding="utf-8")
+    assert "needs: [release-please, build]" in release[release.index("\n  publish:"):]
     preview = (ROOT / ".github" / "workflows" / "preview.yml").read_text(encoding="utf-8")
-    publish = preview[preview.index("\n  publish:"):]
-    assert "needs.mac.result == 'success'" in publish
-    assert "dist/SnipForge-*.dmg" in publish
-
-
-def test_releases_build_the_mac_version_without_rerunning_the_tests():
-    """CI tested the commit; a flaky test mustn't hold a release back. The build, install,
-    self-test and start still run."""
-    mac = (ROOT / ".github" / "workflows" / "mac.yml").read_text(encoding="utf-8")
-    test_step = mac[mac.index("- name: Test\n"):mac.index("- name: Build SnipForge.app")]
-    assert "if: ${{ inputs.run_tests != false }}" in test_step
-    for workflow in ("release.yml", "preview.yml"):
-        text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
-        mac_job = text[text.index("\n  mac:"):text.index("\n  publish:")]
-        assert "run_tests: false" in mac_job
+    for text in (release, preview, (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")):
+        assert "mac.yml" not in text and ".dmg" not in text and "needs.mac" not in text
