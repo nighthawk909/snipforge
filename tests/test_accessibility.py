@@ -142,6 +142,26 @@ def test_every_control_while_taking_a_snip_has_a_name(qapp):
     overlay.close()
 
 
+def test_picking_a_color_is_named_and_works_from_the_keyboard(qapp):
+    from snipforge.color_picker import PickOverlay
+
+    desk = QPixmap(1000, 700)
+    desk.fill(QColor("#1E3550"))
+    overlay = PickOverlay(QGuiApplication.primaryScreen(), desk)
+    overlay.resize(1000, 700)
+    overlay.show()
+    got = []
+    overlay.picked.connect(got.append)
+    assert unnamed(overlay) == [] and overlay.accessibleName() == "Pick a color"
+    assert "arrow keys" in overlay.accessibleDescription()
+    QTest.keyClick(overlay, Qt.Key_Return)  # shows the loupe first
+    QTest.keyClick(overlay, Qt.Key_Right)
+    QTest.keyClick(overlay, Qt.Key_Tab)
+    QTest.keyClick(overlay, Qt.Key_Return)
+    assert [c.name() for c in got] == ["#1e3550"] and overlay.copy_as == "rgb"
+    overlay.close()
+
+
 # --- The editor from the keyboard --------------------------------------------------------------
 def test_the_tool_rail_is_one_tab_stop_with_the_arrow_keys_inside_it(editor):
     rail = editor.tool_rail

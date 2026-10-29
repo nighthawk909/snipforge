@@ -935,6 +935,9 @@ class PropertiesPanel(QScrollArea):
     def save_button(self) -> QPushButton:
         return self._quick.save_button
 
+    def remove_all_button(self) -> QPushButton:
+        return self._quick.remove_all_button
+
     def crop_button(self, action: str) -> QPushButton:
         return self._crop_buttons[action]
 

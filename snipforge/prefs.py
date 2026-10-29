@@ -17,7 +17,8 @@ CAPTURE_MODES = ("area", "window", "screen", "fixed", "scroll")  # the capture t
 DELAYS = (0, 3, 5, 10)  # seconds the capture toolbar's Delay menu offers
 DEFAULT_FIXED_SIZE = (800, 600)  # Fixed size mode's frame, in screen pixels
 MIN_FIXED, MAX_FIXED = 16, 10000  # the smallest and largest side it can have
-SHORTCUT_ACTIONS = ("snip", "repeat", "library", "record")  # what a shortcut of your own can do (snipforge.shortcuts)
+SHORTCUT_ACTIONS = ("snip", "repeat", "library", "record", "color")  # what your own shortcuts do (snipforge.shortcuts)
+COLOR_FORMATS = ("hex", "rgb", "hsl")  # how Pick a color copies a color (snipforge.color_text)
 KEYS = {
     "copy_on_capture": "capture/copy_to_clipboard",
     "hotkey_win_shift_s": "capture/hotkey_win_shift_s",
@@ -33,6 +34,8 @@ KEYS = {
     "shortcut_library": "shortcuts/library",
     "private_titles_checked": "privacy/titles_checked",
     "shortcut_record": "shortcuts/record",
+    "shortcut_color": "shortcuts/color",
+    "color_format": "color/copy_as",
     "export_dir": "output/folder",
     "export_format": "output/format",
 }
@@ -192,6 +195,18 @@ def set_shortcut(action: str, text: str) -> None:
     if action not in SHORTCUT_ACTIONS:
         raise ValueError(f"unknown shortcut action {action!r}")
     _set(f"shortcut_{action}", str(text))
+
+
+def color_format() -> str:
+    """How Pick a color copies a color: "hex" (#2F5BEA), "rgb" or "hsl"."""
+    value = app_settings().value(KEYS["color_format"], "hex")
+    return value if value in COLOR_FORMATS else "hex"
+
+
+def set_color_format(fmt: str) -> None:
+    if fmt not in COLOR_FORMATS:
+        raise ValueError(f"unknown color format {fmt!r}")
+    _set("color_format", fmt)
 
 
 def export_dir() -> Path:
