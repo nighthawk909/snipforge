@@ -729,6 +729,11 @@ class EditorWindow(QMainWindow):
                                      6000)
 
     # ------------------------------------------------------------------ persistence
+    def keeps_itself(self) -> bool:
+        """Whether closing it loses nothing: the snip is in the Library and its markup saves as it
+        closes. Not when autosave is off (it couldn't be added, or its saved markup couldn't be read)."""
+        return self._autosave_enabled
+
     def _save_to_library(self) -> bool:
         """Autosave. False if it couldn't be saved now (autosave is off, typing, or a write failed)."""
         if not self._autosave_enabled:

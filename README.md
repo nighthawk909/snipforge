@@ -51,7 +51,8 @@ Capture, give each a shortcut of its own if you like, and pick one from the **Pr
 capture toolbar (or press 1 to 9 there) or from the tray menu. A preset never changes your usual
 choices, and every snip still lands in the Library.
 
-**Mark up.** Every snip opens in the editor: tools on the left, the snip in the middle, and a
+**Mark up.** Every snip opens in the editor, one at a time (a new snip takes the place of the one
+before, which is saved in your Library): tools on the left, the snip in the middle, and a
 properties panel on the right with **quick styles**, colors, sizes and effects for whatever you've
 selected. **Save this style** keeps the selected markup's look as one of your own quick styles for
 that tool (right-click one to delete it). The **eyedropper** beside the colors picks any color from
