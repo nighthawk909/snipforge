@@ -397,7 +397,8 @@ class EditorWindow(SwitchMixin, QMainWindow):
         self.tool_rail.retheme()
         self.commands.retheme()
         self.panel.retheme()
-        self.canvas.mini_toolbar().retheme()
+        for canvas in {self.canvas, *(snip.canvas for snip in self._kept.values())}:
+            canvas.mini_toolbar().retheme()
         manager = theme.get_manager()  # the system's high contrast decides the colors: no light/dark switch
         self.commands.theme_button.setVisible(manager is None or not manager.high_contrast)
 
@@ -421,8 +422,9 @@ class EditorWindow(SwitchMixin, QMainWindow):
         self.tray.set_beautify(on)
         if on != self._beautify:
             self._beautify = on
-            for canvas in {self.canvas, *(snip.canvas for snip in self._kept.values())}:  # every snip kept here
-                canvas.set_beautify(DEFAULT_STYLE if on else None)
+            for snip in {id(s): s for s in (self._current, *self._kept.values())}.values():  # every snip kept
+                snip.beautify = on
+                snip.canvas.set_beautify(DEFAULT_STYLE if on else None)
 
     def _open_entry(self, entry_id: str) -> None:
         if self._on_open_entry:
@@ -741,6 +743,7 @@ class EditorWindow(SwitchMixin, QMainWindow):
             self.tray.set_saved("Not saved", f"Couldn't autosave: {exc}")
             self.statusBar().showMessage(f"Couldn't autosave: {exc}", 5000)
             return False
+        self._current.dirty = False
         self.tray.set_saved("Saved", dt.datetime.now().strftime("Saved to your library at %I:%M %p"))
         return True
 
@@ -751,6 +754,7 @@ class EditorWindow(SwitchMixin, QMainWindow):
         self._autosave.stop()
         self.canvas.closing = True
         self._save_to_library()
+        self.save_kept_snips()  # any snip you left whose save failed then
         styles = {k: v.to_dict() for k, v in self.canvas.tool_styles.items()}
         self._settings.setValue("tool_styles", json.dumps(styles))
         for signal, slot in ((beautify.switch().changed, self._show_beautify),

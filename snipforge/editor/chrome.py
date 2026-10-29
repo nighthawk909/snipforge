@@ -265,7 +265,6 @@ class Tray(QWidget):
         b.setText(text)
         b.setToolTip(tip)
         b.setAccessibleName(tip)
-        b.setFocusPolicy(Qt.NoFocus)  # the thumbs themselves take Tab; these are for the mouse
         b.setAutoRepeat(True)
         b.clicked.connect(lambda: self._scroll_by(direction))
         b.hide()
@@ -277,6 +276,9 @@ class Tray(QWidget):
         entries = entries[:RECENT_COUNT]
         if [e.id for e in entries] != list(self._by_id):
             self._rebuild(entries)
+        else:  # the same snips in the same places: only their pictures may have changed
+            for entry in entries:
+                self._set_picture(self._by_id[entry.id], entry)
         self._current = current_id
         for entry_id, thumb in self._by_id.items():
             thumb.setChecked(entry_id == current_id)
@@ -297,9 +299,7 @@ class Tray(QWidget):
             thumb = QToolButton()
             thumb.setObjectName("Thumb")
             thumb.setCheckable(True)
-            pix = QPixmap(str(entry.preview_path))
-            if not pix.isNull():
-                thumb.setIcon(QIcon(pix.scaled(128, 76, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+            self._set_picture(thumb, entry)
             thumb.setIconSize(QSize(56, 34))
             when = entry.created.strftime("%b %d, %I:%M %p")
             thumb.setToolTip(f"{when} · click to show it here")
@@ -309,6 +309,12 @@ class Tray(QWidget):
             self._thumbs.insertWidget(self._thumbs.count() - 1, thumb)
             self._by_id[entry.id] = thumb
         bar.setValue(keep)
+
+    @staticmethod
+    def _set_picture(thumb: QToolButton, entry) -> None:
+        pix = QPixmap(str(entry.preview_path))
+        if not pix.isNull():
+            thumb.setIcon(QIcon(pix.scaled(128, 76, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
 
     def _picked(self, entry_id: str) -> None:
         self.set_recent_mark(self._current)  # stays as it is until the editor shows the snip

@@ -4,18 +4,22 @@ own, and the last few you visited keep theirs (and so their undo history) while 
 older ones come back from the Library, markup and all."""
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
 
-from . import colors
+from . import beautify, colors
 from .beautify import DEFAULT_STYLE
 from .canvas import Canvas, UnsupportedDocument
 from .chrome import RECENT_COUNT
 
 KEEP_UNDO_FOR = 5  # snips whose canvas (and undo history) the editor keeps while it's open
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -26,6 +30,8 @@ class OpenSnip:
     autosave: bool
     export_path: Path | None = None
     fitted: bool = False
+    dirty: bool = False  # changed since it was last saved to the Library
+    beautify: bool = False  # Beautify on for this snip (a capture preset can choose it)
 
 
 class SwitchMixin:
@@ -36,7 +42,8 @@ class SwitchMixin:
     def _start_switching(self) -> None:
         self._kept: OrderedDict[str, OpenSnip] = OrderedDict()
         self._wired: list = []
-        self._current = OpenSnip(self._entry, self.canvas, self._autosave_enabled, fitted=True)  # showEvent fits it
+        self._current = OpenSnip(self._entry, self.canvas, self._autosave_enabled, fitted=True,  # showEvent fits it
+                                 beautify=self._beautify)
         if self._entry is not None:
             self._kept[self._entry.id] = self._current
         self._wire(self.canvas)
@@ -52,28 +59,41 @@ class SwitchMixin:
     def has_snip(self, entry_id: str) -> bool:
         return entry_id in self._kept
 
+    def has_open_dialog(self) -> bool:
+        """A dialog of this editor's is waiting on you (Save As, Resize, Edit text): a snip taken now
+        mustn't take the place of the one it's working on."""
+        widget = QApplication.activeModalWidget()
+        while widget is not None:
+            if widget is self:
+                return True
+            widget = widget.parentWidget()
+        return False
+
     # ------------------------------------------------------------------ changing snip
-    def show_snip(self, image, entry, document: dict | None, beautify_on: bool | None = None) -> None:
-        """Show this snip here (a new one, or one from Recent or the Library). The snip before is
-        saved to the Library first. The app opens a snip that can't autosave in a window of its own."""
-        if entry is not None and entry.id in self._kept:
+    def show_snip(self, image, entry, document: dict | None, beautify_on: bool | None = None) -> bool:
+        """Show this snip here (a new one, or one from Recent or the Library); the snip before is
+        saved to the Library first. False if it can't autosave here (its markup is from a newer
+        SnipForge): the app opens it in a window of its own, as it does any snip that can't autosave."""
+        if entry is None:
+            return False
+        if entry.id in self._kept:
             self._activate(self._kept[entry.id])
-            return
+            return True
         canvas = Canvas(image, dict(self.canvas.tool_styles))
-        autosave = entry is not None
         if document:
             try:
                 canvas.load_document(document)
             except UnsupportedDocument:
-                autosave = False
-        on = self._beautify if beautify_on is None else beautify_on
+                canvas.deleteLater()
+                return False
+        on = beautify.enabled() if beautify_on is None else beautify_on
         canvas.set_beautify(DEFAULT_STYLE if on else None)
         self._canvases.addWidget(canvas)
-        snip = OpenSnip(entry, canvas, autosave)
-        if entry is not None:
-            self._kept[entry.id] = snip
+        snip = OpenSnip(entry, canvas, True, beautify=on)
+        self._kept[entry.id] = snip
         self._activate(snip)
         self._let_go_of_old_snips()
+        return True
 
     def switch_to(self, entry_id: str) -> bool:
         """Show a snip whose canvas is kept. False if it isn't."""
@@ -101,6 +121,8 @@ class SwitchMixin:
         self._current = snip
         self.canvas, self._entry = snip.canvas, snip.entry
         self._autosave_enabled, self._export_path = snip.autosave, snip.export_path
+        self._beautify = snip.beautify
+        self.tray.set_beautify(snip.beautify)
         if snip.entry is not None:
             self._kept.move_to_end(snip.entry.id)
         self._canvases.setCurrentWidget(snip.canvas)
@@ -111,26 +133,61 @@ class SwitchMixin:
         if not snip.fitted:
             snip.fitted = True
             QTimer.singleShot(0, snip.canvas, snip.canvas.fit_image)  # once it has its size
+        if snip.dirty:
+            self._autosave.start()  # it couldn't be saved when you left it: try again
         snip.canvas.setFocus()
 
     def _leave_current(self) -> None:
         """Save the snip on show before another takes its place, and tell the app (Library search)."""
         canvas = self.canvas
         canvas.stop_picking()
+        canvas.stop_choosing()
         canvas.commit_text()
         canvas.apply_crop()
         self._autosave.stop()
         self._current.export_path = self._export_path
-        saved = self._save_to_library()
-        if saved and self._entry is not None and self._on_left_snip:
-            self._on_left_snip(self._entry)
+        if not self._current.dirty:
+            return  # only looked at: nothing to write, or to read again for search
+        if self._save_to_library():
+            self._told_app(self._current)
+        elif self._autosave_enabled:
+            self.statusBar().showMessage("Couldn't save the snip you left. It's kept here, and SnipForge tries "
+                                         "again.", 8000)
+
+    def _told_app(self, snip: OpenSnip) -> None:
+        if snip.entry is not None and self._on_left_snip:
+            self._on_left_snip(snip.entry)
+
+    def _snip_changed(self) -> None:
+        self._current.dirty = True
+
+    def _save_kept(self, snip: OpenSnip) -> bool:
+        """Save a snip that isn't on show (one whose save failed as you left it). True if it's saved."""
+        if not snip.autosave or not snip.dirty:
+            return not snip.dirty
+        try:
+            self._library.save(snip.entry, snip.canvas.to_document(),
+                               snip.canvas.render_image(commit=False, use_draft=False))
+        except OSError as exc:
+            log.warning("Couldn't save snip %s: %s", snip.entry.id, exc)
+            return False
+        snip.dirty = False
+        self._told_app(snip)
+        return True
+
+    def save_kept_snips(self) -> None:
+        """As the editor closes: the snips not on show whose save failed as they were left."""
+        for snip in list(self._kept.values()):
+            if snip is not self._current:
+                self._save_kept(snip)
 
     def _let_go_of_old_snips(self) -> None:
         """Keep the canvases of the last few snips shown; older ones were saved as they were left."""
-        while len(self._kept) > KEEP_UNDO_FOR:
-            entry_id, old = next(iter(self._kept.items()))
-            if old is self._current:
+        for entry_id, old in list(self._kept.items()):  # least recently shown first
+            if len(self._kept) <= KEEP_UNDO_FOR:
                 break
+            if old is self._current or not self._save_kept(old):
+                continue  # one whose changes aren't in the Library yet stays until they are
             del self._kept[entry_id]
             self._canvases.removeWidget(old.canvas)
             old.canvas.deleteLater()
@@ -143,16 +200,19 @@ class SwitchMixin:
         self.commands.set_zoom(self.canvas.zoom())
         self.panel.set_source_stamp_available(self._entry is not None)
         self.commands.combine_button.setVisible(self._on_combine is not None and self._autosave_enabled)
-        if self._autosave_enabled:
-            self.tray.set_saved("Saved", "Changes save to your library automatically")
-        else:
+        if not self._autosave_enabled:
             self.tray.set_saved("Autosave off", "Use Save or Copy to keep what you change")
+        elif self._current.dirty:
+            self.tray.set_saved("Not saved", "Its changes aren't in your library yet: SnipForge tries again")
+        else:
+            self.tray.set_saved("Saved", "Changes save to your library automatically")
         self._refresh_recent()
 
     # ------------------------------------------------------------------ the canvas on show
     def _wire(self, canvas: Canvas) -> None:
         """Connect the canvas on show to the window; _unwire undoes exactly this."""
         pairs = [
+            (canvas.document_changed, self._snip_changed),
             (canvas.document_changed, self._autosave.start),
             (canvas.document_changed, self._refresh_size),
             (canvas.document_changed, self._mark_unsaved),

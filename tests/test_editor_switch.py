@@ -141,6 +141,7 @@ def test_leaving_a_snip_reads_its_words_again_for_search(forge, monkeypatch):  #
     monkeypatch.setattr(forge.indexer, "index", lambda entry, again=False: seen.append((entry.id, again)))
     editor = take(forge, "#ff0000")
     red = editor.entry_id()
+    drag(editor.canvas, "rect", (20, 20), (80, 60))  # changed: its words may be covered now
     forge._on_captured(snip("#00ff00"))
     assert (red, True) in seen
 
@@ -167,3 +168,85 @@ def test_closing_the_editor_saves_every_snip_it_kept(forge):  # noqa: F811
     by_id = {e.id: e for e in forge.library.entries()}
     assert [i["kind"] for i in forge.library.load_document(by_id[red])["items"]] == ["rect"]
     assert [i["kind"] for i in forge.library.load_document(by_id[green])["items"]] == ["ellipse"]
+
+
+# --- review: nothing lost, nothing stale, nothing rewritten -----------------------------------
+def test_a_snip_that_couldnt_be_saved_as_you_left_it_is_kept_and_saved_later(forge, monkeypatch):  # noqa: F811
+    editor = take(forge, "#ff0000")
+    red = editor.entry_id()
+    drag(editor.canvas, "rect", (20, 20), (80, 60))
+    real_save = forge.library.save
+
+    def held_by_antivirus(*_a, **_k):
+        raise OSError("the file is in use")
+    monkeypatch.setattr(forge.library, "save", held_by_antivirus)
+    for n in range(KEEP_UNDO_FOR + 1):  # more snips than it keeps: the unsaved one isn't let go
+        forge._on_captured(snip(f"#00{n + 10:02x}00"))
+    assert red in editor.kept_snips()
+    monkeypatch.setattr(forge.library, "save", real_save)
+    editor.close()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    by_id = {e.id: e for e in forge.library.entries()}
+    assert [i["kind"] for i in forge.library.load_document(by_id[red])["items"]] == ["rect"]
+
+
+def test_looking_at_a_snip_doesnt_rewrite_it_or_read_it_again(forge, monkeypatch):  # noqa: F811
+    editor = take(forge, "#ff0000", "#00ff00")
+    saved, read = [], []
+    monkeypatch.setattr(forge.library, "save", lambda entry, *_a: saved.append(entry.id))
+    monkeypatch.setattr(forge.indexer, "index", lambda entry, again=False: read.append(entry.id))
+    older = editor.tray.thumb_ids()[1]
+    editor.tray.thumb(older).click()
+    editor.tray.thumb(editor.tray.thumb_ids()[0]).click()
+    assert saved == [] and read == []  # nothing changed, so nothing is written or read again
+
+
+def test_edit_texts_choosing_stops_when_you_switch(forge):  # noqa: F811
+    editor = take(forge, "#ff0000", "#00ff00")
+    left_behind = editor.canvas
+    left_behind.start_choosing([left_behind.sceneRect()], lambda n: None)
+    editor.tray.thumb(editor.tray.thumb_ids()[1]).click()
+    assert not left_behind.choosing()
+
+
+def test_a_capture_presets_beautify_belongs_to_its_snip(forge):  # noqa: F811
+    editor = take(forge, "#ff0000")
+    plain = editor.entry_id()
+    entry = forge.library.create(snip("#00ff00"))
+    forge._open_editor(snip("#00ff00"), entry, None, beautify_on=True)
+    assert editor._beautify and editor.tray.beautify.isChecked()  # what's shown is what Copy gives
+    forge.open_entry(plain)
+    assert not editor._beautify and not editor.tray.beautify.isChecked()
+
+
+def test_a_snip_taken_while_a_dialog_is_open_gets_its_own_window(forge):  # noqa: F811
+    from PySide6.QtWidgets import QDialog
+    editor = take(forge, "#ff0000")
+    shown = editor.entry_id()
+    dialog = QDialog(editor)
+    dialog.setModal(True)
+    dialog.show()  # Save As, Resize or Edit text waiting on you
+    QApplication.processEvents()
+    forge._on_captured(snip("#00ff00"))
+    assert editor.entry_id() == shown and len(editors(forge)) == 2
+    dialog.close()
+
+
+def test_the_thumbnail_shows_what_you_changed(forge):  # noqa: F811
+    editor = take(forge, "#ff0000", "#00ff00")
+    shown = editor.entry_id()
+    before = editor.tray.thumb(shown).icon().cacheKey()
+    drag(editor.canvas, "rect", (20, 20), (180, 90))
+    editor.tray.thumb(editor.tray.thumb_ids()[1]).click()  # leave it: it's saved
+    assert editor.tray.thumb(shown).icon().cacheKey() != before
+
+
+def test_newer_markup_opens_in_a_window_of_its_own(forge, white_image, no_dialogs):  # noqa: F811
+    import json
+    editor = take(forge, "#ff0000")
+    shown = editor.entry_id()
+    newer = forge.library.create(white_image)
+    (newer.path / "document.json").write_text(json.dumps({"version": 99, "items": []}), encoding="utf-8")
+    forge.open_entry(newer.id)
+    assert editor.entry_id() == shown and len(editors(forge)) == 2
+

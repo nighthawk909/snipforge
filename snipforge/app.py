@@ -556,8 +556,7 @@ class SnipForgeApp:
         from .editor.window import EditorWindow  # loaded just after start-up (_load_editor)
 
         host = self._editor_host() if autosave and entry is not None else None
-        if host is not None:
-            host.show_snip(image, entry, document, beautify_on)
+        if host is not None and host.show_snip(image, entry, document, beautify_on):
             self._bring_to_front(host)
             return
         editor = EditorWindow(image, self.library, entry, document, on_new_snip=self.capture,
@@ -573,7 +572,8 @@ class SnipForgeApp:
         """The open editor that new and opened snips show in: the newest one that autosaves."""
         from .editor.window import EditorWindow
 
-        editors = [w for w in self._windows if isinstance(w, EditorWindow) and w.keeps_itself()]
+        editors = [w for w in self._windows if isinstance(w, EditorWindow) and w.keeps_itself()
+                   and not w.has_open_dialog()]  # Save As or Resize waiting: that snip stays
         return editors[-1] if editors else None
 
     def _snip_left(self, entry) -> None:
