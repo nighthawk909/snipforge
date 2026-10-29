@@ -83,8 +83,10 @@ Root: HKCU; Subkey: "Software\SnipForge"; ValueType: none; Flags: uninsdeletekey
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 ; A silent per-user upgrade closes the running app; start it again so Win+Shift+S keeps working.
-; SnipForge passes /RELAUNCH=0 when it installs an update as you quit it.
-Filename: "{app}\{#AppExe}"; Parameters: "--background"; Flags: nowait; Check: RelaunchAfterSilentInstall
+; SnipForge passes /RELAUNCH=window when you clicked to update (it comes back on screen) and
+; /RELAUNCH=0 when it installs an update as you quit it. Otherwise it comes back in the tray.
+Filename: "{app}\{#AppExe}"; Parameters: "--background"; Flags: nowait; Check: RelaunchAfterSilentInstall('tray')
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: RelaunchAfterSilentInstall('window')
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#AppExe} /F"; Flags: runhidden; RunOnceId: "StopSnipForge"
@@ -98,9 +100,20 @@ Type: filesandordirs; Name: "{localappdata}\SnipForge\cache"
 Type: filesandordirs; Name: "{localappdata}\SnipForge\logs"
 
 [Code]
-function RelaunchAfterSilentInstall: Boolean;
+{ How SnipForge asked to be started again: 'window', 'none' (/RELAUNCH=0) or 'tray' (anything else,
+  including nothing, which is all that older versions of SnipForge pass). }
+function RelaunchMode: String;
 begin
-  Result := WizardSilent and not IsAdminInstallMode and (ExpandConstant('{param:RELAUNCH|1}') <> '0');
+  Result := Lowercase(ExpandConstant('{param:RELAUNCH|1}'));
+  if Result = '0' then
+    Result := 'none'
+  else if Result <> 'window' then
+    Result := 'tray';
+end;
+
+function RelaunchAfterSilentInstall(Mode: String): Boolean;
+begin
+  Result := WizardSilent and not IsAdminInstallMode and (RelaunchMode = Mode);
 end;
 
 [Messages]
