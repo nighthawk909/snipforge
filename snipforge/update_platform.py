@@ -13,10 +13,15 @@ from pathlib import Path
 PLATFORM = "macos" if sys.platform == "darwin" else "windows"
 POLICY_KEY = r"Software\Policies\SnipForge"
 POLICY_VALUES = ("DisableUpdateCheck", "UpdateSource", "UpdateFeed", "UpdateMode", "UpdateChannel", "AllowRollback")
-# Per-user, silent, no reboot. The installer starts SnipForge again unless told /RELAUNCH=0.
+# Per-user, silent, no reboot.
 INSTALLER_ARGS = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/SP-"]
-NO_RELAUNCH_ARG = "/RELAUNCH=0"
+# How the installer starts SnipForge again once it's done (packaging/installer.iss): with its
+# window, in the tray (the installer's default: all that older versions of SnipForge ask for), or not.
+REOPEN_WINDOW, REOPEN_TRAY, REOPEN_NONE = "window", "tray", "none"
+RELAUNCH_ARGS = {REOPEN_WINDOW: ["/RELAUNCH=window"], REOPEN_TRAY: [], REOPEN_NONE: ["/RELAUNCH=0"]}
+INSTALLER_LOG = "installer.log"  # Inno Setup's log of the last install, beside SnipForge's own
 SM_SHUTTINGDOWN = 0x2000
+ASFW_ANY = 0xFFFFFFFF
 
 # How a release's installer is named on GitHub, per platform; group 1 is the version.
 _INSTALLER_NAMES = {
@@ -50,17 +55,46 @@ def install_mode(executable: str | None = None, frozen: bool | None = None) -> s
     return "per-user" if local_programs in exe.parents else "all-users"
 
 
-def launch_installer(installer: Path, relaunch: bool = True) -> str:
-    """Start the verified installer detached. Returns "" on success, otherwise what went wrong."""
+def launch_installer(installer: Path, reopen: str = REOPEN_TRAY) -> str:
+    """Start the verified installer detached; `reopen` is how it starts SnipForge again. Returns ""
+    on success, otherwise what went wrong."""
     if PLATFORM != "windows":
         return "Installing updates isn't supported on this platform yet."
-    args = [str(installer), *INSTALLER_ARGS] + ([] if relaunch else [NO_RELAUNCH_ARG])
+    args = [str(installer), *INSTALLER_ARGS, *RELAUNCH_ARGS[reopen], *_log_args()]
     try:
         subprocess.Popen(args, close_fds=True,
                          creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
     except OSError as exc:
         return str(exc)
+    if reopen == REOPEN_WINDOW:
+        _let_the_next_snipforge_come_to_front()
     return ""
+
+
+def _let_the_next_snipforge_come_to_front() -> None:
+    """Windows only lets a program bring its window to the front if the program in front started
+    it. The installer starts the new SnipForge after this one has quit, so allow any program to,
+    until the next click or key press."""
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        ctypes.windll.user32.AllowSetForegroundWindow(wintypes.DWORD(ASFW_ANY))
+    except (AttributeError, OSError):
+        pass
+
+
+def _log_args() -> list[str]:
+    """Have the installer log what it does (replacing the last install's log), so Report a problem
+    can show why an update didn't finish."""
+    from . import logs
+
+    folder = logs.folder()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return []
+    return [f"/LOG={folder / INSTALLER_LOG}"]
 
 
 def session_ending() -> bool:
