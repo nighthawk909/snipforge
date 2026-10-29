@@ -9,6 +9,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont, QValidator
 from PySide6.QtWidgets import (
+    QComboBox,
     QFontComboBox,
     QHBoxLayout,
     QLabel,
@@ -46,6 +47,7 @@ BADGE_LABELS = {"circle": "Circle", "square": "Square", "pill": "Pill"}
 ALIGN_LABELS = {"left": "Align left", "center": "Center", "right": "Align right"}
 SHAPES_FOR = {"rect": RECT_SHAPES, "callout": CALLOUT_SHAPES, "spotlight": SPOTLIGHT_SHAPES}
 ICON_SEGMENT_MIN_WIDTH = 34  # a segment's least width, whatever its icon's or text's padding
+FONT_BOX_MIN_CHARACTERS = 10  # the font list's least width: about "Segoe UI S"
 USUAL_RECT_CORNER = 3  # what the slider shows for a rectangle's usual rounding
 
 
@@ -98,6 +100,11 @@ class FocusedFontBox(QFontComboBox):
     def __init__(self) -> None:
         super().__init__()
         self.setFocusPolicy(Qt.StrongFocus)
+        # Sized by a few letters, not the longest installed font's name, so it never widens the panel;
+        # it still fills the row, and the open list shows names in full.
+        self.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(FONT_BOX_MIN_CHARACTERS)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def wheelEvent(self, e) -> None:  # noqa: N802 - Qt API
         if self.hasFocus():
