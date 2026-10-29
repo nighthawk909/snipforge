@@ -3,6 +3,21 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.17.0](https://github.com/nighthawk909/snipforge/compare/v0.16.0...v0.17.0) (2026-10-29)
+
+
+### Features
+
+* **editor:** a tool palette that's yours: favorites, hidden tools, your order, labels, either side, and Ctrl+K to find any tool ([#122](https://github.com/nighthawk909/snipforge/issues/122)) ([ee156a2](https://github.com/nighthawk909/snipforge/commit/ee156a25788530421d4eeff17c73d697166abfd3))
+* **editor:** one editor at a time: a new snip takes the place of the one before, which is kept in your Library ([#128](https://github.com/nighthawk909/snipforge/issues/128)) ([2176922](https://github.com/nighthawk909/snipforge/commit/2176922f26f3f55e6565666df1cb74c553be6879))
+* **editor:** properties panel 3.0: opacity and rotation, hex and recent colors, your own palette, a tool's default look, a mini toolbar, align and distribute, lock and hide, and a Layers list ([#124](https://github.com/nighthawk909/snipforge/issues/124)) ([925b8ac](https://github.com/nighthawk909/snipforge/commit/925b8acfbb8d452002feceb46d3512f897ba0e06))
+* **editor:** tool variants: arrow heads and curves, more shapes, step number styles, highlight boxes, text formatting, your own stamps, rounded redactions and spotlight dimming ([#123](https://github.com/nighthawk909/snipforge/issues/123)) ([b051876](https://github.com/nighthawk909/snipforge/commit/b0518766e7c9fd078db30df47e80c8c4ca4bce04))
+
+
+### Documentation
+
+* 0.16.0 on the roadmap, video editor part two in progress, and what 1.0 needs ([#118](https://github.com/nighthawk909/snipforge/issues/118)) ([949956d](https://github.com/nighthawk909/snipforge/commit/949956de70c757da7f29db17ffb9d93e6881903b))
+
 ## [0.16.0](https://github.com/nighthawk909/snipforge/compare/v0.15.0...v0.16.0) (2026-10-18)
 
 
