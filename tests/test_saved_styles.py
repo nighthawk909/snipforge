@@ -2,7 +2,7 @@
 import json
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -289,11 +289,27 @@ def test_samples_stay_visible_on_either_theme(qapp):
 
 
 # --- removing: the × on hover, and Remove all --------------------------------------------------
-def hover(widget, pos=None):
+def enter(widget, pos=None):
+    """The pointer is over it, as when it slides under a pointer that isn't moving."""
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QEnterEvent
     at = QPointF(pos if pos is not None else widget.rect().center())
     QApplication.sendEvent(widget, QEnterEvent(at, at, QPointF(widget.mapToGlobal(at.toPoint()))))
+
+
+def move(widget, pos):
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    at = QPointF(pos)
+    QApplication.sendEvent(widget, QMouseEvent(QEvent.MouseMove, at, QPointF(widget.mapToGlobal(pos)),
+                                               Qt.NoButton, Qt.NoButton, Qt.NoModifier))
+
+
+def hover(widget, pos=None):
+    """The pointer moves onto it."""
+    pos = pos if pos is not None else widget.rect().center()
+    enter(widget, pos)
+    move(widget, pos)
 
 
 def unhover(widget):
@@ -417,3 +433,52 @@ def test_remove_all_from_the_right_click_menu(qapp, monkeypatch):
     pos = tile.rect().center()
     QApplication.sendEvent(tile, QContextMenuEvent(QContextMenuEvent.Mouse, pos, tile.mapToGlobal(pos)))
     assert panel.saved_count() == 0 and not saved_styles.saved_for("arrow")
+
+
+# --- review: no double removals, focus after Remove all, a lost release -----------------------
+def test_a_quick_second_click_does_not_remove_the_next_style(qapp):
+    for color in ("#123456", "#0a84ff", "#34c759"):
+        saved_styles.save("arrow", Style(color=color))
+    panel = arrow_panel()
+    tile = panel.saved_tile(0)
+    hover(tile, tile.remove_rect().center())
+    QTest.mouseClick(tile, Qt.LeftButton, Qt.NoModifier, tile.remove_rect().center())
+    assert panel.saved_count() == 2
+    under = panel.saved_tile(0)  # slid into the place the pointer is
+    enter(under, under.remove_rect().center())  # Windows says the pointer is over it at once
+    QTest.mouseClick(under, Qt.LeftButton, Qt.NoModifier, under.remove_rect().center())
+    QTest.mouseDClick(under, Qt.LeftButton, Qt.NoModifier, under.remove_rect().center())
+    assert panel.saved_count() == 2  # its × waits for the pointer to move first
+    move(under, under.remove_rect().center() + QPoint(1, 0))
+    QTest.mouseClick(under, Qt.LeftButton, Qt.NoModifier, under.remove_rect().center())
+    assert panel.saved_count() == 1
+
+
+def test_remove_all_from_the_keyboard_leaves_focus_on_something_you_can_use(qapp, monkeypatch):
+    from snipforge.editor.quick_tiles import QuickStyles
+    saved_styles.save("arrow", MINE)
+    panel = arrow_panel()  # nothing selected: Save this style is off
+    button = panel.remove_all_button()
+    button.setFocus(Qt.TabFocusReason)
+    QApplication.processEvents()
+
+    def answer_yes(self, _text):
+        QApplication.focusWidget() and QApplication.focusWidget().clearFocus()  # a dialog takes focus
+        return True
+    monkeypatch.setattr(QuickStyles, "_confirm", answer_yes)
+    click(button)
+    focused = QApplication.focusWidget()
+    assert focused is not None and focused.isEnabled() and focused.isVisible()
+    assert focused.accessibleName() or getattr(focused, "text", lambda: "")()
+
+
+def test_a_press_on_the_x_whose_release_went_missing_does_not_eat_the_next_click(qapp):
+    saved_styles.save("arrow", MINE)
+    panel = arrow_panel()
+    seen = []
+    panel.changed.connect(seen.append)
+    tile = panel.saved_tile(0)
+    hover(tile)
+    QTest.mousePress(tile, Qt.LeftButton, Qt.NoModifier, tile.remove_rect().center())  # no release arrives
+    QTest.mouseClick(tile, Qt.LeftButton, Qt.NoModifier, away_from_x(tile))
+    assert len(seen) == 1 and panel.saved_count() == 1

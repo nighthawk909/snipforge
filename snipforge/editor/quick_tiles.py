@@ -153,13 +153,16 @@ class SavedStyleTile(_Tile):
         super().__init__()
         self.kind, self.style = kind, style
         self._hovered = self._over_remove = self._pressing_remove = False
+        # A tile that slides under a resting pointer (the one before it was just removed) waits for the
+        # pointer to move before its × shows, so a quick second click can't remove it too.
+        self._armed = False
         self.setMouseTracking(True)  # to light up the × as the pointer reaches it
         description = describe(kind, style)
         self.setToolTip(f"{description}\nClick to use it. Click ×, right-click or press Delete to remove it")
         self.setAccessibleName(f"Your quick style: {description}")
 
     def remove_shown(self) -> bool:
-        return self._hovered or self.hasFocus()
+        return (self._hovered and self._armed) or self.hasFocus()
 
     def remove_rect(self) -> QRect:
         """The × in the top right corner."""
@@ -178,6 +181,9 @@ class SavedStyleTile(_Tile):
         super().leaveEvent(e)
 
     def mouseMoveEvent(self, e) -> None:  # noqa: N802 - Qt API
+        if not self._armed:
+            self._armed = True
+            self.update()
         over = self._on_remove(e.position().toPoint())
         if over != self._over_remove:
             self._over_remove = over
@@ -185,6 +191,7 @@ class SavedStyleTile(_Tile):
         super().mouseMoveEvent(e)
 
     def mousePressEvent(self, e) -> None:  # noqa: N802 - Qt API
+        self._pressing_remove = False  # a press whose release went missing (a menu, Alt+Tab) is over
         if e.button() == Qt.LeftButton and self._on_remove(e.position().toPoint()):
             self._pressing_remove = True  # the button never sees it, so it can't apply the style
             e.accept()
@@ -200,6 +207,12 @@ class SavedStyleTile(_Tile):
                 self.delete_requested.emit()
             return
         super().mouseReleaseEvent(e)
+
+    def mouseDoubleClickEvent(self, e) -> None:  # noqa: N802 - Qt API
+        if self.remove_rect().contains(e.position().toPoint()):
+            e.accept()  # the second click of a double-click on × never removes (or applies) another
+            return
+        super().mouseDoubleClickEvent(e)
 
     def contextMenuEvent(self, e) -> None:  # noqa: N802 - Qt API
         menu = QMenu(self)
@@ -347,20 +360,28 @@ class QuickStyles(QWidget):
         self.remove_all_button.setAccessibleName(tip)
         if focused is not None:  # you deleted one with the keyboard: stay on the next one
             neighbour = self.saved_tiles[min(focused, len(self.saved_tiles) - 1)] if self.saved_tiles else None
-            (neighbour or self.save_button).setFocus(Qt.OtherFocusReason)
+            self._focus_nearby(neighbour)
+
+    def _focus_nearby(self, first=None) -> None:
+        """Keep the keyboard here: on `first`, else Save this style, else a built-in quick style."""
+        target = next((w for w in (first, self.save_button, *self.tiles)
+                       if w is not None and w.isEnabled() and w.isVisibleTo(self)), None)
+        if target is not None:
+            target.setFocus(Qt.OtherFocusReason)
 
     def _remove_all(self) -> None:
-        styles = saved_styles.saved_for(self._kind)
+        kind = self._kind  # as it was when you asked: not whatever the panel shows after the dialog
+        styles = saved_styles.saved_for(kind)
         if not styles:
             return
-        name = TOOL_NAMES.get(self._kind, self._kind)
+        had_focus = self.remove_all_button.hasFocus()  # before the dialog takes it
+        name = TOOL_NAMES.get(kind, kind)
         what = f"all {len(styles)} of your quick styles" if len(styles) > 1 else "your quick style"
         if not self._confirm(f"Remove {what} for {name}? The built-in quick styles stay."):
             return
-        had_focus = self.remove_all_button.hasFocus()
-        saved_styles.delete_all(self._kind)
+        saved_styles.delete_all(kind)
         if had_focus:  # the button hides with nothing left to remove: keep the keyboard nearby
-            self.save_button.setFocus(Qt.OtherFocusReason)
+            self._focus_nearby()
 
     def _confirm(self, text: str) -> bool:
         """Ask before removing them all (tests stand in for the person answering)."""
