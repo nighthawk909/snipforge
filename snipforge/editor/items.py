@@ -872,7 +872,7 @@ def number_from_label(text: str, numbering: str) -> int | None:
     """What a typed label stands for: "12", "C" or "AA" (27) for letters, "XIV" for roman. None if
     it isn't one. Digits are always read as digits."""
     text = (text or "").strip().upper()
-    if text.isdigit():
+    if text.isascii() and text.isdigit():  # not ² or other digits int() can't read
         return int(text)
     if numbering == "letters" and text.isalpha() and text.isascii():
         n = 0

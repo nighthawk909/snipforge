@@ -731,10 +731,11 @@ class PropertiesPanel(QScrollArea):
 
     # ------------------------------------------------------------------ state
     def load(self, kind: str, style: Style | None, has_selection: bool, next_step: int = 1,
-             selected_count: int | None = None) -> None:
+             selected_count: int | None = None, next_numbering: str | None = None) -> None:
         self._loading = True
         self._kind = kind
         self._next_step = next_step
+        self._next_numbering = next_numbering
         self._selected_count = (1 if has_selection else 0) if selected_count is None else selected_count
         fields = STYLE_FIELDS.get(kind, ()) if style else ()
         self._title.setText(TITLES.get(kind, kind.title()))
@@ -795,7 +796,7 @@ class PropertiesPanel(QScrollArea):
         self._fill.load(self._kind, style)
         self._shapes.load(self._kind, style)
         self._arrow.load(style)
-        self._steps.load(style, self._next_step)
+        self._steps.load(style, self._next_step, self._next_numbering)
         self._format.load(self._kind, style)
         self._dim.load(style)
         for name, button in (*self._stamp_buttons.items(), *self._custom_buttons.items()):

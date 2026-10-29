@@ -189,3 +189,42 @@ def test_select_all_steps_from_the_editors_panel(qapp, tmp_path, white_image):
     editor.panel.step_controls().select_all.click()
     assert set(editor.canvas.selected_annotations()) == set(steps)
     editor.close()
+
+
+# ---------------------------------------------------------------- review: the next number never goes stale
+def test_after_starting_over_deleting_one_keeps_the_next_number_right(canvas):
+    canvas.set_next_step_number(1)
+    one, two, three, four = place(canvas, 20, 50, 80, 110)
+    canvas.set_tool("select")
+    canvas._select([two])
+    canvas.delete_selection()
+    assert labels(canvas) == ["1", "2", "3"] and canvas.next_step_number() == 4
+
+
+def test_deleting_the_last_one_of_a_run_doesnt_skip_its_number(canvas):
+    canvas.set_next_step_number(1)
+    one, two, three = place(canvas, 20, 50, 80)
+    canvas.set_tool("select")
+    canvas._select([three])
+    canvas.delete_selection()
+    assert canvas.next_step_number() == 3
+
+
+def test_letters_after_a_run_you_started_over_still_start_at_a(canvas):
+    canvas.set_next_step_number(1)
+    place(canvas, 20, 50)
+    QTest.keyClick(canvas, Qt.Key_Escape)
+    canvas.apply_style(numbering="letters")
+    assert canvas.next_step_number() == 1
+
+
+def test_the_next_box_uses_the_step_tools_numbering(qapp):
+    panel = PropertiesPanel()
+    digits = DEFAULT_TOOL_STYLES["step"]
+    panel.load("step", digits, has_selection=True, next_step=4, next_numbering="letters")
+    assert panel.step_controls().next.text() == "D"  # what the next click drops, not the selected step's
+
+
+def test_odd_digits_are_not_numbers(qapp):
+    from snipforge.editor.items import number_from_label
+    assert number_from_label("²", "digits") is None and number_from_label("12", "letters") == 12

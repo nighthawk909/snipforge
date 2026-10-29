@@ -276,11 +276,12 @@ class StepControls(QWidget):
         self.select_all.clicked.connect(self.select_all_requested)
         col.addWidget(self.select_all)
 
-    def load(self, style: Style, next_number: int) -> None:
+    def load(self, style: Style, next_number: int, next_numbering: str | None = None) -> None:
+        """`next_numbering`: the Step tool's, which the next click uses (a selected step's may differ)."""
         self._loading = True
         self.numbering.set_value(style.numbering)
         self.badge.set_value(style.badge)
-        self.next.set_numbering(style.numbering)
+        self.next.set_numbering(next_numbering or style.numbering)
         self.next.setValue(max(1, min(999, next_number)))
         self.next.lineEdit().setText(self.next.textFromValue(self.next.value()))
         self._loading = False

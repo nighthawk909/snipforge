@@ -273,18 +273,29 @@ class DrawMixin:
 
     def next_step_number(self) -> int:
         """What the next click with the Step tool drops: the number you set (set_next_step_number,
-        lower than what's on the snip to start over), else one more than the biggest step in the
-        Step tool's numbering. Each numbering counts on its own, so Letters starts at A."""
+        lower than what's on the snip to start over); else one more than the step placed last, as
+        it's numbered now (so deleting or renumbering keeps the run right); else one more than the
+        biggest step in the Step tool's numbering. Each numbering counts on its own: Letters starts at A."""
         chosen = getattr(self, "_next_step", None)
         if chosen is not None:
             return chosen
         numbering = self.tool_styles["step"].numbering
+        last = getattr(self, "_last_step", None)
+        if last is not None and last.scene() is self._scene and last.style.numbering == numbering:
+            return last.number + 1
         numbers = [i.number for i in self.steps() if i.style.numbering == numbering]
         return max(numbers, default=0) + 1
 
     def set_next_step_number(self, number: int | None) -> None:
         """Start (or continue) the numbering from `number`; None goes back to following the snip."""
         self._next_step = max(1, int(number)) if number is not None else None
+
+    def step_run(self) -> tuple:
+        """What decides the next number (the one you set, the step placed last), for undo."""
+        return getattr(self, "_next_step", None), getattr(self, "_last_step", None)
+
+    def set_step_run(self, run: tuple) -> None:
+        self._next_step, self._last_step = run
 
     def steps(self) -> list[StepItem]:
         return [i for i in self.annotations() if isinstance(i, StepItem)]
@@ -328,10 +339,10 @@ class DrawMixin:
         return changes
 
     def _add_step(self, pos: QPointF) -> None:
-        chosen = getattr(self, "_next_step", None)
+        before = self.step_run()
         item = StepItem(self.tool_styles["step"], self.next_step_number())
         item.setPos(pos)
         item.setZValue(self._next_z())
-        # A number you set starts a run that carries on from here; otherwise follow the snip.
-        self.undo_stack.push(AddStepCommand(self, item, chosen, None if chosen is None else item.number + 1))
+        # The run carries on from this step, whatever it's numbered later (deleting closes up gaps).
+        self.undo_stack.push(AddStepCommand(self, item, before, (None, item)))
         self._select([item])
