@@ -76,6 +76,7 @@ class SnipForgeApp:
         self.indexer = TextIndexer(self.library)  # reads the words in snips so Library search finds them
         self._session: CaptureSession | None = None
         self._recording = None  # snipforge.video.record_flow.RecordFlow, while one is under way
+        self._color_picker = None  # snipforge.color_picker.ColorPicker, once Pick a color is first used
         self._windows: list = []  # editors and pins kept alive until closed
         self._home: HomeWindow | None = None
         self._settings: SettingsWindow | None = None
@@ -166,6 +167,7 @@ class SnipForgeApp:
         self._record_action = menu.addAction("Record video", self.record)
         self._stop_record_action = menu.addAction("Stop recording", self.stop_recording)
         self._stop_record_action.setVisible(False)  # only while a recording is under way
+        menu.addAction("Pick a color", self.pick_color)
         menu.addAction("Library", self.show_home)
         menu.addAction("Settings…", self.show_settings)
         menu.addSeparator()
@@ -400,10 +402,23 @@ class SnipForgeApp:
             return
         self._start(CaptureSession(self._on_captured, repeat=area, on_note=self._note))
 
+    def pick_color(self) -> None:
+        """Pick a color from anywhere on screen (the tray, or its shortcut): its code is copied."""
+        from .color_picker import ColorPicker
+
+        if self._session is not None:  # its overlays are up, or about to be
+            self._note("Finish or cancel the snip first, then pick a color.")
+            return
+        if self._color_picker is None:
+            self._color_picker = ColorPicker(self._note)
+        self._color_picker.start()
+
     def _note(self, text: str) -> None:
         self._tray.showMessage("SnipForge", text, QSystemTrayIcon.Information, 4000)
 
     def _start(self, session: CaptureSession) -> None:
+        if self._color_picker is not None:
+            self._color_picker.cancel()  # the snip's overlays take the screen
         self._session = session
         self._cancel_snip_action.setVisible(True)
         QTimer.singleShot(CAPTURE_DELAY_MS, session.start)
@@ -412,7 +427,8 @@ class SnipForgeApp:
         if (preset_id := presets.from_action(action)) is not None:
             self.capture_preset(preset_id)
             return
-        {"snip": self.capture, "repeat": self.repeat_last, "library": self.show_home, "record": self.record}[action]()
+        {"snip": self.capture, "repeat": self.repeat_last, "library": self.show_home, "record": self.record,
+         "color": self.pick_color}[action]()
 
     def cancel_snip(self) -> None:
         """From the tray: stop a snip in progress, e.g. during a countdown, which has no keyboard."""

@@ -83,6 +83,19 @@ Crop from the keyboard: C, then the arrow keys and Ctrl+arrow keys, then Enter.
 | 1 to 9, 0 | A capture preset; your usual choices |
 | Esc | Cancel |
 
+## Picking a color
+
+Pick a color is in the tray menu, and can have a shortcut of your own (Settings › Capture). Every
+monitor freezes and is named "Pick a color" for screen readers; the keyboard goes to the monitor
+the pointer is on.
+
+| Keys | What they do |
+|---|---|
+| Arrow keys | Move the loupe a screen pixel at a time (Shift: 10), starting from the pointer |
+| Enter, Space | Copy the color the loupe shows (the first press, before the loupe is showing, shows it) |
+| Tab, Shift+Tab | Choose what's copied: HEX, RGB or HSL (remembered) |
+| Esc | Cancel |
+
 ## Video editor
 
 | Keys | What they do |
@@ -101,7 +114,7 @@ accessibility support, which talks to Windows UI Automation and to the Mac's acc
 ## Checked how
 
 `tests/test_accessibility.py` checks the controls of the editor (with every tool's panel), the
-Library, Settings (every page) and the capture overlay for a name; the keyboard paths above with
+Library, Settings (every page), the capture overlay and Pick a color for a name; the keyboard paths above with
 real key presses; that the colors of two Windows contrast themes keep their text and highlights at
 7:1 or better (WCAG AAA); and, by comparing pictures, that focus shows on every kind of control in
 light, dark and both contrast themes.
