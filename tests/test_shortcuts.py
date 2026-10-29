@@ -46,7 +46,7 @@ class FakeApi:
 # --- what a shortcut can be --------------------------------------------------------------------
 
 def test_prefs_and_settings_know_the_same_actions():
-    assert tuple(shortcuts.ACTIONS) == prefs.SHORTCUT_ACTIONS == ("snip", "repeat", "library", "record")
+    assert tuple(shortcuts.ACTIONS) == prefs.SHORTCUT_ACTIONS == ("snip", "repeat", "library", "record", "color")
 
 
 def test_recording_has_a_shortcut_with_no_combination_until_one_is_chosen():
