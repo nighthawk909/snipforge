@@ -338,7 +338,7 @@ def test_previews_sign_only_commits_already_on_main():
     assert "if: ${{ needs.prepare.outputs.on_main == 'true' }}" in job_block("preview.yml", "build-signed")
     assert "if: ${{ needs.prepare.outputs.on_main != 'true' }}" in job_block("preview.yml", "build")
     publish = job_block("preview.yml", "publish")
-    assert "needs: [prepare, build, build-signed, mac]" in publish
+    assert "needs: [prepare, build, build-signed]" in publish
     assert "needs.build.result == 'success' || needs.build-signed.result == 'success'" in publish
     assert 'compare/$sha...main' in (WORKFLOWS / "preview.yml").read_text(encoding="utf-8")
 
@@ -500,14 +500,3 @@ def test_github_env_option_outside_ci_stops_before_downloading(tmp_path, monkeyp
     with pytest.raises(SystemExit, match="GITHUB_ENV"):
         codesign.main(["setup", "--dest", str(tmp_path), "--endpoint", ENDPOINT, "--account", "a1",
                        "--profile", "p1", "--github-env"])
-
-
-@pytest.mark.parametrize("workflow", ["release.yml", "preview.yml", "ci.yml"])
-def test_mac_builds_never_get_a_token(workflow):
-    """The Mac build runs unreviewed code in previews and CI, and isn't signed: it never gets the OIDC
-    token, whoever calls it."""
-    block = job_block(workflow, "mac")
-    assert "uses: ./.github/workflows/mac.yml" in block
-    assert "id-token" not in block and "secrets" not in block
-    mac = (WORKFLOWS / "mac.yml").read_text(encoding="utf-8")
-    assert "id-token" not in mac and "secrets." not in mac

@@ -1,8 +1,8 @@
 # SnipForge: working agreement for AI coding agents
 
-SnipForge is a Python/PySide6 screenshot, markup and recording tool for Windows and macOS, released
-through GitHub Releases (a per-user installer for Windows, a .dmg for Mac). These rules make
-agent-driven changes safe to ship.
+SnipForge is a Python/PySide6 screenshot, markup and recording tool for Windows, released through
+GitHub Releases (a per-user installer and a portable zip). It's Windows only: the Mac version was
+dropped, so don't add Mac code, builds or docs. These rules make agent-driven changes safe to ship.
 
 ## Every change
 
@@ -24,20 +24,13 @@ agent-driven changes safe to ship.
    green before merge.
 6. After a feature lands, have the change reviewed (code-reviewer agent) and fix high/medium
    findings in the same PR. Say in the PR which `docs/ROADMAP.md` box it ticks.
-7. **Both platforms.** Windows first, then the Mac port (`docs/ROADMAP.md`); the Mac build must
-   always build and start, and features not on the Mac yet step aside there. Before touching anything
-   that talks to the OS, or adding a feature, read `docs/CROSS-PLATFORM.md` (the rules, the code
-   layout and the macOS gotchas; the `cross-platform` skill in `.claude/skills` sums it up). A
-   feature ships on both platforms in the same release, or steps aside cleanly on the one that's
-   behind and gets a row in `docs/PARITY.md`. Tests must pass on Windows and macOS.
 
 ## Releases
 
 - Never edit version numbers or `CHANGELOG.md` by hand; release-please does both in its release PR.
 - Merging the release PR creates the tag and a draft release; the Release workflow builds, attaches
   the installer and only then publishes it. Check the Release workflow run and confirm the release
-  is published with its assets (setup.exe, portable zip, the Mac .dmg and SnipForge.dmg,
-  SHA256SUMS.txt, sbom.cdx.json). If the
+  is published with its assets (setup.exe, portable zip, SHA256SUMS.txt, sbom.cdx.json). If the
   run fails the release stays a draft and the previous one stays "Latest": use "Re-run failed jobs"
   on that run (reuses a finished build), or run the Release workflow by hand with the tag.
 - Keep `draft` and `force-tag-creation` together in `release-please-config.json`. GitHub only
