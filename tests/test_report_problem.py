@@ -16,7 +16,7 @@ from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
-from snipforge import diagnostics, logs, report_dialog
+from snipforge import diagnostics, logs, report_dialog, update_platform
 
 HOME = Path(r"C:\Users\jordan.q") if sys.platform == "win32" else Path("/Users/jordan.q")
 ENV = {"USERNAME": "jordan.q", "COMPUTERNAME": "CONTOSO-LT42", "USERDOMAIN": "CONTOSO",
@@ -130,6 +130,14 @@ def test_a_recorder_that_crashed_is_in_the_report_before_the_next_recording(tmp_
     report = diagnostics.build(log_folder=tmp_path, policy_hives=[{}, {}], environ={}, home=HOME, hostnames=())
     assert report.file("recorder.crash.txt").title == "Crash of the recorder"
     assert "Crash of the recorder:" in report.file("summary.txt").text
+
+
+def test_the_installers_log_of_the_last_update_is_in_the_report(tmp_path):
+    text = b"Log opened.\r\n-- Run entry --\r\nParameters: --background\r\n"
+    (tmp_path / update_platform.INSTALLER_LOG).write_bytes(text)
+    report = diagnostics.build(log_folder=tmp_path, policy_hives=[{}, {}], environ={}, home=HOME, hostnames=())
+    log = report.file("installer.log")
+    assert log.title == "Recent log of the installer" and "Run entry" in log.text
 
 
 def test_a_running_process_crash_file_is_not_a_crash(tmp_path):
