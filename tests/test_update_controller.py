@@ -9,8 +9,8 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import QCoreApplication, Qt
-from PySide6.QtWidgets import QMessageBox, QSystemTrayIcon
+from PySide6.QtCore import QCoreApplication, QPoint, Qt
+from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon, QWidget
 
 from snipforge import project, update_controller, update_flow, update_sources, updates
 from snipforge.settings import app_settings
@@ -125,11 +125,11 @@ def make(qapp, tmp_path, clean_settings, monkeypatch):
         if mode:
             save_prefs(replace(load_prefs(), mode=mode))
         h = SimpleNamespace(source=FakeSource(releases) if source == "fake" else source, launched=[], quits=[],
-                            states=[], lists=[], dir=downloads, clock=clock or Clock())
+                            states=[], lists=[], dir=downloads, clock=clock or Clock(), window_open=False)
         h.c = UpdateController(
             policy=policy or PolicyInfo(), source=h.source, download_dir=downloads, current_version=current,
-            install_mode=install_mode, launcher=lambda path, relaunch: h.launched.append((path, relaunch)) or "",
-            quit_app=lambda: h.quits.append(True), clock=h.clock)
+            install_mode=install_mode, launcher=lambda path, reopen: h.launched.append((path, reopen)) or "",
+            quit_app=lambda: h.quits.append(True), clock=h.clock, window_open=lambda: h.window_open)
         h.c.state_changed.connect(h.states.append)
         h.c.releases_changed.connect(h.lists.append)
         h.kinds = lambda: [k for i, k in enumerate(s.kind for s in h.states) if i == 0 or h.states[i - 1].kind != k]
@@ -225,7 +225,8 @@ def test_auto_mode_installs_on_next_start_and_shows_what_changed(make):
     second = make(mode="auto")
     second.c.start()
     assert spin(lambda: second.quits)
-    assert second.launched == [(first.dir / "SnipForge-0.6.0-setup.exe", True)]
+    # started at sign-in with nothing on screen: it comes back in the tray, as it was
+    assert second.launched == [(first.dir / "SnipForge-0.6.0-setup.exe", "tray")]
     assert second.c.state.kind == "installing"
     third = make(current="0.6.0")
     third.c.start()
@@ -247,6 +248,39 @@ def test_ask_mode_waits_at_next_start(make):
     assert second.launched == []
 
 
+def test_an_update_you_start_brings_snipforge_back_on_screen(make):
+    h = make([rel("0.6.0")], mode="ask")
+    h.c.check_now()
+    h.c.install_ready()  # Install now, or Restart and update in Settings
+    assert h.launched == [(h.dir / "SnipForge-0.6.0-setup.exe", "window")]
+    assert "reopen" in h.c.state.message and spin(lambda: h.quits)
+
+
+def test_auto_mode_installing_at_start_reopens_the_window_you_had_open(make):
+    first = make([rel("0.6.0")], mode="auto")
+    first.c.check_now()
+    second = make(mode="auto")
+    second.window_open = True  # opened from the Start menu: the Library is on screen
+    second.c.start()
+    assert spin(lambda: second.quits)
+    assert second.launched == [(first.dir / "SnipForge-0.6.0-setup.exe", "window")]
+
+
+def test_a_window_on_screen_counts_but_hidden_ones_and_menus_dont(qapp):
+    menu, hidden, window = QMenu(), QWidget(), QWidget()
+    try:
+        menu.addAction("Snip")
+        menu.popup(QPoint(0, 0))  # the tray's menu, say
+        hidden.winId()  # a window that exists but isn't shown
+        assert not update_controller.snipforge_window_open()
+        window.show()
+        assert update_controller.snipforge_window_open()
+    finally:
+        for widget in (menu, hidden, window):
+            widget.close()
+            widget.deleteLater()
+
+
 def test_auto_mode_installs_on_quit_without_relaunching(make):
     h = make([rel("0.6.0")], mode="auto")
     h.c.check_now()
@@ -255,7 +289,7 @@ def test_auto_mode_installs_on_quit_without_relaunching(make):
     assert h.launched == []  # never while Windows is signing out
     h.c._session_end_at -= update_controller.SESSION_END_GRACE_S + 1  # that sign-out was called off
     h.c.install_on_quit()
-    assert h.launched == [(h.dir / "SnipForge-0.6.0-setup.exe", False)] and h.quits == []
+    assert h.launched == [(h.dir / "SnipForge-0.6.0-setup.exe", "none")] and h.quits == []
     h.c.install_on_quit()
     assert len(h.launched) == 1
     ask = make([rel("0.6.0")], mode="ask")
@@ -276,7 +310,7 @@ def test_install_ready_rechecks_the_downloaded_file(make):
 
 def test_failed_installer_launch_is_reported(make):
     h = make([rel("0.6.0")], mode="ask")
-    h.c._launcher = lambda path, relaunch: "Access is denied"
+    h.c._launcher = lambda path, reopen: "Access is denied"
     h.c.check_now()
     h.c.install_ready()
     assert h.c.state.kind == "error" and "Access is denied" in h.c.state.message and h.quits == []
@@ -408,7 +442,7 @@ def test_rollback_installs_the_older_version_and_pins_it(make):
     older = h.c.releases[1]
     assert h.c.install_blocker(older) == ""
     h.c.install_version("0.5.0")
-    assert h.source.downloads == ["0.5.0"] and h.launched == [(h.dir / "SnipForge-0.5.0-setup.exe", True)]
+    assert h.source.downloads == ["0.5.0"] and h.launched == [(h.dir / "SnipForge-0.5.0-setup.exe", "window")]
     assert load_prefs().pinned_version == "0.5.0" and h.c.state.kind == "installing"
     assert spin(lambda: h.quits)
 

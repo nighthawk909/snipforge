@@ -14,6 +14,7 @@ from PySide6.QtCore import QCoreApplication, QUrl
 from PySide6.QtNetwork import QNetworkReply
 
 from snipforge import (
+    logs,
     project,
     update_flow,
     update_platform,
@@ -904,15 +905,27 @@ def test_installer_names_by_platform():
 
 @pytest.mark.windows
 def test_launch_installer_runs_silently(monkeypatch, tmp_path):
-    calls = []
+    calls, fronts = [], []
     monkeypatch.setattr(update_platform.subprocess, "Popen", lambda args, **k: calls.append(args))
+    monkeypatch.setattr(update_platform, "_let_the_next_snipforge_come_to_front", lambda: fronts.append(len(calls)))
+    monkeypatch.setenv(logs.FOLDER_VARIABLE, str(tmp_path / "logs"))
     exe = tmp_path / "SnipForge-9.0.0-setup.exe"
     exe.write_bytes(b"x")
     assert update_platform.launch_installer(exe) == ""
     assert calls[0][0] == str(exe) and "/VERYSILENT" in calls[0] and "/CURRENTUSER" in calls[0]
-    assert "/RELAUNCH=0" not in calls[0]
-    assert update_platform.launch_installer(exe, relaunch=False) == ""
-    assert "/RELAUNCH=0" in calls[1]
+    assert not any(arg.startswith("/RELAUNCH=") for arg in calls[0])  # back in the tray, as before
+    assert update_platform.launch_installer(exe, update_platform.REOPEN_WINDOW) == ""
+    assert "/RELAUNCH=window" in calls[1]
+    assert update_platform.launch_installer(exe, update_platform.REOPEN_NONE) == ""
+    assert "/RELAUNCH=0" in calls[2]
+    # Inno Setup's own log of each install goes beside SnipForge's, where Report a problem finds it
+    assert all(f"/LOG={tmp_path / 'logs' / 'installer.log'}" in call for call in calls)
+    assert (tmp_path / "logs").is_dir()
+    assert fronts == [2]  # only when it's to come back on screen, once the installer is running
+    (tmp_path / "logs" / "installer.log").unlink()
+    (tmp_path / "logs" / "installer.log").mkdir()  # a log that can't be written: install without one
+    assert update_platform.launch_installer(exe) == ""
+    assert not any(arg.startswith("/LOG=") for arg in calls[3])
 
     def blocked(*a, **k):
         raise OSError("blocked by policy")
