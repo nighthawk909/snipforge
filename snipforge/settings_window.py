@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, autostart, bundle, hotkey, prefs, project, theme, wording
+from . import __version__, autostart, bundle, color_text, hotkey, prefs, project, theme, wording
 from .capture_toolbar import MODES
 from .editor import beautify
 from .icons import icon
@@ -42,7 +42,8 @@ SECTIONS = {
     "capture": ("Capture", "monitor", "Which keys start a snip and what you see while choosing.",
                 "shortcut keyboard win shift print screen hotkey magnifier mode area window full screen "
                 "delay timer countdown pointer cursor mouse repeat last snip own custom combination library "
-                "preset presets saved copy folder beautify border torn edges"),
+                "preset presets saved copy folder beautify border torn edges color colour picker eyedropper pick "
+                "hex rgb hsl"),
     "saving": ("Saving", "save", "Where Save puts files, and in which format.",
                "save folder format png jpg webp pdf beautify export"),
     "appearance": ("Appearance", "palette", "Light or dark, and the accent color used across SnipForge.",
@@ -253,6 +254,7 @@ class SettingsWindow(QMainWindow):
         self.format.set_value(prefs.export_format())
         self.start_mode.set_value(self._start_mode())
         self.delay.set_value(str(prefs.capture_delay()))
+        self.color_format.set_value(prefs.color_format())  # Tab changes it while picking
         self._show_shortcuts()
         self.preset_list.refresh()
         self._retheme()
@@ -322,6 +324,10 @@ class SettingsWindow(QMainWindow):
         self.include_pointer = ToggleSwitch("Include the mouse pointer")
         self.include_pointer.setChecked(prefs.capture_pointer())
         self.include_pointer.toggled.connect(prefs.set_capture_pointer)
+        self.color_format = Segmented([(f, color_text.LABELS[f]) for f in color_text.FORMATS],
+                                      value=prefs.color_format())
+        self.color_format.setAccessibleName("Copy picked colors as")
+        self.color_format.changed.connect(prefs.set_color_format)
         note = QLabel(self._keys_note())
         note.setProperty("sfRole", "muted")
         note.setWordWrap(True)
@@ -343,6 +349,8 @@ class SettingsWindow(QMainWindow):
             SettingRow("Include the mouse pointer", "Draw the pointer into snips", self.include_pointer),
             SettingRow("Show the magnifier", "Pixel-exact zoom next to the pointer while you choose an area",
                        self.magnifier),
+            SettingRow("Copy picked colors as", "What Pick a color (in the tray menu) copies: #2F5BEA, "
+                       "rgb(47, 91, 234) or hsl(226, 82%, 55%). Tab switches while you pick", self.color_format),
             note,
             self._preset_list())
 
@@ -376,7 +384,8 @@ class SettingsWindow(QMainWindow):
         descriptions = {"snip": "Your own combination, besides Win+Shift+S and Print Screen",
                         "repeat": "The same area as your last snip, taken straight away",
                         "library": "Bring up the Library from anywhere",
-                        "record": "Choose an area and record a video of it; press it again to stop"}
+                        "record": "Choose an area and record a video of it; press it again to stop",
+                        "color": "Pick a color from anywhere on your screen and copy its code"}
         self.shortcut_edits: dict[str, ShortcutEdit] = {}
         rows: list[QWidget] = []
         for action, title in SHORTCUT_TITLES.items():

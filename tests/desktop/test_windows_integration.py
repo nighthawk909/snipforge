@@ -72,6 +72,30 @@ def test_keyboard_hook_installs(qapp):
         listener.stop()
 
 
+def test_a_busy_spell_has_the_keyboard_hook_put_back(qapp):
+    """While this thread holds Python's lock (as busy work in SnipForge can), another process
+    presses F24, which no keyboard has. The hook can't answer until the lock is free, so the key
+    reaches it late: the hook notices and is put back in case Windows removed it."""
+    import ctypes
+    import subprocess
+    import sys
+
+    from snipforge.hotkey import HotkeyListener
+    listener = HotkeyListener()
+    try:
+        assert listener.start()
+        presser = subprocess.Popen([sys.executable, "-c", (
+            "import ctypes, time; time.sleep(0.6); u = ctypes.windll.user32; "
+            "u.keybd_event(0x87, 0, 0, 0); u.keybd_event(0x87, 0, 2, 0)")])
+        ctypes.PyDLL("kernel32").Sleep(2000)  # a PyDLL call keeps Python's lock while it waits
+        presser.wait(10)
+        pump(0.5)
+        assert listener.stalls >= 1, "the late key wasn't noticed"
+        assert listener.late_ms == 0, "the hook wasn't put back"
+    finally:
+        listener.stop()
+
+
 def test_teams_link_handler_is_registered():
     try:
         winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "msteams").Close()

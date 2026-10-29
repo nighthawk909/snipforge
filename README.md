@@ -42,7 +42,13 @@ tooltip you want to snip, and **Include the mouse pointer** draws the pointer in
 **Repeat last snip** (in the tray menu) takes the same area again, straight away. The snip is also
 copied to the clipboard, just like the built-in Snipping Tool. Either key can be handed back to
 Windows in Settings, and you can add **shortcuts of your own** there for New snip, Repeat last snip,
-the Library and recording a video.
+the Library, recording a video and picking a color.
+
+**Pick a color** from anywhere on your screen, not just a snip: choose it in the tray menu (or give it
+a shortcut of your own), and a loupe beside the pointer shows the exact screen pixels under it, on
+every monitor and at any display scale. Click to copy the color's code (`#2F5BEA`, or press Tab for
+`rgb(47, 91, 234)` or `hsl(226, 82%, 55%)`); the arrow keys move a pixel at a time and Enter copies.
+The color is also waiting under **Recent** in the editor's colors.
 
 **Capture presets** save the ways you snip most: a mode (a Full screen preset takes the monitor
 you're on straight away), a delay, the pointer, a Fixed size, effects (Beautify, a border, torn
