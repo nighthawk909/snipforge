@@ -13,6 +13,7 @@ import ctypes
 import logging
 import sys
 import threading
+import time
 
 from PySide6.QtCore import QObject, Signal
 
@@ -23,6 +24,7 @@ SUPPORTED = sys.platform == "win32"
 # Python's lock, so the hook couldn't answer. Windows quietly removes a hook that answers too slowly
 # (its limit can be as short as 300 ms), so it's put back at once.
 HOOK_LATE_MS = 250
+LOG_EVERY_S = 60  # the log says so at most this often (a key stamped with an old time could repeat it)
 
 WH_KEYBOARD_LL = 13
 WM_KEYDOWN = 0x0100
@@ -104,6 +106,7 @@ class HotkeyListener(QObject):
         self._held_at = 0  # when it was last seen (ms, the event's own clock)
         self.late_ms = 0  # how late a key reached the hook, until the hook is put back (0: on time)
         self.stalls = 0  # times a late key had the hook put back
+        self._logged_at = -LOG_EVERY_S  # when the log last said so (time.monotonic())
 
     @property
     def keys(self) -> tuple[bool, bool]:
@@ -149,7 +152,7 @@ class HotkeyListener(QObject):
                 if fresh:
                     _user32.UnhookWindowsHookEx(self._hook)
                     self._hook = fresh
-                self._reinstalled()
+                self._reinstalled(bool(fresh))
                 continue
             _user32.TranslateMessage(ctypes.byref(msg))
             _user32.DispatchMessageW(ctypes.byref(msg))
@@ -180,12 +183,14 @@ class HotkeyListener(QObject):
             self.stalls += 1
             self.refresh()
 
-    def _reinstalled(self) -> None:
-        """On the hook thread, once it's been put back: say why in the log if a late key asked for it."""
-        if self.late_ms:
+    def _reinstalled(self, ok: bool = True) -> None:
+        """On the hook thread, once it's been put back (or tried): say why in the log if a late key
+        asked for it, at most once a minute."""
+        if self.late_ms and ok and time.monotonic() - self._logged_at >= LOG_EVERY_S:
+            self._logged_at = time.monotonic()
             log.info("SnipForge was busy for %d ms when a key was pressed, so the snip key's keyboard "
                      "hook was put back in case Windows had removed it", self.late_ms)
-            self.late_ms = 0
+        self.late_ms = 0
 
     def _repeat(self, vk: int, when: int) -> bool:
         """Whether this key-down is Windows repeating a held key. A key-down long after the last

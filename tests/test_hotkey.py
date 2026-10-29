@@ -53,3 +53,23 @@ def test_an_event_stamped_after_now_is_not_a_stall(monkeypatch):
 def test_the_app_checks_on_the_hook_often(monkeypatch):
     from snipforge import app
     assert app.REHOOK_MS <= 60_000  # a hook Windows removed comes back within a minute at worst
+
+
+def test_the_log_says_so_at_most_once_a_minute(monkeypatch, caplog):
+    import logging
+    listener, _asked = listener_counting_refreshes(monkeypatch)
+    caplog.set_level(logging.INFO, logger="snipforge.hotkey")
+    for _ in range(3):  # three busy spells in a row
+        listener._check_timing(event_time=10_000, now=11_000)
+        listener._reinstalled(True)
+    assert len([r for r in caplog.records if "busy" in r.getMessage()]) == 1
+    assert listener.stalls == 3 and listener.late_ms == 0
+
+
+def test_a_failed_reinstall_is_not_reported_as_put_back(monkeypatch, caplog):
+    import logging
+    listener, _asked = listener_counting_refreshes(monkeypatch)
+    caplog.set_level(logging.INFO, logger="snipforge.hotkey")
+    listener._check_timing(event_time=10_000, now=11_000)
+    listener._reinstalled(False)
+    assert not [r for r in caplog.records if "put back" in r.getMessage()]
