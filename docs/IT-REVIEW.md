@@ -179,8 +179,9 @@ straight away). Unticking **Update automatically** in the tray menu sets Manual.
 
 A per-user install updates silently and then starts SnipForge again: on screen when the user clicked to
 install (or had a SnipForge window open), in the tray when it installed by itself just after signing in,
-and not at all when it installed as SnipForge quit. The installer's own log of the last update is
-`installer.log` beside SnipForge's logs, so Report a problem includes it.
+and not at all when it installed as SnipForge quit. A rollback to 0.17.0 or older always comes back in the
+tray: those installers predate this. The installer's own log of the last update is `installer.log` beside
+SnipForge's logs, so Report a problem includes it.
 
 **Policy.** Set these under `HKLM\Software\Policies\SnipForge` (or `HKCU\Software\Policies\SnipForge` for one
 user). Machine values win over user values; for the two on/off values the more restrictive one wins.

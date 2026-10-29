@@ -922,6 +922,10 @@ def test_launch_installer_runs_silently(monkeypatch, tmp_path):
     assert all(f"/LOG={tmp_path / 'logs' / 'installer.log'}" in call for call in calls)
     assert (tmp_path / "logs").is_dir()
     assert fronts == [2]  # only when it's to come back on screen, once the installer is running
+    (tmp_path / "logs" / "installer.log").unlink()
+    (tmp_path / "logs" / "installer.log").mkdir()  # a log that can't be written: install without one
+    assert update_platform.launch_installer(exe) == ""
+    assert not any(arg.startswith("/LOG=") for arg in calls[3])
 
     def blocked(*a, **k):
         raise OSError("blocked by policy")

@@ -86,15 +86,18 @@ def _let_the_next_snipforge_come_to_front() -> None:
 
 def _log_args() -> list[str]:
     """Have the installer log what it does (replacing the last install's log), so Report a problem
-    can show why an update didn't finish."""
+    can show why an update didn't finish. Only if the log can be written: Setup gives up on a log
+    it can't create, and SnipForge has quit by then."""
     from . import logs
 
-    folder = logs.folder()
+    path = logs.folder() / INSTALLER_LOG
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "ab"):
+            pass
     except OSError:
         return []
-    return [f"/LOG={folder / INSTALLER_LOG}"]
+    return [f"/LOG={path}"]
 
 
 def session_ending() -> bool:
