@@ -183,6 +183,16 @@ class CommandBar(QWidget):
         self.theme_button.setAccessibleName(tip)
 
 
+class ThumbStrip(QScrollArea):
+    """The Recent snips, in a row that the mouse wheel scrolls sideways."""
+
+    def wheelEvent(self, e) -> None:  # noqa: N802 - Qt API
+        delta = e.angleDelta().y() or e.angleDelta().x()
+        bar = self.horizontalScrollBar()
+        bar.setValue(bar.value() - delta)  # the wheel turned towards you goes on to older snips
+        e.accept()
+
+
 class Tray(QWidget):
     """Recent snips on the left; status messages, Beautify, image size and save state on the right."""
 
@@ -205,7 +215,11 @@ class Tray(QWidget):
         self._thumbs.setContentsMargins(0, 0, 0, 0)
         self._thumbs.setSpacing(6)
         self._thumbs.addStretch(1)
-        self._strip = QScrollArea()  # recent snips shrink away before messages do
+        self._by_id: dict[str, QToolButton] = {}
+        self._current: str | None = None
+        self._back = self._arrow("‹", "Newer snips", -1)
+        row.addWidget(self._back)
+        self._strip = ThumbStrip()  # recent snips shrink away before messages do
         self._strip.setObjectName("TrayThumbs")
         self._strip.setWidget(strip)
         self._strip.setWidgetResizable(True)
@@ -215,6 +229,9 @@ class Tray(QWidget):
         self._strip.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self._strip.setFixedHeight(46)
         row.addWidget(self._strip, 2)
+        self._forward = self._arrow("›", "Older snips", 1)
+        row.addWidget(self._forward)
+        self._strip.horizontalScrollBar().rangeChanged.connect(self._show_arrows)
         self.library_button = QPushButton("Open library")
         self.library_button.setProperty("variant", "ghost")
         self.library_button.clicked.connect(self.open_library)
@@ -242,29 +259,97 @@ class Tray(QWidget):
         for w in self.findChildren(QWidget):
             w.setFocusPolicy(Qt.TabFocus if isinstance(w, (QPushButton, QToolButton, ToggleSwitch)) else Qt.NoFocus)
 
-    def set_recent(self, entries) -> None:
+    def _arrow(self, text: str, tip: str, direction: int) -> QToolButton:
+        b = QToolButton()
+        b.setObjectName("StripArrow")
+        b.setText(text)
+        b.setToolTip(tip)
+        b.setAccessibleName(tip)
+        b.setFocusPolicy(Qt.NoFocus)  # the thumbs themselves take Tab; these are for the mouse
+        b.setAutoRepeat(True)
+        b.clicked.connect(lambda: self._scroll_by(direction))
+        b.hide()
+        return b
+
+    def set_recent(self, entries, current_id: str | None = None) -> None:
+        """The newest snips in order, `current_id` (the snip on show) marked. Thumbs already there
+        stay where they are, so moving between snips never shuffles the row."""
+        entries = entries[:RECENT_COUNT]
+        if [e.id for e in entries] != list(self._by_id):
+            self._rebuild(entries)
+        self._current = current_id
+        for entry_id, thumb in self._by_id.items():
+            thumb.setChecked(entry_id == current_id)
+        if current_id in self._by_id:
+            self._strip.ensureWidgetVisible(self._by_id[current_id], 8, 0)
+
+    def _rebuild(self, entries) -> None:
+        bar = self._strip.horizontalScrollBar()
+        keep = bar.value()
         while self._thumbs.count() > 1:  # keep the trailing stretch
             widget = self._thumbs.takeAt(0).widget()
             if widget:
                 widget.hide()
                 widget.deleteLater()
+        self._by_id = {}
         self._label.setVisible(bool(entries))
-        for entry in entries[:RECENT_COUNT]:
+        for entry in entries:
             thumb = QToolButton()
             thumb.setObjectName("Thumb")
+            thumb.setCheckable(True)
             pix = QPixmap(str(entry.preview_path))
             if not pix.isNull():
                 thumb.setIcon(QIcon(pix.scaled(128, 76, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
             thumb.setIconSize(QSize(56, 34))
             when = entry.created.strftime("%b %d, %I:%M %p")
-            thumb.setToolTip(f"{when} · click to open")
-            thumb.setAccessibleName(f"Open snip from {when}")
+            thumb.setToolTip(f"{when} · click to show it here")
+            thumb.setAccessibleName(f"Snip from {when}")
             thumb.setFocusPolicy(Qt.TabFocus)
-            thumb.clicked.connect(lambda _=False, i=entry.id: self.open_entry.emit(i))
+            thumb.clicked.connect(lambda _=False, i=entry.id: self._picked(i))
             self._thumbs.insertWidget(self._thumbs.count() - 1, thumb)
+            self._by_id[entry.id] = thumb
+        bar.setValue(keep)
+
+    def _picked(self, entry_id: str) -> None:
+        self.set_recent_mark(self._current)  # stays as it is until the editor shows the snip
+        self.open_entry.emit(entry_id)
+
+    def set_recent_mark(self, current_id: str | None) -> None:
+        for entry_id, thumb in self._by_id.items():
+            thumb.setChecked(entry_id == current_id)
+
+    def _scroll_by(self, direction: int) -> None:
+        bar = self._strip.horizontalScrollBar()
+        bar.setValue(bar.value() + direction * max(60, int(self._strip.viewport().width() * 0.8)))
+
+    def _show_arrows(self, _low: int = 0, high: int = 0) -> None:
+        overflow = self._strip.horizontalScrollBar().maximum() > 0
+        self._back.setVisible(overflow)
+        self._forward.setVisible(overflow)
 
     def thumb_count(self) -> int:
         return self._thumbs.count() - 1
+
+    def thumb_ids(self) -> list[str]:
+        return list(self._by_id)
+
+    def thumb(self, entry_id: str) -> QToolButton:
+        return self._by_id[entry_id]
+
+    def current_id(self) -> str | None:
+        return self._current
+
+    def strip(self) -> QScrollArea:
+        return self._strip
+
+    def strip_scroll_bar(self):
+        return self._strip.horizontalScrollBar()
+
+    def can_scroll(self) -> bool:
+        return self._strip.horizontalScrollBar().maximum() > 0
+
+    def scroll_buttons_visible(self) -> bool:
+        return self._back.isVisible() and self._forward.isVisible()
 
     def set_beautify(self, on: bool) -> None:
         self._loading = True

@@ -144,6 +144,15 @@ class LayersList(QWidget):
 
     # ------------------------------------------------------------------ the canvas
     def attach(self, canvas) -> None:
+        """List this canvas's markup (the editor's snip on show), letting go of the one before."""
+        old = getattr(self, "_canvas", None)
+        if old is not None and old is not canvas:
+            pairs = ((old.document_changed, self._changed), (old.selection_changed, self._follow_selection))
+            for signal, slot in pairs:
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass  # already gone with it
         self._canvas = canvas
         canvas.document_changed.connect(self._changed)  # every edit, undo and redo
         canvas.selection_changed.connect(self._follow_selection)

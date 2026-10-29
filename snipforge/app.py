@@ -523,6 +523,10 @@ class SnipForgeApp:
             if getattr(window, "_entry", None) is not None and window._entry.id == entry_id:  # an editor
                 self._bring_to_front(window)
                 return
+        host = self._editor_host()
+        if host is not None and host.switch_to(entry_id):  # one it kept: back as you left it, undo and all
+            self._bring_to_front(host)
+            return
         entry = self.library.get(entry_id)
         if entry is None:
             QMessageBox.information(None, "SnipForge", "That snip is no longer in the library.")
@@ -547,19 +551,36 @@ class SnipForgeApp:
 
     def _open_editor(self, image: QImage, entry, document, autosave: bool = True,
                      beautify_on: bool | None = None) -> None:
+        """Show the snip in the editor that's open, in place (snip_switch.py). A snip that can't
+        autosave (not in the Library, or its markup unreadable) gets a window of its own instead."""
         from .editor.window import EditorWindow  # loaded just after start-up (_load_editor)
 
+        host = self._editor_host() if autosave and entry is not None else None
+        if host is not None:
+            host.show_snip(image, entry, document, beautify_on)
+            self._bring_to_front(host)
+            return
         editor = EditorWindow(image, self.library, entry, document, on_new_snip=self.capture,
                               on_open_entry=self.open_entry, on_pin=self.pin, autosave=autosave,
                               on_open_library=self.show_home, beautify_on=beautify_on,
-                              on_combine=lambda entry_id, window: self.combine([entry_id], window))
-        earlier = [w for w in self._windows if isinstance(w, EditorWindow)]
+                              on_combine=lambda entry_id, window: self.combine([entry_id], window),
+                              on_left_snip=self._snip_left)
         self._track(editor)
         editor.show()
         self._bring_to_front(editor)
-        for window in earlier:  # one editor at a time: the newest snip replaces the one before
-            if window.keeps_itself():
-                window.close()  # it saves to the Library as it closes
+
+    def _editor_host(self):
+        """The open editor that new and opened snips show in: the newest one that autosaves."""
+        from .editor.window import EditorWindow
+
+        editors = [w for w in self._windows if isinstance(w, EditorWindow) and w.keeps_itself()]
+        return editors[-1] if editors else None
+
+    def _snip_left(self, entry) -> None:
+        """An editor saved a snip as another took its place: read its words again for search."""
+        self.indexer.index(entry, again=True)
+        if self._home is not None and self._home.isVisible():
+            self._home.update_entry(entry.id)
 
     def pin(self, image: QImage) -> None:
         window = PinWindow(image, QPoint(*self._pin_position()))

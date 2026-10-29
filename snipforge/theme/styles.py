@@ -245,6 +245,9 @@ QStatusBar#TrayStatus {{ background: transparent; border: none; color: {p.text2}
 QScrollArea#TrayThumbs, QScrollArea#TrayThumbs > QWidget > QWidget {{ background: transparent; border: none; }}
 #Thumb {{ background: {p.surface2}; border: 1px solid {p.border}; border-radius: 6px; padding: 2px; }}
 #Thumb:hover {{ border-color: {a.fill}; }}
+#Thumb:checked {{ border: 2px solid {a.fill}; padding: 1px; }}
+QToolButton#StripArrow {{ background: transparent; border: none; color: {p.text2}; padding: 0 2px; }}
+QToolButton#StripArrow:hover {{ color: {a.text}; }}
 #ZoomLabel {{ color: {h.text2}; }}
 """ + _focus_rules(theme) + (_contrast_rules(theme) if theme.contrast else "") + _focus_on_accent(theme)
 
