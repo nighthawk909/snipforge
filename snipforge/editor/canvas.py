@@ -134,6 +134,7 @@ class Canvas(KeyboardMixin, InputMixin, PanMixin, DrawMixin, ClipboardMixin, Pic
         # No scroll bars: drag the empty area (or with the middle button, or Space) and the wheel move it.
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)  # a bigger window keeps what's in its middle
         self.setMouseTracking(True)
 
         self._drag: dict | None = None

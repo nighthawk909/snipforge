@@ -131,3 +131,33 @@ def test_the_empty_area_shows_a_hand_to_say_it_drags(canvas):
     middle = at(canvas)
     mouse(canvas, "move", (middle.x(), middle.y()), Qt.NoButton)
     assert canvas.viewport().cursor().shape() == Qt.ArrowCursor
+
+
+# --- review: a click on the empty area still deselects; resizing keeps the snip in the middle --
+def test_a_click_on_the_empty_area_still_deselects(canvas):
+    box = drag(canvas, "rect", (20, 20), (60, 60))
+    canvas.set_tool("select")
+    box.setSelected(True)
+    x, y = well_point(canvas)
+    mouse(canvas, "press", (x, y))
+    mouse(canvas, "release", (x, y))
+    assert not box.isSelected()
+
+
+def test_resizing_the_window_keeps_the_snip_where_it_was_in_the_middle(canvas):
+    canvas.fit_image()
+    QApplication.processEvents()
+    centre = canvas.mapToScene(canvas.viewport().rect().center())
+    canvas.resize(900, 700)
+    QApplication.processEvents()
+    after = canvas.mapToScene(canvas.viewport().rect().center())
+    assert abs(after.x() - centre.x()) <= 2 and abs(after.y() - centre.y()) <= 2
+
+
+def test_a_stale_pan_never_hijacks_the_next_press(canvas):
+    canvas.set_tool("select")
+    x, y = well_point(canvas)
+    mouse(canvas, "press", (x, y))  # its release never arrives (Alt+Tab)
+    before = at(canvas)
+    box = drag(canvas, "rect", (20, 20), (60, 60))  # the next press, straight on the snip
+    assert box is not None and moved(before, at(canvas)) == (0, 0)

@@ -18,6 +18,7 @@ class PanMixin:
 
     _pan_from: QPoint | None = None
     _pan_button = Qt.NoButton
+    _pan_moved = False
 
     def pan_room(self) -> tuple[float, float]:
         """Scene units of room around the snip, so it can move about however it fits the window."""
@@ -35,12 +36,13 @@ class PanMixin:
 
     def _begin_pan(self, e) -> bool:
         """Start moving the snip if this press does that: True if it did."""
+        self._pan_from = None  # one whose release went missing (Alt+Tab) is over: this press decides
         middle = e.button() == Qt.MiddleButton
         select_on_empty = (e.button() == Qt.LeftButton and self.tool == "select" and not self._panning
                            and self._free_to_pan() and self.on_empty_area(e.position().toPoint()))
         if not (middle or select_on_empty):
             return False
-        self._pan_from, self._pan_button = e.position().toPoint(), e.button()
+        self._pan_from, self._pan_button, self._pan_moved = e.position().toPoint(), e.button(), False
         self.viewport().setCursor(Qt.ClosedHandCursor)
         return True
 
@@ -57,6 +59,7 @@ class PanMixin:
             return False
         pos = e.position().toPoint()
         delta, self._pan_from = pos - self._pan_from, pos
+        self._pan_moved = self._pan_moved or not delta.isNull()
         h, v = self.horizontalScrollBar(), self.verticalScrollBar()
         h.setValue(h.value() - delta.x())
         v.setValue(v.value() - delta.y())
@@ -65,6 +68,8 @@ class PanMixin:
     def _end_pan(self, e) -> bool:
         if self._pan_from is None or e.button() != self._pan_button:
             return False
+        if e.button() == Qt.LeftButton and not self._pan_moved:
+            self._scene.clearSelection()  # a click on the empty area, as before: nothing selected
         self._stop_pan()
         return True
 
