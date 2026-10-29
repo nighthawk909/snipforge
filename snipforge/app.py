@@ -32,7 +32,7 @@ from .update_flow import UpdateFlow
 log = logging.getLogger(__name__)
 EDITOR_PRELOAD_MS = 1500  # after start-up, load the editor's code, so the first snip opens as fast as any
 CAPTURE_DELAY_MS = 120  # let the Start menu and key-up settle before freezing the screen
-REHOOK_MS = 5 * 60 * 1000  # reinstall the keyboard hook in case Windows dropped it
+REHOOK_MS = 30 * 1000  # reinstall the keyboard hook in case Windows dropped it unseen (a late key also does)
 PRIVACY_POLL_MS = 500  # how often the GUI thread looks for the private-title sweep's result
 CRASH_NOTICE_MS = 10_000  # how long the "closed unexpectedly" notice is up, and clicking it opens the report
 CRASH_NOTICE_DELAY_MS = 3_000  # after start, so the notification area is there (it isn't at once at sign-in)
