@@ -115,3 +115,9 @@ def delete(kind: str, style: Style) -> None:
     kept = [s for s in styles if not same_look(kind, s, style)]
     if len(kept) != len(styles):
         _store(kind, kept)
+
+
+def delete_all(kind: str) -> None:
+    """Remove every saved style for `kind`; other tools' stay."""
+    if saved_for(kind):
+        _store(kind, [])
