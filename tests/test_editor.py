@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
-from PySide6.QtGui import QFocusEvent, QMouseEvent
+from PySide6.QtGui import QColor, QFocusEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from snipforge.editor.canvas import Canvas
@@ -623,8 +623,11 @@ def test_crop_actually_cuts_and_hides_outside(canvas):
     canvas.set_tool("select")
     assert canvas.crop_rect() == QRectF(20, 10, 100, 60)
     assert not canvas.crop_editing()
-    assert canvas.scene().sceneRect().contains(QRectF(20, 10, 100, 60))
-    assert not canvas.scene().sceneRect().contains(QRectF(0, 0, 200, 100))  # cut area is gone from view
+    assert canvas.scene().sceneRect().center() == QRectF(20, 10, 100, 60).center()  # room around what's kept
+    shot = canvas.viewport().grab().toImage()
+    kept = shot.pixelColor(canvas.mapFromScene(QPointF(60, 40)))
+    cut = shot.pixelColor(canvas.mapFromScene(QPointF(5, 5)))
+    assert kept == QColor("white") and cut != kept  # the cut area is hidden, however you move the snip
 
 
 def test_crop_edges_drag_back_out_to_uncut(canvas):

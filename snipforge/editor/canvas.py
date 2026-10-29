@@ -19,6 +19,7 @@ from .canvas_draw import DrawMixin
 from .canvas_image import ImageMixin
 from .canvas_input import InputMixin
 from .canvas_keys import KeyboardMixin
+from .canvas_pan import PanMixin
 from .canvas_pick import PickMixin
 from .canvas_view import MAX_ZOOM as MAX_ZOOM  # re-exported: the window's zoom buttons use these
 from .canvas_view import MIN_ZOOM as MIN_ZOOM
@@ -73,8 +74,8 @@ def _shows_snip(item) -> bool:
     return getattr(item, "hides_content", False) or getattr(item, "is_snip", False)
 
 
-class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, ImageMixin, ViewMixin,
-             QGraphicsView):
+class Canvas(KeyboardMixin, InputMixin, PanMixin, DrawMixin, ClipboardMixin, PickMixin, ChooseMixin, ImageMixin,
+             ViewMixin, QGraphicsView):
     tool_changed = Signal(str)
     selection_changed = Signal()
     zoom_changed = Signal(float)
@@ -130,6 +131,9 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
         self._dot_tiles: dict[float, QPixmap] = {}
         self._mask.set_pattern(self._background_pattern)
         self.setFrameShape(QGraphicsView.NoFrame)
+        # No scroll bars: drag the empty area (or with the middle button, or Space) and the wheel move it.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setMouseTracking(True)
 
         self._drag: dict | None = None
@@ -487,7 +491,8 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
 
     def _update_scene_rect(self) -> None:
         base = self._image_rect if self._mask.editing else self.frame_rect()
-        self._scene.setSceneRect(base.adjusted(-SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN))
+        room_x, room_y = self.pan_room()
+        self._scene.setSceneRect(base.adjusted(-room_x, -room_y, room_x, room_y))
 
     def commit_text(self) -> None:
         editing = self.editing_text_item()
