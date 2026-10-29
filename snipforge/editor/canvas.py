@@ -244,6 +244,7 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
                 self.tool_styles[kind] = self.tool_styles[kind].with_changes(**own(kind))
         editing = self.editing_text_item()
         editing_owner = editing.owner() if editing is not None else None
+        renumbered = self.numbers_in(changes["numbering"], selected) if "numbering" in changes else {}
         records = []
         for item in selected:
             mine = own(item.kind)
@@ -255,6 +256,8 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
                 continue
             before = item.get_state()
             item.set_style(item.style.with_changes(**mine))
+            if item in renumbered:
+                item.set_state({**item.get_state(), "number": renumbered[item]})
             records.append((item, before, item.get_state()))
         if records:
             key = ("style", tuple(id(r[0]) for r in records), tuple(sorted(changes)))
@@ -274,9 +277,20 @@ class Canvas(KeyboardMixin, InputMixin, DrawMixin, ClipboardMixin, PickMixin, Ch
     def delete_selection(self) -> None:
         items = [i for i in self.selected_annotations() if not i.locked]
         if items:
-            self.undo_stack.push(RemoveItemsCommand(self._scene, items))
+            self.remove_items(items)
         else:
             self._only_locked()
+
+    def remove_items(self, items, text: str = "Delete") -> None:
+        """Remove markup as one undo step; step numbers after removed ones close up the gap."""
+        renumber = self.step_gap_changes(items)
+        if not renumber:
+            self.undo_stack.push(RemoveItemsCommand(self._scene, items, text))
+            return
+        self.undo_stack.beginMacro(text)
+        self.undo_stack.push(RemoveItemsCommand(self._scene, items, text))
+        self.undo_stack.push(StateCommand(renumber, "Renumber steps", already_applied=False))
+        self.undo_stack.endMacro()
 
     def _state_change(self, items, text: str, change) -> None:
         """Apply `change(item)` to each of `items` as one undo step."""

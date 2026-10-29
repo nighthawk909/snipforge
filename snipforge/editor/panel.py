@@ -149,6 +149,7 @@ class PropertiesPanel(QScrollArea):
     changed = Signal(dict)          # style field -> new value
     crop_action = Signal(str)       # apply | cancel | reset
     next_step = Signal(int)         # the Step tool's next number (the Numbering section)
+    select_steps = Signal()         # Select all steps: select every step number to restyle them together
     image_action = Signal(str)      # rotate_left | rotate_right | flip_horizontal | flip_vertical | resize
     pick_color = Signal()           # the eyedropper button: start (or stop) picking a color from the snip
     style_saved = Signal(str)       # the selection's look was saved as a quick style for this tool
@@ -298,6 +299,7 @@ class PropertiesPanel(QScrollArea):
         self._steps = StepControls()
         self._steps.changed.connect(lambda changes: self._emit(**changes))
         self._steps.next_number.connect(self.next_step)
+        self._steps.select_all_requested.connect(self.select_steps)
         col.addWidget(self._steps)
 
     def _build_dim(self) -> None:
@@ -919,6 +921,9 @@ class PropertiesPanel(QScrollArea):
 
     def default_button(self, key: str) -> QPushButton:
         return self._default_buttons[key]
+
+    def step_controls(self) -> StepControls:
+        return self._steps
 
     def layers_list(self) -> LayersList:
         return self._layers

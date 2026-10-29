@@ -131,6 +131,7 @@ class EditorWindow(QMainWindow):
         self.panel.changed.connect(lambda changes: self.canvas.apply_style(**changes))
         self.panel.crop_action.connect(self._crop_action)
         self.panel.next_step.connect(self.canvas.set_next_step_number)
+        self.panel.select_steps.connect(self.canvas.select_steps)
         self.panel.arrange.connect(self._arrange)
         self.panel.tool_default.connect(self._tool_default)
         self.panel.layers_list().attach(self.canvas)

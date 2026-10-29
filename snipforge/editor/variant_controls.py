@@ -7,11 +7,12 @@ and rethemes its icons. The panel shows each one only for tools that have its fi
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QValidator
 from PySide6.QtWidgets import (
     QFontComboBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QSpinBox,
     QToolButton,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from ..icons import icon
 from ..widgets import Segmented, screen_reader_name
+from .items import number_from_label, step_label
 from .style import (
     ARROW_HEADS,
     BADGES,
@@ -60,6 +62,34 @@ class FocusedSpinBox(QSpinBox):
             super().wheelEvent(e)
         else:
             e.ignore()  # the panel scrolls instead
+
+
+class StepNumberBox(FocusedSpinBox):
+    """The next step's number, shown and typed as the numbering writes it: 3, C or III."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.numbering = "digits"
+
+    def set_numbering(self, numbering: str) -> None:
+        self.numbering = numbering
+        self.lineEdit().setText(self.textFromValue(self.value()))
+
+    def textFromValue(self, value: int) -> str:  # noqa: N802 - Qt API
+        return step_label(value, self.numbering)
+
+    def valueFromText(self, text: str) -> int:  # noqa: N802 - Qt API
+        found = number_from_label(text, self.numbering)
+        return self.value() if found is None else found
+
+    def validate(self, text: str, pos: int):
+        if not text.strip():
+            return QValidator.Intermediate, text, pos
+        found = number_from_label(text, self.numbering)
+        if found is None:
+            return QValidator.Invalid, text, pos
+        return (QValidator.Acceptable if self.minimum() <= found <= self.maximum() else QValidator.Intermediate,
+                text, pos)
 
 
 class FocusedFontBox(QFontComboBox):
@@ -198,6 +228,7 @@ class StepControls(QWidget):
 
     changed = Signal(dict)
     next_number = Signal(int)  # what the next click with the Step tool drops
+    select_all_requested = Signal()  # select every step number, to restyle them together
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -218,22 +249,47 @@ class StepControls(QWidget):
         self.badge.changed.connect(lambda key: self._emit(badge=key))
         col.addWidget(self.badge)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Next number"))
+        row.addWidget(QLabel("Next"))  # short: the box and the Start over button share the row
         row.addStretch(1)
-        self.next = FocusedSpinBox()
+        self.next = StepNumberBox()
         self.next.setRange(1, 999)
-        self.next.setToolTip("What the next click drops; the ones after follow on from it")
+        self.next.setToolTip("What the next click drops, and the ones after follow on from it. Lower than "
+                             "what's on the snip starts over.")
         screen_reader_name(self.next, "Next step number")
         self.next.valueChanged.connect(lambda v: self._loading or self.next_number.emit(int(v)))
         row.addWidget(self.next)
+        self.start_over = QToolButton()
+        self.start_over.setObjectName("FormatToggle")  # the same small square button as Bold and Italic
+        self.start_over.setToolTip("Start over: the next click drops 1 (or A, or I) again")
+        self.start_over.setAccessibleName("Start the step numbers over")
+        self.start_over.setIconSize(QSize(18, 18))
+        self.start_over.setFixedSize(30, 30)
+        self.start_over.setCursor(Qt.PointingHandCursor)
+        self.start_over.setFocusPolicy(Qt.TabFocus)
+        self.start_over.clicked.connect(self._start_over)
+        row.addWidget(self.start_over)
         col.addLayout(row)
+        self.select_all = QPushButton("Select all steps")
+        self.select_all.setProperty("variant", "ghost")
+        self.select_all.setToolTip("Select every step number to change their color, badge or numbering together")
+        self.select_all.setFocusPolicy(Qt.TabFocus)
+        self.select_all.clicked.connect(self.select_all_requested)
+        col.addWidget(self.select_all)
 
     def load(self, style: Style, next_number: int) -> None:
         self._loading = True
         self.numbering.set_value(style.numbering)
         self.badge.set_value(style.badge)
+        self.next.set_numbering(style.numbering)
         self.next.setValue(max(1, min(999, next_number)))
+        self.next.lineEdit().setText(self.next.textFromValue(self.next.value()))
         self._loading = False
+
+    def _start_over(self) -> None:
+        self._loading = True
+        self.next.setValue(1)
+        self._loading = False
+        self.next_number.emit(1)
 
     def _emit(self, **changes) -> None:
         if not self._loading:
@@ -241,6 +297,7 @@ class StepControls(QWidget):
 
     def retheme(self) -> None:
         retheme_segmented(self.badge, BADGES)
+        self.start_over.setIcon(icon("refresh"))
 
 
 class TextFormatControls(QWidget):

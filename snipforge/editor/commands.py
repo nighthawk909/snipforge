@@ -21,6 +21,23 @@ class AddItemsCommand(QUndoCommand):
             self._scene.removeItem(item)
 
 
+class AddStepCommand(AddItemsCommand):
+    """A step number placed, with the number the next one gets before and after it (None: follow
+    the snip), so undo gives the same number again."""
+
+    def __init__(self, canvas, item, next_before: int | None, next_after: int | None) -> None:
+        super().__init__(canvas._scene, [item], "Add step")
+        self._canvas, self._next = canvas, (next_before, next_after)
+
+    def redo(self) -> None:
+        super().redo()
+        self._canvas.set_next_step_number(self._next[1])
+
+    def undo(self) -> None:
+        super().undo()
+        self._canvas.set_next_step_number(self._next[0])
+
+
 class RemoveItemsCommand(QUndoCommand):
     def __init__(self, scene, items, text: str = "Delete") -> None:
         super().__init__(text)

@@ -6,7 +6,7 @@ from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QFontMetricsF
 
 from .app_stamp import fitted
-from .commands import AddItemsCommand, StateCommand
+from .commands import AddItemsCommand, AddStepCommand, StateCommand
 from .crop import crop_handle_at
 from .edges import DEPTH as EDGE_DEPTH
 from .erase import EraseItem
@@ -272,21 +272,66 @@ class DrawMixin:
         self.ensureVisible(item)
 
     def next_step_number(self) -> int:
-        """What the next click with the Step tool drops: one more than the biggest on the snip, or
-        the number you set (set_next_step_number) while it's still bigger than that."""
-        numbers = [i.number for i in self.annotations() if isinstance(i, StepItem)]
-        following = max(numbers, default=0) + 1
+        """What the next click with the Step tool drops: the number you set (set_next_step_number,
+        lower than what's on the snip to start over), else one more than the biggest step in the
+        Step tool's numbering. Each numbering counts on its own, so Letters starts at A."""
         chosen = getattr(self, "_next_step", None)
-        return chosen if chosen is not None and chosen > following else following
+        if chosen is not None:
+            return chosen
+        numbering = self.tool_styles["step"].numbering
+        numbers = [i.number for i in self.steps() if i.style.numbering == numbering]
+        return max(numbers, default=0) + 1
 
     def set_next_step_number(self, number: int | None) -> None:
         """Start (or continue) the numbering from `number`; None goes back to following the snip."""
         self._next_step = max(1, int(number)) if number is not None else None
 
+    def steps(self) -> list[StepItem]:
+        return [i for i in self.annotations() if isinstance(i, StepItem)]
+
+    def select_steps(self) -> None:
+        """Select every step number (to restyle them all), with the Select tool."""
+        self.set_tool("select")
+        self._select([i for i in self.steps() if not i.hidden and self._visible_in_crop(i)])
+        self.selection_changed.emit()
+
+    def numbers_in(self, numbering: str, items) -> dict[StepItem, int]:
+        """New numbers for the steps among `items` switching to `numbering`: in their order, after
+        any steps already in it, so a switch to Letters starts at A (or carries on after the A B
+        that are there)."""
+        groups: dict[str, list[StepItem]] = {}
+        for i in items:
+            if isinstance(i, StepItem) and i.style.numbering != numbering:
+                groups.setdefault(i.style.numbering, []).append(i)
+        moving = []  # 1 2 then A: each numbering's steps by number, the one placed first first
+        for members in sorted(groups.values(), key=lambda g: min(i.zValue() for i in g)):
+            moving += sorted(members, key=lambda i: (i.number, i.zValue()))
+        staying = [i for i in self.steps() if i.style.numbering == numbering and i not in moving]
+        start = max((i.number for i in staying), default=0)
+        return {step: start + n for n, step in enumerate(moving, 1)}
+
+    def step_gap_changes(self, removed) -> list[tuple[StepItem, dict, dict]]:
+        """Renumbering that closes the gaps `removed` steps leave (1 2 3 4 less 2 and 3 is 1 2), as
+        (step, before, after) for an undo step. Each numbering separately; a number that another
+        step still has (a run you started over) isn't a gap."""
+        gone = [i for i in removed if isinstance(i, StepItem)]
+        left = [i for i in self.steps() if i not in removed]
+        changes = []
+        for numbering in {i.style.numbering for i in gone}:
+            same = [i for i in left if i.style.numbering == numbering]
+            missing = {i.number for i in gone if i.style.numbering == numbering} - {i.number for i in same}
+            for step in same:
+                shift = sum(1 for n in missing if n < step.number)
+                if shift:
+                    before = step.get_state()
+                    changes.append((step, before, {**before, "number": step.number - shift}))
+        return changes
+
     def _add_step(self, pos: QPointF) -> None:
+        chosen = getattr(self, "_next_step", None)
         item = StepItem(self.tool_styles["step"], self.next_step_number())
-        self._next_step = None  # placed: the numbering follows the snip from here
         item.setPos(pos)
         item.setZValue(self._next_z())
-        self.undo_stack.push(AddItemsCommand(self._scene, [item], "Add step"))
+        # A number you set starts a run that carries on from here; otherwise follow the snip.
+        self.undo_stack.push(AddStepCommand(self, item, chosen, None if chosen is None else item.number + 1))
         self._select([item])
