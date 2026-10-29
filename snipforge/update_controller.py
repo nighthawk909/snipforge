@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 
 from . import __version__, update_platform, update_policy, update_sources
@@ -55,6 +55,14 @@ QUIT_DELAY_MS = 500
 RECENT_INSTALL = dt.timedelta(minutes=10)   # an installer started this recently may still be running
 SESSION_END_GRACE_S = 120                   # after Windows says it's signing out (a sign-out can be vetoed)
 DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "SnipForge" / "updates"
+
+
+def snipforge_window_open() -> bool:
+    """Whether a SnipForge window (the Library, an editor, Settings) is on screen, minimized or not."""
+    if not isinstance(QCoreApplication.instance(), QGuiApplication):
+        return False
+    return any(window.isVisible() and window.type() in (Qt.Window, Qt.Dialog)
+               for window in QGuiApplication.topLevelWindows())
 
 
 def check_is_due(now: dt.datetime, last: str | dt.datetime | None) -> bool:
@@ -92,7 +100,7 @@ class UpdateController(QObject):
 
     def __init__(self, parent=None, *, policy: PolicyInfo | None = None, source=None, download_dir=None,
                  current_version: str = __version__, install_mode: str | None = None, launcher=None,
-                 quit_app=None, clock=None) -> None:
+                 quit_app=None, clock=None, window_open=None) -> None:
         super().__init__(parent)
         self._policy = policy if policy is not None else update_policy.read_policy()
         self._source = source if source is not None else update_sources.source_for(self._policy)
@@ -102,6 +110,7 @@ class UpdateController(QObject):
         self._launcher = launcher or update_platform.launch_installer
         self._quit_app = quit_app or QCoreApplication.quit
         self._clock = clock or dt.datetime.now
+        self._window_open = window_open or snipforge_window_open
         self._last_checked = load_last_checked()
         self._state = UpdateState(last_checked=self._last_checked)
         self._all: list[Release] = []
@@ -224,8 +233,9 @@ class UpdateController(QObject):
         else:
             self._set("idle", message="Check canceled.")
 
-    def install_ready(self) -> None:
-        """Install the downloaded, verified update now; SnipForge closes and the installer reopens it."""
+    def install_ready(self, reopen: str = update_platform.REOPEN_WINDOW) -> None:
+        """Install the downloaded, verified update now; SnipForge closes and the installer reopens it,
+        on screen unless `reopen` says otherwise: you clicked for this, so it shouldn't vanish."""
         ready = self._store.ready
         if self._state.kind == "installing":
             return
@@ -243,7 +253,7 @@ class UpdateController(QObject):
             self._set("error", ready.release, "The downloaded update changed on disk, so it wasn't installed. "
                                               "Check for updates to download it again.")
             return
-        error = self._launch(ready, relaunch=True)
+        error = self._launch(ready, reopen)
         if error:
             self._set("error", ready.release, f"Couldn't start the update: {error}")
             return
@@ -311,7 +321,7 @@ class UpdateController(QObject):
         if self.prefs.mode != "auto" or self.install_blocker(ready.release) or not self._eligible(ready.release):
             return
         if self._store.verified(ready):
-            error = self._launch(ready, relaunch=False)
+            error = self._launch(ready, update_platform.REOPEN_NONE)
             if error:
                 log.warning("Couldn't install the update on quit: %s", error)
 
@@ -406,7 +416,7 @@ class UpdateController(QObject):
             self.install_ready()
 
     # ------------------------------------------------------------------ installing
-    def _launch(self, ready: Ready, relaunch: bool) -> str:
+    def _launch(self, ready: Ready, reopen: str) -> str:
         """Pin when rolling back (or past the pin), remember what we're installing, start the installer."""
         before = load_prefs()
         after = self._pin_for(ready.release, before)
@@ -414,7 +424,7 @@ class UpdateController(QObject):
             save_prefs(after)
         self._store.remember_install(ready.release, self._current, before.pinned_version, after.pinned_version,
                                      self._clock())
-        error = self._launcher(ready.path, relaunch)
+        error = self._launcher(ready.path, reopen)
         if error:
             self._store.forget_install()
             if after != before:
@@ -432,8 +442,10 @@ class UpdateController(QObject):
         return prefs
 
     def _install_at_start(self) -> None:
+        """Auto mode, just after starting: back in the tray if SnipForge started there (signing in),
+        back on screen if you'd opened it."""
         if self._store.ready is not None and self.prefs.mode == "auto" and not self.busy:
-            self.install_ready()
+            self.install_ready(update_platform.REOPEN_WINDOW if self._window_open() else update_platform.REOPEN_TRAY)
 
     def _on_session_end(self, *_) -> None:
         self._session_end_at = time.monotonic()
