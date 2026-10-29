@@ -153,6 +153,8 @@ def _paint_redaction(p: QPainter, rect: QRectF, kind: str, style: Style) -> None
 
 def _sample_ink(kind: str, style: Style) -> QColor:
     """The "Aa" color on a text or callout sample, as the real item colors its text."""
+    if kind == "callout" and style.text_color:  # one you picked
+        return QColor(style.text_color)
     if not style.fill:
         return QColor(style.color) if kind == "text" else QColor("#1c1c1e")
     return fill_ink(kind, style)

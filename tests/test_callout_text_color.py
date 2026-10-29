@@ -69,3 +69,20 @@ def test_text_color_in_the_editor_applies_to_the_selected_callout(white_image):
     assert QColor(text_color(callout)) == QColor("#34c759")
     canvas.undo_stack.undo()
     assert callout.style.text_color == ""
+
+
+def test_a_saved_quick_style_shows_its_text_color(qapp):
+    from snipforge.editor.style_sample import _sample_ink
+    style = DEFAULT_TOOL_STYLES["callout"].with_changes(text_color="#bf5af2")
+    assert _sample_ink("callout", style).name() == "#bf5af2"
+    assert _sample_ink("callout", style.with_changes(text_color="")).name() != "#bf5af2"
+
+
+def test_the_automatic_swatch_shows_the_fill_as_it_really_looks(qapp):
+    from snipforge.editor.items import over_white
+    from snipforge.editor.style import fill_qcolor
+    panel = PropertiesPanel()
+    faint = DEFAULT_TOOL_STYLES["callout"].with_changes(fill_opacity=30)
+    panel.load("callout", faint, has_selection=True)
+    paper = panel.text_color_controls().automatic.paper
+    assert paper == over_white(fill_qcolor("callout", faint))  # a pale tint, not the solid fill

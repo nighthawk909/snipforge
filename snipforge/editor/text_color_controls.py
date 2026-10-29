@@ -8,8 +8,8 @@ from PySide6.QtWidgets import QColorDialog, QHBoxLayout, QLabel, QPushButton, QT
 
 from .. import theme
 from . import colors
-from .items import fill_ink
-from .style import COLOR_NAMES, PALETTE, Style
+from .items import fill_ink, over_white
+from .style import COLOR_NAMES, PALETTE, Style, fill_qcolor
 
 
 class AutomaticTextColor(QPushButton):
@@ -87,7 +87,8 @@ class TextColorControls(QWidget):
         try:
             self._style = style
             self.automatic.ink = fill_ink(kind, style.with_changes(text_color="")) if style.fill else QColor("#1c1c1e")
-            self.automatic.paper = QColor(style.fill_color or style.color) if style.fill else QColor("#ffffff")
+            # As the callout really shows its fill: a faint one is a pale tint over white.
+            self.automatic.paper = over_white(fill_qcolor(kind, style)) if style.fill else QColor("#ffffff")
             self._check(style.text_color)
         finally:
             self._loading = False
