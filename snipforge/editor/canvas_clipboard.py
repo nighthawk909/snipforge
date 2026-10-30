@@ -14,7 +14,7 @@ from PySide6.QtGui import QFontMetricsF, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import QMenu
 
 from . import paste_checks
-from .commands import AddItemsCommand, RemoveItemsCommand
+from .commands import AddItemsCommand
 from .factory import create_item
 from .magnify import MagnifyItem
 from .text_items import TextItem
@@ -93,7 +93,7 @@ class ClipboardMixin:
         mime = QMimeData()
         mime.setData(MARKUP_MIME, QByteArray(data))
         QGuiApplication.clipboard().setMimeData(mime)
-        self.undo_stack.push(RemoveItemsCommand(self._scene, items, "Cut"))
+        self.remove_items(items, "Cut")
         return True
 
     # ------------------------------------------------------------------ paste
