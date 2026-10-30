@@ -252,6 +252,8 @@ class CalloutItem(BoxItem):
         self._relayout()
 
     def _text_color(self) -> QColor:
+        if self.style.text_color:  # one you picked
+            return QColor(self.style.text_color)
         return fill_ink(self.kind, self.style) if self.style.fill else QColor("#1c1c1e")  # else on the white box
 
     def _insets(self) -> tuple[float, float]:
