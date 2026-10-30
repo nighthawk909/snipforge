@@ -25,11 +25,16 @@ class ViewMixin:
         self.fitInView(rect.adjusted(-24, -24, 24, 24), Qt.KeepAspectRatio)
         if self.zoom() > 1.0:
             self.resetTransform()
+        self._update_scene_rect()  # the room to move about is in scene units: it changes with the zoom
+        self.centerOn(rect.center())
         self.zoom_changed.emit(self.zoom())
 
     def set_zoom(self, zoom: float) -> None:
+        center = self.mapToScene(self.viewport().rect().center())
         self.resetTransform()
         self.scale(zoom, zoom)
+        self._update_scene_rect()
+        self.centerOn(center)
         self.zoom_changed.emit(self.zoom())
 
     def wheelEvent(self, e) -> None:
@@ -38,6 +43,7 @@ class ViewMixin:
             new_zoom = self.zoom() * factor
             if MIN_ZOOM <= new_zoom <= MAX_ZOOM:
                 self.scale(factor, factor)
+                self._update_scene_rect()
                 self.zoom_changed.emit(self.zoom())
         else:
             super().wheelEvent(e)

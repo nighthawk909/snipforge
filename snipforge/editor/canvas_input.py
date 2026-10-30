@@ -160,6 +160,8 @@ class InputMixin:
             self.stop_picking()  # right-click cancels, as in most apps
             self.stop_choosing()
             return
+        if self._begin_pan(e):  # the middle button, or Select on the empty area: move the snip about
+            return
         if self.choosing() and e.button() == Qt.LeftButton and not self._panning:
             self._choose_press(self.mapToScene(e.position().toPoint()))
             return
@@ -224,6 +226,8 @@ class InputMixin:
             self._begin_create(pos)
 
     def mouseMoveEvent(self, e) -> None:
+        if self._continue_pan(e):  # canvas_pan.py
+            return
         view_pos = e.position().toPoint()
         pos = self.mapToScene(view_pos)
         shift = bool(e.modifiers() & Qt.ShiftModifier)
@@ -277,6 +281,9 @@ class InputMixin:
         if self._panning or e.button() != Qt.LeftButton:
             super().mouseDoubleClickEvent(e)
             return
+        if self.tool == "select" and self._free_to_pan() and self.on_empty_area(e.position().toPoint()):
+            self.fit_image()  # the empty area: bring the snip back to the middle, fitted
+            return
         if self._just_picked or self.picking():  # a double-click with the eyedropper is just a pick
             self._just_picked = False
             if self.picking():
@@ -300,6 +307,8 @@ class InputMixin:
         self.mousePressEvent(e)  # otherwise it's just another press (keeps moves undoable)
 
     def mouseReleaseEvent(self, e) -> None:
+        if self._end_pan(e):
+            return
         if e.button() != Qt.LeftButton:
             super().mouseReleaseEvent(e)
             return
@@ -395,8 +404,11 @@ class InputMixin:
                 cursor = Qt.IBeamCursor
             else:
                 cursor = Qt.SizeAllCursor if self.drag_moves(hit) else Qt.PointingHandCursor
+        elif self.tool == "select":
+            frame = self._image_rect if self._mask.editing else self.frame_rect()
+            cursor = Qt.ArrowCursor if frame.contains(scene_pos) else Qt.OpenHandCursor  # drag to move it about
         else:
-            cursor = Qt.ArrowCursor if self.tool == "select" else Qt.CrossCursor
+            cursor = Qt.CrossCursor
         self.viewport().setCursor(cursor)
 
     def leaveEvent(self, e) -> None:
