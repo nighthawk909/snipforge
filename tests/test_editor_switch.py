@@ -250,3 +250,24 @@ def test_newer_markup_opens_in_a_window_of_its_own(forge, white_image, no_dialog
     forge.open_entry(newer.id)
     assert editor.entry_id() == shown and len(editors(forge)) == 2
 
+
+
+def test_step_numbers_and_select_all_steps_follow_the_snip_on_show(forge):  # noqa: F811
+    from tests.test_editor import gesture
+
+    editor = take(forge, "#ff0000")
+    red = editor.entry_id()
+    editor.canvas.set_tool("step")
+    for x in (20, 50, 80):
+        gesture(editor.canvas, (x, 30), (x, 30))
+    assert editor.panel.step_controls().next.text() == "4"
+    forge._on_captured(snip("#00ff00"))
+    green_canvas = editor.canvas
+    assert editor.panel.step_controls().next.text() == "1"  # a new snip counts from 1
+    gesture(green_canvas, (20, 30), (20, 30))
+    green_selection = green_canvas.selected_annotations()
+    forge.open_entry(red)
+    assert editor.panel.step_controls().next.text() == "4"  # and the red one carries on where it was
+    editor.panel.step_controls().select_all.click()
+    assert len(editor.canvas.selected_annotations()) == 3  # the red snip's steps, not the green one's
+    assert green_canvas.selected_annotations() == green_selection
