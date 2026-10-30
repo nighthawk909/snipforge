@@ -160,7 +160,9 @@ def test_step_numbering_styles_and_next_number(page):
     assert max(i.number for i in canvas.annotations() if isinstance(i, StepItem)) == 10
     assert canvas.next_step_number() == 11
     canvas.undo_stack.undo()
-    assert canvas.next_step_number() == 3  # follows what's on the snip again
+    assert canvas.next_step_number() == 10  # the number you set is next again
+    canvas.set_next_step_number(None)
+    assert canvas.next_step_number() == 3  # following what's on the snip
 
 
 # ---------------------------------------------------------------- highlighter

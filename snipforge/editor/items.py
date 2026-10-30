@@ -856,6 +856,36 @@ def letters(n: int) -> str:
 
 
 
+def step_label(n: int, numbering: str) -> str:
+    """How a step shows `n`: 3, C or III."""
+    if numbering == "letters":
+        return letters(n)
+    if numbering == "roman":
+        return roman(n)
+    return str(n)
+
+
+ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+
+
+def number_from_label(text: str, numbering: str) -> int | None:
+    """What a typed label stands for: "12", "C" or "AA" (27) for letters, "XIV" for roman. None if
+    it isn't one. Digits are always read as digits."""
+    text = (text or "").strip().upper()
+    if text.isascii() and text.isdigit():  # not ² or other digits int() can't read
+        return int(text)
+    if numbering == "letters" and text.isalpha() and text.isascii():
+        n = 0
+        for ch in text:
+            n = n * 26 + ord(ch) - ord("A") + 1
+        return n
+    if numbering == "roman" and text and all(ch in ROMAN_VALUES for ch in text):
+        values = [ROMAN_VALUES[ch] for ch in text]
+        n = sum(-v if i + 1 < len(values) and v < values[i + 1] else v for i, v in enumerate(values))
+        return n if n > 0 and roman(n) == text else None  # only well-formed numerals (not IIII)
+    return None
+
+
 class StepItem(Annotation, QGraphicsItem):
     """A numbered badge: 1 2 3, A B C or I II III, in a circle, square or pill."""
 
@@ -873,11 +903,7 @@ class StepItem(Annotation, QGraphicsItem):
         return QPointF(0, 0)
 
     def label(self) -> str:
-        if self.style.numbering == "letters":
-            return letters(self.number)
-        if self.style.numbering == "roman":
-            return roman(self.number)
-        return str(self.number)
+        return step_label(self.number, self.style.numbering)
 
     def _geometry(self) -> dict:
         return {"number": self.number}
