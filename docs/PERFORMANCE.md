@@ -23,8 +23,10 @@ asyncio (for text recognition), Outlook automation and Report a problem load whe
 not when SnipForge starts. The Library's budgets follow the machine: the self-test first reads the
 same Library the simplest way (each folder listed and its details read, one after another), and a
 machine whose disk is slow even for that (antivirus on a CI machine made it fifteen times slower
-than on a laptop) gets twice that, plus a second, to open the window. The fixed 6 s leaves room for
-GitHub's Windows runner, whose CPU took 2.6 s to open 500 snips that a laptop opens in 0.1 s. On a Mac, start-up also loads PyObjC's modules and memory is measured
+than on a laptop) gets twice that, plus a second, to open the window. The fixed 6 s was meant to
+leave room for GitHub's Windows runner, which took 2.3–8.0 s (3.5 s typically) to open 500 snips
+that a laptop opens in 0.2 s, and missed it three times. Reading the snips took it 0.06 s; the rest
+went on building the window, nearly all of it on the font lookup described below. On a Mac, start-up also loads PyObjC's modules and memory is measured
 as the peak resident size, so there only the heavy modules are checked (the rest is reported) until
 the Mac port measures it. The self-test also checks that Qt has a TLS back-end for update downloads
 (`tls`), since Python's own isn't packaged.
@@ -43,6 +45,12 @@ the Mac port measures it. The self-test also checks that Qt has a TLS back-end f
   later (a coarse clock could hide a second change in the same tick), and a folder that couldn't be
   listed is tried again next time. Changes made outside SnipForge that write a file in place (an
   editor, a restore that keeps folder times) show after **F5** in the Library, or the next start.
+- **The app's font names one family.** It's Segoe UI Variable Text, or Segoe UI where that isn't
+  installed (Windows 10). SnipForge now picks one when it starts; it used to name both and let Qt
+  choose. A font with a list of families makes Qt look up every fallback font the first time it
+  measures text. That took a quarter of a second at every start on a laptop, and 2–8 s on GitHub's
+  Windows runner, where it made the Library window miss its budget. With one family, Qt looks for a
+  fallback font only when text has a character Segoe UI lacks, such as Japanese in a snip's title.
 - **The installer leaves out what SnipForge never uses:** Python's own OpenSSL (SnipForge goes online
   only through Qt's network stack, which has its own TLS), Qt's translations of its dialogs (SnipForge never loads a
   translator), the Direct2D, minimal and touch-over-network plugins, and zstd archives.
