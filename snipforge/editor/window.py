@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QStackedWidget,
     QStatusBar,
     QVBoxLayout,
     QWidget,
@@ -32,12 +33,12 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from ..wording import keys
-from . import beautify, colors, palette, regions
+from . import beautify, palette, regions
 from .app_stamp import stamp_parts
 from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
 from .canvas_clipboard import MARKUP_MIME
-from .chrome import RECENT_COUNT, ZOOM_STEP, CommandBar, Tray
+from .chrome import ZOOM_STEP, CommandBar, Tray
 from .export import SAVE_FILTERS, ExportError, filter_for, save_image, with_suffix
 from .export import fits as export_fits
 from .palette import TOOL_NAMES as ALL_TOOLS
@@ -46,6 +47,7 @@ from .panel import PropertiesPanel
 from .quick_tiles import TOOL_NAMES
 from .resize_dialog import ResizeDialog
 from .share_menu import ShareController
+from .snip_switch import SwitchMixin
 from .style import Style
 from .textdialog import GrabbedTextDialog
 from .tool_rail import ToolRail
@@ -68,10 +70,11 @@ def load_tool_styles(settings: QSettings) -> dict[str, Style]:
         return {}
 
 
-class EditorWindow(QMainWindow):
+class EditorWindow(SwitchMixin, QMainWindow):
     def __init__(self, image: QImage, library: Library, entry: Entry | None, document: dict | None = None,
                  on_new_snip=None, on_open_entry=None, on_pin=None, autosave: bool = True,
-                 on_open_library=None, beautify_on: bool | None = None, on_combine=None) -> None:
+                 on_open_library=None, beautify_on: bool | None = None, on_combine=None,
+                 on_left_snip=None) -> None:
         """`beautify_on`: start with Beautify on or off (a capture preset's choice) instead of
         following the switch in Settings; the switch still changes it."""
         super().__init__()
@@ -81,6 +84,7 @@ class EditorWindow(QMainWindow):
         self._on_new_snip, self._on_open_entry, self._on_pin = on_new_snip, on_open_entry, on_pin
         self._on_open_library = on_open_library
         self._on_combine = on_combine  # (this snip's id, this window): put it together with others
+        self._on_left_snip = on_left_snip  # (entry): a snip was saved as another took its place
         self._settings = app_settings()
         self._export_path: Path | None = None
         self._beautify = beautify.enabled() if beautify_on is None else beautify_on
@@ -108,7 +112,9 @@ class EditorWindow(QMainWindow):
         middle = self._middle = QHBoxLayout()
         middle.setSpacing(0)
         self.tool_rail = self._build_tool_rail()
-        middle.addWidget(self.canvas, 1)
+        self._canvases = QStackedWidget()  # a canvas per snip shown here (snip_switch.py)
+        self._canvases.addWidget(self.canvas)
+        middle.addWidget(self._canvases, 1)
         middle.addWidget(self.panel)
         self._apply_palette(self._palette)  # puts the rail on its side
         column.addLayout(middle, 1)
@@ -119,38 +125,22 @@ class EditorWindow(QMainWindow):
 
         self._autosave = QTimer(self, singleShot=True, interval=AUTOSAVE_MS)
         self._autosave.timeout.connect(self._save_to_library)
-        self.canvas.document_changed.connect(self._autosave.start)
-        self.canvas.document_changed.connect(self._refresh_size)
-        self.canvas.document_changed.connect(self._mark_unsaved)
-        self.canvas.selection_changed.connect(self._refresh_props)
-        self.canvas.tool_changed.connect(lambda t: self._tool_actions[t].setChecked(True))
-        self.canvas.zoom_changed.connect(self.commands.set_zoom)
-        # Straight to the buttons (not a Python slot) so nothing runs while the stack is torn down.
-        self.canvas.undo_stack.canUndoChanged.connect(self.commands.undo_button.setEnabled)
-        self.canvas.undo_stack.canRedoChanged.connect(self.commands.redo_button.setEnabled)
+        self._start_switching()  # wires the canvas on show to the window (snip_switch.py)
         self.panel.changed.connect(lambda changes: self.canvas.apply_style(**changes))
         self.panel.crop_action.connect(self._crop_action)
-        self.panel.next_step.connect(self.canvas.set_next_step_number)
-        self.panel.select_steps.connect(self.canvas.select_steps)
+        self.panel.next_step.connect(lambda n: self.canvas.set_next_step_number(n))
+        self.panel.select_steps.connect(lambda: self.canvas.select_steps())
         self.panel.arrange.connect(self._arrange)
         self.panel.tool_default.connect(self._tool_default)
-        self.panel.layers_list().attach(self.canvas)
         self.panel.image_action.connect(self.image_action)
         self.panel.pick_color.connect(self._toggle_picking)
-        self.panel.edges_changed.connect(self.canvas.set_edges)
-        self.canvas.notice.connect(lambda text: self.statusBar().showMessage(text, 6000))
-        self.canvas.copy_requested.connect(self.copy_to_clipboard)
+        self.panel.edges_changed.connect(lambda edges: self.canvas.set_edges(edges))
         self.panel.source_stamp.connect(self.add_source_stamp)
         self.panel.set_source_stamp_available(entry is not None)
         self.panel.cutout_changed.connect(lambda changes: self.canvas.set_cutout_options(**changes))
         self.panel.style_saved.connect(
             lambda kind: self.statusBar().showMessage(f"Saved as a quick style for {TOOL_NAMES.get(kind, kind)}", 3000))
-        self.canvas.picking_changed.connect(self._show_picking)
-        self.canvas.choosing_changed.connect(self._show_choosing)
-        self.canvas.color_picked.connect(
-            lambda color: self.statusBar().showMessage(f"Picked {color.upper()}", 3000))
-        self.canvas.color_picked.connect(colors.remember)
-        self.panel.editing_done.connect(self.canvas.setFocus)
+        self.panel.editing_done.connect(lambda: self.canvas.setFocus())
         self.tray.beautify_changed.connect(beautify.set_enabled)
         beautify.switch().changed.connect(self._show_beautify)  # from any editor or Settings
         self.tray.set_beautify(self._beautify)
@@ -237,8 +227,8 @@ class EditorWindow(QMainWindow):
         p = self._palette
         bar = self.commands
         actions = [
-            Command("Undo", self.canvas.undo_stack.undo, key=keys("Ctrl+Z"), icon="undo"),
-            Command("Redo", self.canvas.undo_stack.redo, key=keys("Ctrl+Y"), icon="redo"),
+            Command("Undo", lambda: self.canvas.undo_stack.undo(), key=keys("Ctrl+Z"), icon="undo"),
+            Command("Redo", lambda: self.canvas.undo_stack.redo(), key=keys("Ctrl+Y"), icon="redo"),
             Command("Copy", self.copy_to_clipboard, key=keys("Ctrl+C"), icon="copy", keywords=("clipboard",)),
             Command("Cut", self.cut, key=keys("Ctrl+X"), keywords=("clipboard",)),
             Command("Paste", self.paste, key=keys("Ctrl+V"), keywords=("clipboard",)),
@@ -251,8 +241,8 @@ class EditorWindow(QMainWindow):
             Command("Redact: blur private details", self.auto_redact, icon="redact",
                     keywords=("email", "phone", "card", "private", "blur")),
             Command("Email this snip", self.share_email, key=keys("Ctrl+E"), icon="mail", keywords=("share", "send")),
-            Command("Select all markup", self.canvas.select_all, key=keys("Ctrl+A")),
-            Command("Duplicate the selection", self.canvas.duplicate_selection, key=keys("Ctrl+D")),
+            Command("Select all markup", lambda: self.canvas.select_all(), key=keys("Ctrl+A")),
+            Command("Duplicate the selection", lambda: self.canvas.duplicate_selection(), key=keys("Ctrl+D")),
             Command("Bring forward", lambda: self.canvas.reorder_selection(True), key=keys("Ctrl+]"),
                     keywords=("front", "order", "layer")),
             Command("Send backward", lambda: self.canvas.reorder_selection(False), key=keys("Ctrl+["),
@@ -266,7 +256,8 @@ class EditorWindow(QMainWindow):
             Command("Flip vertical", lambda: self.image_action("flip_vertical"), icon="flip_vertical",
                     keywords=("mirror", "image")),
             Command("Resize the snip…", lambda: self.image_action("resize"), keywords=("scale", "size", "image")),
-            Command("Fit to window", self.canvas.fit_image, key=keys("Ctrl+0"), icon="fit", keywords=("zoom",)),
+            Command("Fit to window", lambda: self.canvas.fit_image(), key=keys("Ctrl+0"), icon="fit",
+                    keywords=("zoom",)),
             Command("Zoom to 100%", lambda: self.canvas.set_zoom(1.0), key=keys("Ctrl+1"), keywords=("actual",)),
             Command("Zoom in", self._zoom_in, key=keys("Ctrl+="), icon="zoom_in"),
             Command("Zoom out", self._zoom_out, key=keys("Ctrl+-"), icon="zoom_out"),
@@ -311,11 +302,11 @@ class EditorWindow(QMainWindow):
         bar.new_button.setVisible(self._on_new_snip is not None)
         if self._on_new_snip:
             bar.new_capture.connect(self._on_new_snip)
-        bar.undo.connect(self.canvas.undo_stack.undo)
-        bar.redo.connect(self.canvas.undo_stack.redo)
+        bar.undo.connect(lambda: self.canvas.undo_stack.undo())  # whichever snip is on show
+        bar.redo.connect(lambda: self.canvas.undo_stack.redo())
         bar.zoom_in.connect(self._zoom_in)
         bar.zoom_out.connect(self._zoom_out)
-        bar.fit.connect(self.canvas.fit_image)
+        bar.fit.connect(lambda: self.canvas.fit_image())
         bar.grab_text.connect(self.grab_text)
         bar.edit_text.connect(self.edit_text)
         bar.redact.connect(self.auto_redact)
@@ -350,15 +341,17 @@ class EditorWindow(QMainWindow):
         add("Ctrl+V", self.paste)
         add("Ctrl+S", self.save)
         add("Ctrl+Shift+S", self.save_as)
-        add("Ctrl+Z", self.canvas.undo_stack.undo)
-        add("Ctrl+Y", self.canvas.undo_stack.redo)
-        add("Ctrl+Shift+Z", self.canvas.undo_stack.redo)
-        add("Ctrl+D", self.canvas.duplicate_selection)
+        add("Ctrl+Z", lambda: self.canvas.undo_stack.undo())  # whichever snip is on show
+        add("Ctrl+Y", lambda: self.canvas.undo_stack.redo())
+        add("Ctrl+Shift+Z", lambda: self.canvas.undo_stack.redo())
+        add("Ctrl+D", lambda: self.canvas.duplicate_selection())
+        add("Ctrl+PgDown", lambda: self.step_snip(older=True))
+        add("Ctrl+PgUp", lambda: self.step_snip(older=False))
         add("Ctrl+]", lambda: self.canvas.reorder_selection(True))
         add("Ctrl+[", lambda: self.canvas.reorder_selection(False))
-        add("Ctrl+A", self.canvas.select_all)
+        add("Ctrl+A", lambda: self.canvas.select_all())
         add("Ctrl+E", self.share_email)
-        add("Ctrl+0", self.canvas.fit_image)
+        add("Ctrl+0", lambda: self.canvas.fit_image())
         add("Ctrl+1", lambda: self.canvas.set_zoom(1.0))
         add("Ctrl+=", self._zoom_in)
         add("Ctrl+-", self._zoom_out)
@@ -405,7 +398,8 @@ class EditorWindow(QMainWindow):
         self.tool_rail.retheme()
         self.commands.retheme()
         self.panel.retheme()
-        self.canvas.mini_toolbar().retheme()
+        for canvas in {self.canvas, *(snip.canvas for snip in self._kept.values())}:
+            canvas.mini_toolbar().retheme()
         manager = theme.get_manager()  # the system's high contrast decides the colors: no light/dark switch
         self.commands.theme_button.setVisible(manager is None or not manager.high_contrast)
 
@@ -429,7 +423,9 @@ class EditorWindow(QMainWindow):
         self.tray.set_beautify(on)
         if on != self._beautify:
             self._beautify = on
-            self.canvas.set_beautify(DEFAULT_STYLE if on else None)
+            for snip in {id(s): s for s in (self._current, *self._kept.values())}.values():  # every snip kept
+                snip.beautify = on
+                snip.canvas.set_beautify(DEFAULT_STYLE if on else None)
 
     def _open_entry(self, entry_id: str) -> None:
         if self._on_open_entry:
@@ -554,9 +550,7 @@ class EditorWindow(QMainWindow):
         self.commands.set_history(stack.canUndo(), stack.canRedo())
 
     def _refresh_recent(self) -> None:
-        current = self._entry.id if self._entry else None
-        entries = [e for e in self._library.entries(RECENT_COUNT + 1) if e.id != current][:RECENT_COUNT]
-        self.tray.set_recent(entries)
+        self.tray.set_recent(self.recent_entries(), self.entry_id())  # the snip on show is marked
 
     def _update_title(self) -> None:
         when = self._entry.created.strftime("%b %d, %I:%M %p") if self._entry else "Unsaved"
@@ -751,6 +745,7 @@ class EditorWindow(QMainWindow):
             self.tray.set_saved("Not saved", f"Couldn't autosave: {exc}")
             self.statusBar().showMessage(f"Couldn't autosave: {exc}", 5000)
             return False
+        self._current.dirty = False
         self.tray.set_saved("Saved", dt.datetime.now().strftime("Saved to your library at %I:%M %p"))
         return True
 
@@ -761,6 +756,7 @@ class EditorWindow(QMainWindow):
         self._autosave.stop()
         self.canvas.closing = True
         self._save_to_library()
+        self.save_kept_snips()  # any snip you left whose save failed then
         styles = {k: v.to_dict() for k, v in self.canvas.tool_styles.items()}
         self._settings.setValue("tool_styles", json.dumps(styles))
         for signal, slot in ((beautify.switch().changed, self._show_beautify),
