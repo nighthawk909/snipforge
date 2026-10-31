@@ -23,8 +23,8 @@ BUDGETS = {
     "startup_s": 3.0,  # import to the Library painted (0.3 s today)
     "startup_memory_mb": 150,  # private bytes on Windows: 39 MB today (offscreen; more with a display)
     "snip_to_editor_s": 1.5,  # a 1920 × 1080 snip saved and its editor painted (0.18 s today)
-    # The Library window over 1,000 snips: 0.4 s on a laptop, 0.3 s on GitHub's Mac runner, 2.6 s
-    # on its Windows runner (its CPU, not its disk: reading the same files took 0.09 s there)
+    # The Library window over 500 snips: 0.2 s on a laptop. GitHub's Windows runner took 2.3-8.0 s,
+    # nearly all of it looking up fallback fonts, until the app's font named one family (theme/styles.py)
     "library_open_s": 6.0,
     "library_refresh_s": 1.0,  # opening it again (0.05 s today)
 }

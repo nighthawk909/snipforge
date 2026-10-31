@@ -10,15 +10,22 @@ from __future__ import annotations
 import sys
 from collections.abc import Mapping
 
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
 from .tokens import Theme
 
+WINDOWS_UI_FAMILIES = ("Segoe UI Variable Text", "Segoe UI")  # Windows 11's, then Windows 10's
+
 
 def ui_font() -> QFont:
+    """The app's font. One family, the first of WINDOWS_UI_FAMILIES that's installed: a font given
+    a list of families makes Qt look up every fallback font the first time it's used (0.3 s on a
+    laptop, seconds on GitHub's Windows runner), where one family looks for a fallback only when
+    text has a character it lacks. Call it once the QApplication exists: Qt's font database
+    crashes without one."""
     font = QFont()
     if sys.platform == "win32":
-        font.setFamilies(["Segoe UI Variable Text", "Segoe UI"])
+        font.setFamily(next((f for f in WINDOWS_UI_FAMILIES if QFontDatabase.hasFamily(f)), WINDOWS_UI_FAMILIES[-1]))
     font.setPointSizeF(10)
     return font
 

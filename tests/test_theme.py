@@ -229,6 +229,26 @@ def test_stylesheet_parses_with_awkward_profile_paths(qapp, tmp_path):
     assert not [m for m in messages if "parse" in m.lower()], messages
 
 
+@pytest.mark.parametrize(("installed", "family"), [
+    ({"Segoe UI Variable Text", "Segoe UI"}, "Segoe UI Variable Text"),  # Windows 11
+    ({"Segoe UI"}, "Segoe UI"),  # Windows 10
+    (set(), "Segoe UI"),  # no fonts to ask about (Qt's offscreen platform)
+])
+def test_interface_font_is_the_one_family_installed(monkeypatch, installed, family):
+    """One family, never a list: a font with a list of families makes Qt look up every fallback
+    font the first time it's used, which took the Library window 0.3 s to build on a laptop and up
+    to 7.8 s on GitHub's Windows runner."""
+    class FontDatabase:
+        @staticmethod
+        def hasFamily(name):  # noqa: N802 - Qt API
+            return name in installed
+
+    monkeypatch.setattr(styles, "QFontDatabase", FontDatabase)
+    font = styles.ui_font()
+    assert font.families() == [family]
+    assert font.pointSizeF() == 10
+
+
 def test_palette_maps_tokens_to_qt_roles(qapp):
     t = tokens.resolve("dark", tokens.BUILTIN_ACCENTS["snipforge"])
     pal = styles.build_palette(t)
