@@ -12,7 +12,6 @@ from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem, QGraphicsScene,
 from .. import theme
 from ..wording import keys
 from . import colors
-from .beautify import BeautifyStyle
 from .canvas_choose import ChooseMixin
 from .canvas_clipboard import ClipboardMixin
 from .canvas_draw import DrawMixin
@@ -84,7 +83,7 @@ class Canvas(KeyboardMixin, InputMixin, PanMixin, DrawMixin, ClipboardMixin, Pic
     choosing_changed = Signal(bool)  # Edit text started or stopped offering lines to click
     color_picked = Signal(str)  # "#rrggbb", now the selection's or the tool's color
     notice = Signal(str)  # something to tell you in the status bar
-    copy_requested = Signal()  # the right-click menu's Copy: the window copies (the snip, with Beautify)
+    copy_requested = Signal()  # the right-click menu's Copy: the window copies the snip
 
     def __init__(self, image: QImage, tool_styles: dict[str, Style] | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -198,10 +197,8 @@ class Canvas(KeyboardMixin, InputMixin, PanMixin, DrawMixin, ClipboardMixin, Pic
         return QRectF(self._crop_rect)
 
     def frame_rect(self) -> QRectF:
-        """What an export covers: the crop, plus Beautify's padding when it's on."""
-        style = self._mask.beautify
-        pad = style.padding if style is not None else 0
-        return self._crop_rect.adjusted(-pad, -pad, pad, pad)
+        """What an export covers: the crop."""
+        return QRectF(self._crop_rect)
 
     def style_target(self) -> tuple[str, Style | None]:
         """What the property bar should show: the selection, else the active tool."""
@@ -447,15 +444,6 @@ class Canvas(KeyboardMixin, InputMixin, PanMixin, DrawMixin, ClipboardMixin, Pic
         self._mask.set_crop(rect)
         self._edge_item.set_edges(self._crop_rect, self._edges)  # edges are the export's edges
         self._update_scene_rect()
-
-    def set_beautify(self, style: BeautifyStyle | None) -> None:
-        """Preview Beautify around the snip (never exported: render_image hides the mask). If you
-        could see the whole snip, you still can; a zoomed-in view stays as it is."""
-        whole = self.mapToScene(self.viewport().rect()).boundingRect().contains(self.frame_rect())
-        self._mask.set_beautify(style)
-        self._update_scene_rect()
-        if whole and not self._mask.editing:
-            self.fit_image()
 
     def reset_crop(self) -> None:
         if self._crop_rect != self._image_rect:

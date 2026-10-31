@@ -62,7 +62,7 @@ class FakeHotkey:
 
 @pytest.fixture(autouse=True)
 def clean_prefs():
-    keys = list(prefs.KEYS.values()) + ["beautify"]
+    keys = list(prefs.KEYS.values())
     for key in keys:
         app_settings().remove(key)
     yield
@@ -113,7 +113,7 @@ def test_general_and_capture_switches_take_effect(make, monkeypatch):
     assert prefs.magnifier() is False
 
 
-def test_saving_folder_format_and_beautify(make, monkeypatch, tmp_path):
+def test_saving_folder_and_format(make, monkeypatch, tmp_path):
     from PySide6.QtWidgets import QFileDialog
     w = make()
     (tmp_path / "Shots").mkdir()
@@ -129,8 +129,15 @@ def test_saving_folder_format_and_beautify(make, monkeypatch, tmp_path):
     assert prefs.export_dir() == prefs.DEFAULT_EXPORT_DIR
     w.format.button("jpg").click()
     assert prefs.export_format() == "jpg"
-    w.beautify.click()
-    assert app_settings().value("beautify", False, bool) is True
+
+
+def test_settings_no_longer_has_a_beautify_switch(make):
+    from tests.test_editor_window import ui_words
+    w = make()
+    words = ui_words(w)
+    assert "file format" in words and "beautif" not in words and not hasattr(w, "beautify")
+    w._find.setText("beautify")
+    assert all(item.isHidden() for item in w._nav.values())  # nothing to find
 
 
 def test_appearance_changes_the_theme(make, qapp):

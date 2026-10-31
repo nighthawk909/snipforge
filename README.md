@@ -51,8 +51,8 @@ every monitor and at any display scale. Click to copy the color's code (`#2F5BEA
 The color is also waiting under **Recent** in the editor's colors.
 
 **Capture presets** save the ways you snip most: a mode (a Full screen preset takes the monitor
-you're on straight away), a delay, the pointer, a Fixed size, effects (Beautify, a border, torn
-edges) and where the snip goes: the editor, the clipboard, or a folder. Make them in Settings ›
+you're on straight away), a delay, the pointer, a Fixed size, edges (a border, torn sides) and
+where the snip goes: the editor, the clipboard, or a folder. Make them in Settings ›
 Capture, give each a shortcut of its own if you like, and pick one from the **Presets** menu on the
 capture toolbar (or press 1 to 9 there) or from the tray menu. A preset never changes your usual
 choices, and every snip still lands in the Library.
@@ -114,8 +114,7 @@ right (Ctrl+Shift+R, Ctrl+R), flips it, and resizes it by pixels or percent with
 kept. Your markup follows: shapes and blurs turn with the image, while text, callouts and stamps
 move with it and stay upright. Each change is one undo step, and the original capture is never
 lost, so resizing down and back up gives you the original pixels. The **Edges** section adds a
-border and tears the sides you pick; torn parts are transparent in a PNG, and Beautify's backdrop
-shows through them.
+border and tears the sides you pick; torn parts are transparent in a PNG.
 
 **Share.** Copy (Ctrl+C), save (Ctrl+S) as PNG, JPG, WebP or PDF (choose in Settings › Saving, or
 pick in Save as), or use **Share**: a new Outlook email with the snip inline,
@@ -148,7 +147,7 @@ version you choose. IT can manage all of it by policy and point SnipForge at a c
 location ([docs/IT-REVIEW.md](docs/IT-REVIEW.md)).
 
 **Extras.** Grab text (OCR, offline) · Redact (finds emails and phone/card numbers and blurs them) ·
-Pin a snip on top of other windows · Beautify (backdrop, rounded corners, shadow).
+Pin a snip on top of other windows.
 
 **Accessible.** Snipping, markup, cropping, the Library and Settings work from the keyboard (F6
 moves between the editor's parts, Tab walks through the markup, Enter adds a tool's markup and

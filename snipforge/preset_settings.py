@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import prefs, presets, scroll_input, wording
-from .presets import BEAUTIFY, BORDERS, MAX_NAME, MAX_PRESETS, MODE_NAMES, TORN, Preset
+from .presets import BORDERS, MAX_NAME, MAX_PRESETS, MODE_NAMES, TORN, Preset
 from .shortcut_edit import ShortcutEdit
 from .shortcuts import label as shortcut_label
 from .widgets import Segmented, SettingRow, ToggleSwitch, stack
@@ -73,8 +73,6 @@ class PresetDialog(QDialog):
         self.delay.setAccessibleName("Delay")
         self.pointer = ToggleSwitch("Include the mouse pointer")
         self.pointer.setChecked(preset.pointer)
-        self.beautify = Segmented(list(BEAUTIFY.items()), value=preset.beautify)
-        self.beautify.setAccessibleName("Beautify")
         self.border = Segmented([(str(k), v) for k, v in BORDERS.items()], value=str(preset.border))
         self.border.setAccessibleName("Border")
         self.torn = Segmented(list(TORN.items()), value=preset.torn_key if preset.torn_key in TORN else "")
@@ -111,7 +109,6 @@ class PresetDialog(QDialog):
             self.size_row,
             SettingRow("Delay", "Count down before the screen freezes", self.delay),
             SettingRow("Include the mouse pointer", "", self.pointer),
-            SettingRow("Beautify", "Backdrop, rounded corners and a shadow", self.beautify),
             SettingRow("Border", "", self.border),
             SettingRow("Torn edges", "", self.torn),
             SettingRow("After the snip", "Every snip is kept in the Library too", self.destination),
@@ -193,7 +190,7 @@ class PresetDialog(QDialog):
             box.interpretText()
         return replace(self._original, name=presets.clean_name(self.name.text()), mode=self.mode.value,
                        delay=int(self.delay.value), pointer=self.pointer.isChecked(),
-                       fixed_size=(self.width_box.value(), self.height_box.value()), beautify=self.beautify.value,
+                       fixed_size=(self.width_box.value(), self.height_box.value()),
                        border=int(self.border.value), torn=torn, destination=self.destination.value,
                        folder=self._folder if self.destination.value == "save" else "",
                        shortcut=self.shortcut.text())

@@ -1,7 +1,6 @@
 import pytest
 from PySide6.QtCore import QRectF
 
-from snipforge.editor.beautify import apply_beautify
 from snipforge.library import DocumentUnreadable, Library
 from snipforge.ocr import OcrLine, OcrWord
 from snipforge.redact import find_sensitive, summarize
@@ -74,8 +73,3 @@ def test_redact_card_not_double_counted_as_phone():
 def test_summarize():
     findings = find_sensitive([line("a@b.co", "c@d.co")])
     assert summarize(findings) == "2 emails"
-
-
-def test_beautify_adds_padding(white_image):
-    out = apply_beautify(white_image)
-    assert out.width() == 200 + 2 * 56 and out.height() == 100 + 2 * 56

@@ -19,7 +19,7 @@ from tests.test_update_controller import FakeSource, rel
 
 @pytest.fixture(autouse=True)
 def clean_prefs():
-    keys = list(prefs.KEYS.values()) + ["beautify"]
+    keys = list(prefs.KEYS.values())
     for key in keys:
         app_settings().remove(key)
     yield
@@ -135,11 +135,10 @@ def test_settings_reread_changes_made_elsewhere(qapp, monkeypatch, tmp_path):
     w = SettingsWindow(library_root=tmp_path)
     w.show()
     w.hide()
-    app_settings().setValue("beautify", True)  # e.g. the editor's bottom-bar switch
     prefs.set_hotkey("print_screen", False)
     monkeypatch.setattr(autostart, "is_enabled", lambda: True)
     w.show()
-    assert w.beautify.isChecked() and not w.key_print_screen.isChecked() and w.startup.isChecked()
+    assert not w.key_print_screen.isChecked() and w.startup.isChecked()
     w.close()
 
 

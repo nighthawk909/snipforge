@@ -12,8 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from . import beautify, colors
-from .beautify import DEFAULT_STYLE
+from . import colors
 from .canvas import Canvas, UnsupportedDocument
 from .chrome import RECENT_COUNT
 
@@ -31,19 +30,17 @@ class OpenSnip:
     export_path: Path | None = None
     fitted: bool = False
     dirty: bool = False  # changed since it was last saved to the Library
-    beautify: bool = False  # Beautify on for this snip (a capture preset can choose it)
 
 
 class SwitchMixin:
     """For EditorWindow. Uses its `canvas`, `_entry`, `_autosave_enabled`, `_export_path`, `_library`,
-    `_canvases` (a QStackedWidget), `_autosave` (timer), `panel`, `tray`, `commands`, `_beautify`,
+    `_canvases` (a QStackedWidget), `_autosave` (timer), `panel`, `tray`, `commands`,
     `_on_open_entry`, `_on_left_snip` and the refresh methods."""
 
     def _start_switching(self) -> None:
         self._kept: OrderedDict[str, OpenSnip] = OrderedDict()
         self._wired: list = []
-        self._current = OpenSnip(self._entry, self.canvas, self._autosave_enabled, fitted=True,  # showEvent fits it
-                                 beautify=self._beautify)
+        self._current = OpenSnip(self._entry, self.canvas, self._autosave_enabled, fitted=True)  # showEvent fits it
         if self._entry is not None:
             self._kept[self._entry.id] = self._current
         self._wire(self.canvas)
@@ -70,7 +67,7 @@ class SwitchMixin:
         return False
 
     # ------------------------------------------------------------------ changing snip
-    def show_snip(self, image, entry, document: dict | None, beautify_on: bool | None = None) -> bool:
+    def show_snip(self, image, entry, document: dict | None) -> bool:
         """Show this snip here (a new one, or one from Recent or the Library); the snip before is
         saved to the Library first. False if it can't autosave here (its markup is from a newer
         SnipForge): the app opens it in a window of its own, as it does any snip that can't autosave."""
@@ -86,10 +83,8 @@ class SwitchMixin:
             except UnsupportedDocument:
                 canvas.deleteLater()
                 return False
-        on = beautify.enabled() if beautify_on is None else beautify_on
-        canvas.set_beautify(DEFAULT_STYLE if on else None)
         self._canvases.addWidget(canvas)
-        snip = OpenSnip(entry, canvas, True, beautify=on)
+        snip = OpenSnip(entry, canvas, True)
         self._kept[entry.id] = snip
         self._activate(snip)
         self._let_go_of_old_snips()
@@ -121,8 +116,6 @@ class SwitchMixin:
         self._current = snip
         self.canvas, self._entry = snip.canvas, snip.entry
         self._autosave_enabled, self._export_path = snip.autosave, snip.export_path
-        self._beautify = snip.beautify
-        self.tray.set_beautify(snip.beautify)
         if snip.entry is not None:
             self._kept.move_to_end(snip.entry.id)
         self._canvases.setCurrentWidget(snip.canvas)

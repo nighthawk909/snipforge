@@ -11,7 +11,6 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 
 from snipforge import countdown, prefs, presets, shortcuts
-from snipforge.editor import beautify
 from snipforge.presets import Preset
 from snipforge.settings import app_settings
 from snipforge.shortcuts import MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT
@@ -26,7 +25,6 @@ def clean(monkeypatch):
         for name in KEYS:
             app_settings().remove(prefs.KEYS[name])
         app_settings().remove(presets.KEY)
-        app_settings().remove(beautify.SETTING)
     wipe()
     monkeypatch.setattr(countdown, "SETTLE_MS", 0)
     yield
@@ -49,7 +47,7 @@ class FakeApi:
         self.registered.pop(hotkey_id, None)
 
 
-DOCS = Preset("d0c5", "Docs", mode="window", delay=0, pointer=True, beautify="on", border=3,
+DOCS = Preset("d0c5", "Docs", mode="window", delay=0, pointer=True, border=3,
               torn=frozenset({"bottom"}), destination="copy", shortcut="Ctrl+Shift+1")
 
 
@@ -65,12 +63,23 @@ def test_a_preset_is_saved_and_read_back_whole():
 def test_unusable_saved_presets_are_dropped_or_mended():
     app_settings().setValue(presets.KEY, json.dumps([
         {"id": "ok1", "name": "  Good   one ", "mode": "teleport", "delay": 7, "border": 99, "torn": ["up", "left"],
-         "destination": "fax", "fixed_size": [5, 5], "pointer": "yes", "beautify": 1, "shortcut": 3},
+         "destination": "fax", "fixed_size": [5, 5], "pointer": "yes", "shortcut": 3},
         {"id": "ok1", "name": "Same id twice"}, {"id": "bad id!", "name": "x"}, {"id": "n0", "name": ""}, "junk"]))
     [mended] = presets.load()
     assert mended == Preset("ok1", "Good one", torn=frozenset({"left"}))
     app_settings().setValue(presets.KEY, "{not json")
     assert presets.load() == []
+
+
+def test_a_preset_saved_with_beautify_still_loads_without_it():
+    """Beautify was removed: presets saved before then keep everything else they chose."""
+    saved = dict(DOCS.to_dict(), beautify="on")
+    app_settings().setValue(presets.KEY, json.dumps([saved, dict(saved, id="o1", beautify="settings")]))
+    old, other = presets.load()
+    assert old == DOCS and other == replace(DOCS, id="o1")
+    assert "beautify" not in old.to_dict() and not hasattr(old, "beautify")
+    presets.save([old])  # saved again, the old key is gone
+    assert "beautify" not in json.loads(app_settings().value(presets.KEY))[0]
 
 
 def test_saving_tells_whoever_listens():
@@ -81,11 +90,9 @@ def test_saving_tells_whoever_listens():
 
 
 def test_a_summary_says_what_the_preset_does():
-    assert DOCS.summary() == "Window · pointer · Beautify, border, torn edges · copy"
+    assert DOCS.summary() == "Window · pointer · border, torn edges · copy"
     assert Preset("x", "X", mode="fixed", fixed_size=(800, 600), delay=5).summary() == \
         "Fixed size 800 × 600 · 5 s delay · editor"
-    assert DOCS.beautify_on(False) and not replace(DOCS, beautify="off").beautify_on(True)
-    assert replace(DOCS, beautify="settings").beautify_on(True)
 
 
 def test_torn_sides_round_trip_through_their_choices():
@@ -365,17 +372,15 @@ def test_the_saved_preset_shortcuts_are_registered_at_start(qapp, tmp_path, monk
 
 
 def test_a_copy_preset_copies_the_finished_snip_and_keeps_it_editable(forge):
-    forge._session = Taken(DOCS)  # border 3, torn bottom, Beautify on
+    forge._session = Taken(DOCS)  # border 3, torn bottom
     forge._on_captured(snip())
     copied = QGuiApplication.clipboard().image()
-    pad = beautify.DEFAULT_STYLE.padding
-    assert copied.size().toTuple() == (200 + 2 * pad, 100 + 2 * pad)  # Beautify around it
-    assert copied.pixelColor(pad + 1, pad + 50).name() == "#1c1c1e"  # the border, inside the snip's edge
+    assert copied.size().toTuple() == (200, 100)  # the snip and its edges, nothing around it
+    assert copied.pixelColor(1, 50).name() == "#1c1c1e"  # the border, inside the snip's edge
     assert not forge._windows and "Copied (Docs)" in forge.notes[0]
     [entry] = forge.library.entries()
     document = forge.library.load_document(entry)
     assert document["edges"] == {"border": 3, "color": "#1c1c1e", "torn": ["bottom"]}
-    assert beautify.enabled() is False  # the preset's Beautify didn't change the setting
 
 
 def test_a_save_preset_saves_in_its_folder_in_the_settings_format(forge, tmp_path):
@@ -390,7 +395,7 @@ def test_a_save_preset_saves_in_its_folder_in_the_settings_format(forge, tmp_pat
 
 def test_a_save_preset_without_a_folder_uses_the_save_folder(forge, tmp_path):
     prefs.set_export_dir(tmp_path / "Pictures")
-    forge._session = Taken(Preset("s3", "Default", destination="save", beautify="off"))
+    forge._session = Taken(Preset("s3", "Default", destination="save"))
     forge._on_captured(snip())
     assert [p.suffix for p in (tmp_path / "Pictures").iterdir()] == [".png"]
 
@@ -403,20 +408,22 @@ def test_a_preset_that_cannot_save_opens_the_snip_instead(forge, tmp_path):
     assert "Couldn't save" in forge.notes[0] and len(forge._windows) == 1
 
 
-def test_an_editor_preset_opens_with_its_edges_and_beautify(forge):
-    forge._session = Taken(replace(DOCS, destination="editor", beautify="on"))
+def test_an_editor_preset_opens_with_its_edges(forge):
+    forge._session = Taken(replace(DOCS, destination="editor"))
     forge._on_captured(snip())
     [editor] = forge._windows
-    assert editor._beautify is True and beautify.enabled() is False
+    assert editor.final_image().size().toTuple() == (200, 100)
     assert editor.canvas.edges().border == 3 and editor.canvas.edges().torn == frozenset({"bottom"})
 
 
 def test_copy_on_capture_copies_what_a_save_preset_saved(forge, tmp_path):
     prefs.set_copy_on_capture(True)
-    forge._session = Taken(replace(DOCS, destination="save", folder=str(tmp_path)))  # border and Beautify
+    forge._session = Taken(replace(DOCS, destination="save", folder=str(tmp_path)))  # border, torn bottom
     forge._on_captured(snip())
-    pad = beautify.DEFAULT_STYLE.padding
-    assert QGuiApplication.clipboard().image().size().toTuple() == (200 + 2 * pad, 100 + 2 * pad)
+    [saved] = list(tmp_path.glob("snip-*"))
+    copied = QGuiApplication.clipboard().image()
+    assert copied.size().toTuple() == QImage(str(saved)).size().toTuple() == (200, 100)
+    assert copied.pixelColor(1, 50).name() == "#1c1c1e"  # with its border
 
 
 def test_notes_never_promise_a_library_copy_that_failed(forge, monkeypatch):
@@ -457,7 +464,7 @@ def test_presets_added_and_removed_never_reuse_a_hotkey_id(qapp):
 
 def test_the_raw_snip_is_not_copied_over_a_copy_preset(forge):
     prefs.set_copy_on_capture(True)
-    forge._session = Taken(replace(DOCS, beautify="off", border=0, torn=frozenset()))
+    forge._session = Taken(replace(DOCS, border=0, torn=frozenset()))
     forge._on_captured(snip(120, 40))
     assert QGuiApplication.clipboard().image().size().toTuple() == (120, 40)
 
@@ -495,7 +502,6 @@ def test_add_a_preset_from_settings(settings_window, monkeypatch):
         dialog.width_box.setValue(1280)
         QTest.mouseClick(dialog.delay.button("3"), Qt.LeftButton)
         QTest.mouseClick(dialog.pointer, Qt.LeftButton)
-        QTest.mouseClick(dialog.beautify.button("on"), Qt.LeftButton)
         QTest.mouseClick(dialog.torn.button("all"), Qt.LeftButton)
         QTest.mouseClick(dialog.destination.button("copy"), Qt.LeftButton)
         dialog.shortcut.changed.emit("Ctrl+Shift+2")
@@ -503,8 +509,8 @@ def test_add_a_preset_from_settings(settings_window, monkeypatch):
     monkeypatch.setattr(*fill(steps))
     QTest.mouseClick(settings_window.preset_list.add_button, Qt.LeftButton)
     [made] = presets.load()
-    assert (made.name, made.mode, made.fixed_size[0], made.delay, made.pointer, made.beautify, made.torn,
-            made.destination, made.shortcut) == ("Docs screenshot", "fixed", 1280, 3, True, "on",
+    assert (made.name, made.mode, made.fixed_size[0], made.delay, made.pointer, made.torn,
+            made.destination, made.shortcut) == ("Docs screenshot", "fixed", 1280, 3, True,
                                                  frozenset(presets.SIDES), "copy", "Ctrl+Shift+2")
     assert settings_window._shortcuts.bindings()[made.action] == "Ctrl+Shift+2"
     row = settings_window.preset_list.rows[made.id]
@@ -603,6 +609,16 @@ def test_manage_presets_shows_them_in_settings(forge, monkeypatch):
 def test_settings_finds_presets():
     from snipforge.settings_window import SECTIONS
     assert "preset" in SECTIONS["capture"][3]
+
+
+def test_the_preset_editor_has_no_beautify_choice(qapp):
+    from snipforge.preset_settings import PresetDialog
+    from tests.test_editor_window import ui_words
+    dialog = PresetDialog(DOCS, None)
+    words = ui_words(dialog)
+    assert "border" in words and "torn edges" in words  # the effects it does have
+    assert "beautif" not in words and not hasattr(dialog, "beautify")
+    dialog.close()
 
 
 def test_without_shortcuts_of_your_own_presets_have_no_shortcut_row(qapp):

@@ -1,10 +1,10 @@
 """Capture presets: saved combinations of how to snip and what happens to the snip afterwards.
 
 A preset holds a capture mode, a delay, whether the pointer is drawn in, Fixed size mode's size,
-effects (Beautify, a border, torn edges) and where the snip goes: the editor, the clipboard, or a
-folder. Each can have a shortcut of its own, registered with RegisterHotKey like the other
-shortcuts of your own (snipforge/shortcuts.py), never the keyboard hook. They're chosen from the
-capture toolbar, the tray menu and Settings > Capture, and kept as JSON in the settings.
+edges (a border, torn sides) and where the snip goes: the editor, the clipboard, or a folder. Each
+can have a shortcut of its own, registered with RegisterHotKey like the other shortcuts of your own
+(snipforge/shortcuts.py), never the keyboard hook. They're chosen from the capture toolbar, the
+tray menu and Settings > Capture, and kept as JSON in the settings.
 
 Choosing a preset never changes your usual choices (the mode, delay and pointer the next ordinary
 snip starts with).
@@ -28,7 +28,6 @@ ACTION_PREFIX = "preset:"  # a preset's shortcut action in snipforge.shortcuts
 MAX_PRESETS = 20
 MAX_NAME = 40
 DESTINATIONS = {"editor": "Open the editor", "copy": "Copy to the clipboard", "save": "Save to a folder"}
-BEAUTIFY = {"settings": "As in Settings", "on": "On", "off": "Off"}
 BORDERS = {0: "None", 3: "Thin", 8: "Thick"}
 SIDES = ("top", "right", "bottom", "left")
 TORN = {"": "None", "bottom": "Bottom", "right,bottom": "Right and bottom", "all": "All sides"}
@@ -44,7 +43,6 @@ class Preset:
     delay: int = 0
     pointer: bool = False
     fixed_size: tuple[int, int] = DEFAULT_FIXED_SIZE
-    beautify: str = "settings"  # a key of BEAUTIFY
     border: int = 0  # pixels; a key of BORDERS
     torn: frozenset[str] = field(default_factory=frozenset)  # which sides are torn
     destination: str = "editor"  # a key of DESTINATIONS
@@ -67,12 +65,8 @@ class Preset:
     def has_edges(self) -> bool:
         return bool(self.border or self.torn)
 
-    def beautify_on(self, setting: bool) -> bool:
-        """Whether Beautify frames this preset's snips, given the Beautify switch in Settings."""
-        return {"on": True, "off": False}.get(self.beautify, setting)
-
     def summary(self) -> str:
-        """For example "Area · 3 s delay · pointer · Beautify, border · copy"."""
+        """For example "Area · 3 s delay · pointer · border, torn edges · copy"."""
         mode = MODE_NAMES.get(self.mode, self.mode)
         if self.mode == "fixed":
             mode += f" {self.fixed_size[0]} × {self.fixed_size[1]}"
@@ -81,8 +75,7 @@ class Preset:
             parts.append(f"{self.delay} s delay")
         if self.pointer:
             parts.append("pointer")
-        effects = [name for name, on in (("Beautify", self.beautify == "on"), ("no Beautify", self.beautify == "off"),
-                                         ("border", bool(self.border)), ("torn edges", bool(self.torn))) if on]
+        effects = [name for name, on in (("border", bool(self.border)), ("torn edges", bool(self.torn))) if on]
         if effects:
             parts.append(", ".join(effects))
         parts.append({"editor": "editor", "copy": "copy", "save": "save"}[self.destination])
@@ -90,14 +83,15 @@ class Preset:
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "mode": self.mode, "delay": self.delay, "pointer": self.pointer,
-                "fixed_size": list(self.fixed_size), "beautify": self.beautify, "border": self.border,
+                "fixed_size": list(self.fixed_size), "border": self.border,
                 "torn": [side for side in SIDES if side in self.torn], "destination": self.destination,
                 "folder": self.folder, "shortcut": self.shortcut}
 
     @staticmethod
     def from_dict(data) -> Preset | None:
         """A preset from saved settings, or None if it isn't one. Unusable details fall back to
-        their defaults; an unusable id or name drops the preset."""
+        their defaults; an unusable id or name drops the preset. Keys it doesn't know (such as
+        "beautify", from before Beautify was removed) are ignored."""
         if not isinstance(data, dict):
             return None
         pid, name = data.get("id"), data.get("name")
@@ -119,7 +113,6 @@ class Preset:
             delay=_one_of(data.get("delay"), DELAYS, defaults.delay),
             pointer=data.get("pointer") is True,
             fixed_size=fixed,
-            beautify=_one_of(data.get("beautify"), BEAUTIFY, defaults.beautify),
             border=_one_of(data.get("border"), BORDERS, defaults.border),
             torn=frozenset(s for s in torn if s in SIDES) if isinstance(torn, list) else frozenset(),
             destination=_one_of(data.get("destination"), DESTINATIONS, defaults.destination),
