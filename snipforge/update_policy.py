@@ -19,7 +19,7 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import PureWindowsPath
 from urllib.parse import urlparse
 
 from . import update_platform
@@ -70,7 +70,7 @@ def feed_location(text) -> str | None:
         if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password:
             return None
         return text
-    path = PureWindowsPath(text) if update_platform.PLATFORM == "windows" else PurePosixPath(text)
+    path = PureWindowsPath(text)
     unexpanded = re.search(r"%[^%\\/]+%", text)  # a variable that doesn't exist on this PC
     return str(path) if path.is_absolute() and not unexpanded else None
 

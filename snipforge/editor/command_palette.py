@@ -1,4 +1,4 @@
-"""Find a tool or action by name: Ctrl+K in the editor (⌘K on a Mac).
+"""Find a tool or action by name: Ctrl+K in the editor.
 
 A small window over the snip with a search box and a list: type a few letters of what you want
 ("arr", "blur", "rot", "save as") and press Enter. It finds every tool, including ones you've hidden

@@ -30,7 +30,7 @@ from PySide6.QtGui import QImage
 from .webcam_bubble import BubbleSnapshot
 from .webcam_layer import SHAPES
 
-NAME_PREFIX = "sfcam-"  # short: macOS allows 31 characters for a shared memory name
+NAME_PREFIX = "sfcam-"  # short: some systems allow only 31 characters for a shared memory name
 NAME = re.compile(r"sfcam-[0-9a-f]{16}")
 MAX_WIDTH, MAX_HEIGHT = 1280, 720  # bigger pictures are shrunk to fit: the bubble is small anyway
 HEADER = struct.Struct("<8sQIII")  # magic, sequence, width, height, bytes per line
@@ -122,7 +122,7 @@ class CameraReader:
 
 
 def _attach(name: str) -> shared_memory.SharedMemory:
-    """Open SnipForge's block without taking charge of it: on macOS and Linux, Python's resource
+    """Open SnipForge's block without taking charge of it: off Windows, Python's resource
     tracker would otherwise delete it when the recorder exits, and warn about a "leak"."""
     if sys.version_info >= (3, 13):
         return shared_memory.SharedMemory(name=name, create=False, track=False)

@@ -1,9 +1,7 @@
-"""Where SnipForge's own files are, on each platform (docs/CROSS-PLATFORM.md).
+"""Where SnipForge's own files are.
 
-Installed on Windows, the files that ship with SnipForge (license texts, an organization's theme
-packs) sit next to SnipForge.exe. In SnipForge.app they're in Contents/Resources, while the
-program itself is in Contents/MacOS. Caches go in %LOCALAPPDATA% on Windows and ~/Library/Caches on
-a Mac.
+Installed, the files that ship with SnipForge (license texts, an organization's theme packs) sit
+next to SnipForge.exe. Caches go in %LOCALAPPDATA%.
 """
 from __future__ import annotations
 
@@ -18,15 +16,10 @@ def resources_dir() -> Path:
     licenses/, themes/). Run from source, the repository."""
     if not getattr(sys, "frozen", False):
         return Path(__file__).resolve().parents[1]
-    program = Path(sys.executable).resolve().parent
-    if sys.platform == "darwin" and program.name == "MacOS" and program.parent.name == "Contents":
-        return program.parent / "Resources"
-    return program
+    return Path(sys.executable).resolve().parent
 
 
 def cache_dir() -> Path:
     """SnipForge's own cache folder: files it can always make again."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / "SnipForge"
     base = os.environ.get("LOCALAPPDATA")
     return Path(base) / "SnipForge" / "cache" if base else Path(tempfile.gettempdir()) / "SnipForge"

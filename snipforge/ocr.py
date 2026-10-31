@@ -1,7 +1,7 @@
 """Text recognition using the OCR engine built into Windows (offline, no model download).
 
-Windows only for now: elsewhere `recognize()` raises OcrUnavailable, so Grab Text explains why and
-Library search leaves snips unread (macOS has the Vision framework, see docs/MAC-PLAN.md).
+Windows only: elsewhere `recognize()` raises OcrUnavailable, so Grab Text explains why and Library
+search leaves snips unread.
 """
 from __future__ import annotations
 

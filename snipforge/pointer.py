@@ -4,7 +4,7 @@ Windows draws the pointer on top of the screen, so screenshots never contain it.
 Windows to draw the pointer as it looks right now, once on black and once on white (cheap), and
 the difference gives each pixel's transparency, worked out only if the snip includes the pointer.
 Old-style pointers that invert what's under them (the text I-beam) do the same when drawn onto
-the frozen screen. Elsewhere grab() returns None, until a Mac version fills it in.
+the frozen screen. Elsewhere grab() returns None.
 """
 from __future__ import annotations
 

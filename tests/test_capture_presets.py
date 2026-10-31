@@ -607,6 +607,6 @@ def test_settings_finds_presets():
 
 def test_without_shortcuts_of_your_own_presets_have_no_shortcut_row(qapp):
     from snipforge.preset_settings import PresetDialog
-    dialog = PresetDialog(DOCS, None)  # the Mac today: no GlobalShortcuts
+    dialog = PresetDialog(DOCS, None)  # no GlobalShortcuts
     assert dialog.shortcut.parentWidget().isHidden()
     dialog.close()

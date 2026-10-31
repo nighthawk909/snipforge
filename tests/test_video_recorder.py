@@ -23,8 +23,8 @@ FPS = 30
 AREA = (0, 0, 320, 240)
 ROOMY = 10**12  # bytes free: the tests' drives never run low unless a test says so
 STAMP_SLACK = 0.05  # frame times are whole microseconds: a frame 4 late can measure 4.00001
-# How close the file's length must be to the time recorded. On an overloaded machine (GitHub's macOS
-# runners, where recording isn't shipped yet) the file has come out ~5 frames longer: issue #107.
+# How close the file's length must be to the time recorded. On an overloaded machine (off Windows,
+# where recording isn't shipped) the file has come out ~5 frames longer: issue #107.
 FILE_LENGTH_SLACK = 0.1 if sys.platform == "win32" else 0.25
 BUSY = "The computer was too busy"  # the recorder's own warning when most frames couldn't be made
 
@@ -206,7 +206,7 @@ def assert_in_time(shown, result):
     LATE_FRAMES + 1 (3.6 frames late is kept, and shows 4), on any machine. A jump (a pause making
     frames, a lost stretch) is many more. Not the first frame, made at the frame thread's first wake
     however late, and never skipped past. How late they are on average is the machine's doing (on
-    GitHub's macOS runners most are a frame or two late), so it isn't checked; frames' exact places
+    a busy CI runner most can be a frame or two late), so it isn't checked; frames' exact places
     are, in test_video_encoder.py. And most of them are there, apart from those the frame thread
     knowingly skipped (frames the encoder lost aren't excused)."""
     late = [number - at for number, at in shown[1:]]

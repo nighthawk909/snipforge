@@ -1,15 +1,10 @@
 # PyInstaller spec for SnipForge (one-folder, windowed). Build with: python scripts/build.py
-# On macOS it also wraps the folder in SnipForge.app (python scripts/build_mac.py, docs/MAC-PLAN.md).
 # ruff: noqa
 import os
-import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH).parent
-MAC = sys.platform == "darwin"
 VERSION_FILE = os.environ.get("SNIPFORGE_VERSION_FILE", str(ROOT / "build" / "version_info.txt"))
-# Never change it once Macs have it: macOS keys the Screen Recording permission and settings to it.
-BUNDLE_ID = "io.github.nighthawk909.snipforge"
 
 # Big parts of Qt that SnipForge never uses; leaving them out keeps the download small.
 EXCLUDES = [
@@ -29,7 +24,7 @@ EXCLUDES = [
     "numpy",
     # Python's own TLS and OpenSSL hashes (~6 MB with their OpenSSL): SnipForge goes online only
     # through Qt's network stack (QNetworkAccessManager), whose TLS back-ends are separate (OpenSSL
-    # where the build finds it, else Windows' Schannel or macOS's Secure Transport; the self-test's
+    # where the build finds it, else Windows' Schannel; the self-test's
     # "tls" check proves one works); hashlib falls back to Python's built-in SHA-256, and asyncio
     # (Windows OCR) runs without ssl. tests/test_packaging.py keeps it that way.
     "ssl", "_ssl", "_hashlib",
@@ -42,14 +37,13 @@ a = Analysis(
     pathex=[str(ROOT)],
     datas=[(str(ROOT / "assets" / "snipforge.ico"), "assets")],  # license files are copied by scripts/build.py
     # Qt Multimedia is imported only when needed (snipforge/video), so it's named here, as are the
-    # platform halves (_<name>_mac.py) and the PyObjC frameworks they use on a Mac.
-    hiddenimports=["PySide6.QtMultimedia"] + ([
-        "objc", "Quartz", "snipforge._screen_access_mac",
-    ] if MAC else [
+    # Windows modules that are imported only when needed (OCR, the shell and COM).
+    hiddenimports=[
+        "PySide6.QtMultimedia",
         "winrt.windows.media.ocr", "winrt.windows.graphics.imaging", "winrt.windows.storage.streams",
         "winrt.windows.foundation", "winrt.windows.foundation.collections", "winrt.windows.globalization",
         "win32com.shell", "win32com.client",
-    ]),
+    ],
     excludes=EXCLUDES,
     noarchive=False,
 )
@@ -59,7 +53,7 @@ a.binaries = [b for b in a.binaries if not b[0].lower().endswith("opengl32sw.dll
 
 def _media_backend_we_use(name):
     """Recording uses Qt Multimedia's FFmpeg back-end only (docs/VIDEO-PLAN.md); its other back-end
-    (Media Foundation on Windows, AVFoundation on macOS) stays out."""
+    (Media Foundation) stays out."""
     name = name.replace("\\", "/").lower()
     return "/plugins/multimedia/" not in name or "ffmpegmediaplugin" in name
 
@@ -75,10 +69,7 @@ UNUSED_QT = ("qpdf", "virtualkeyboard", "qt6pdf", "qtpdf", "qt6quick", "qtquick"
 
 def _used(name):
     name = name.replace("\\", "/").lower()
-    # Windows only for now: on macOS these are framework folders, and dropping their libraries
-    # leaves links codesign rejects; the Mac build keeps them until that's handled.
-    unused = not MAC and any(part in name for part in UNUSED_QT)
-    return _media_backend_we_use(name) and not unused
+    return _media_backend_we_use(name) and not any(part in name for part in UNUSED_QT)
 
 
 a.binaries = [b for b in a.binaries if _used(b[0])]
@@ -90,28 +81,9 @@ exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
     name="SnipForge",
-    icon=str(ROOT / "assets" / "snipforge.ico"),  # PyInstaller converts it to .icns on macOS (Pillow)
-    version=None if MAC else VERSION_FILE,
-    target_arch="universal2" if MAC else None,  # one app for Apple silicon and Intel Macs
+    icon=str(ROOT / "assets" / "snipforge.ico"),
+    version=VERSION_FILE,
     console=False,
     upx=False,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="SnipForge", upx=False)
-if MAC:
-    VERSION = os.environ.get("SNIPFORGE_VERSION", "0.0.0")
-    app = BUNDLE(
-        coll,
-        name="SnipForge.app",
-        icon=str(ROOT / "assets" / "snipforge.ico"),
-        bundle_identifier=BUNDLE_ID,
-        version=VERSION,
-        info_plist={
-            "CFBundleName": "SnipForge",
-            "CFBundleDisplayName": "SnipForge",
-            "CFBundleVersion": VERSION,
-            "NSHighResolutionCapable": True,
-            # PySide6 6.12's wheels need macOS 14; older Macs get a clear "needs a newer macOS".
-            "LSMinimumSystemVersion": "14.0",
-            "LSApplicationCategoryType": "public.app-category.graphics-design",
-        },
-    )

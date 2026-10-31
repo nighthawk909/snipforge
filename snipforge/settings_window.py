@@ -57,12 +57,12 @@ FORMAT_LABELS = {"webp": "WebP"}  # how Settings names a save format (the rest i
 
 
 def theme_choices() -> tuple[tuple[str, str], ...]:
-    """The Appearance tiles: following the system ("Match Windows", "Match macOS"), Light, Dark."""
+    """The Appearance tiles: following the system ("Match Windows"), Light, Dark."""
     return (("system", f"Match {wording.os_name()}"), ("light", "Light"), ("dark", "Dark"))
 
 
 class ThemeTile(QAbstractButton):
-    """A small preview of a theme: half light, half dark for 'Match Windows' ('Match macOS')."""
+    """A small preview of a theme: half light, half dark for 'Match Windows'."""
 
     def __init__(self, key: str, label: str) -> None:
         super().__init__()
@@ -337,7 +337,7 @@ class SettingsWindow(QMainWindow):
                        self.key_win_shift_s),
             SettingRow("Print Screen opens SnipForge", "Alt+Print Screen and Win+Print Screen stay with Windows",
                        self.key_print_screen)]
-        if not hotkey.SUPPORTED:  # Windows keys: a Mac has neither
+        if not hotkey.SUPPORTED:  # Windows keys: hidden off Windows
             for row in windows_keys:
                 row.hide()
         return stack(
@@ -647,14 +647,13 @@ class SettingsWindow(QMainWindow):
 
     @staticmethod
     def _open_notices() -> None:
-        """The notices that ship with SnipForge (next to SnipForge.exe, or in SnipForge.app's
-        Contents/Resources), or the repository's copy."""
+        """The notices that ship with SnipForge (next to SnipForge.exe), or the repository's copy."""
         path = bundle.resources_dir() / "THIRD_PARTY_NOTICES.md"
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)) if path.exists()
                                  else QUrl(f"{project.REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md"))
 
     def _open_folder(self, path: Path | None) -> None:
-        """Our own folder, in File Explorer or Finder."""
+        """Our own folder, in File Explorer."""
         if path is None:
             return
         try:

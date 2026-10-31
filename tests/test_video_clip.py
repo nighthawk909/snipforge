@@ -7,10 +7,10 @@ import pytest
 
 from snipforge.video import clip, ffmpeg
 
-# On macOS CI, Qt 6.12 crashed (segfault) while deleting a recorder that had failed or been
-# abandoned; to look into on a Mac in the Mac phase (docs/VIDEO-PLAN.md, Risks).
+# Off Windows, Qt 6.12 has crashed (segfault) while deleting a recorder that had failed or been
+# abandoned.
 windows_teardown = pytest.mark.skipif(sys.platform != "win32",
-                                      reason="Qt crashes tearing down a failed recorder on macOS")
+                                      reason="Qt has crashed tearing down a failed recorder off Windows")
 needs_ffmpeg = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
                                    reason="Qt's FFmpeg isn't usable here (ffmpeg.unavailable_reason() says why)")
 

@@ -7,8 +7,8 @@ import pytest
 from snipforge.video import dpi
 
 
-def test_off_windows_it_changes_nothing(on_a_mac):
-    on_a_mac(dpi)
+def test_off_windows_it_changes_nothing(off_windows):
+    off_windows(dpi)
     with dpi.physical_pixels():
         pass
 

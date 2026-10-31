@@ -39,16 +39,11 @@ def asset(tag, name, size=29_155_538):
     return {"name": name, "size": size, "browser_download_url": f"{REPO}/releases/download/{tag}/{name}"}
 
 
-def release(tag, prerelease=False, draft=False, body="", published="2026-10-20T15:00:00Z", alias=True,
-            mac=False):
+def release(tag, prerelease=False, draft=False, body="", published="2026-10-20T15:00:00Z", alias=True):
     version = tag[1:]
     assets = [asset(tag, f"SnipForge-{version}-setup.exe"), asset(tag, "SHA256SUMS.txt", 300)]
     if alias:
         assets.append(asset(tag, "SnipForge-setup.exe"))
-    if mac:
-        assets.append(asset(tag, f"SnipForge-{version}.dmg", 67_108_864))
-        if alias:
-            assets.append(asset(tag, "SnipForge.dmg", 67_108_864))
     return {"tag_name": tag, "prerelease": prerelease, "draft": draft, "body": body,
             "published_at": published, "html_url": f"{REPO}/releases/tag/{tag}", "assets": assets}
 
@@ -211,24 +206,8 @@ def test_cli_reports_bad_release_data(tmp_path):
                       "--out", str(tmp_path / "_site")]) == 1
 
 
-# --- the Mac download (docs/CROSS-PLATFORM.md) -------------------------------------------------------
+# --- Windows only ------------------------------------------------------------------------------------
 
-def test_a_release_with_a_mac_version_offers_it():
-    page = render([release("v0.12.0", mac=True)])
-    assert f'id="download-mac" href="{REPO}/releases/latest/download/SnipForge.dmg"' in page
-    assert "(64 MB), macOS 14 or later" in page and 'href="#mac"' in page
-    assert f"{REPO}/blob/main/docs/PARITY.md" in page
-
-
-def test_the_mac_link_names_the_version_until_the_permanent_file_exists():
-    page = render([release("v0.12.0", mac=True, alias=False)])
-    assert f'id="download-mac" href="{REPO}/releases/download/v0.12.0/SnipForge-0.12.0.dmg"' in page
-
-
-def test_a_release_without_a_mac_version_says_one_is_coming():
-    page = render([release("v0.11.0")])
-    assert 'id="download-mac"' not in page and "A Mac version is on the way" in page
-
-
-def test_the_page_explains_the_first_launch_on_a_mac():
-    assert 'id="mac"' in TEMPLATE and "Open Anyway" in TEMPLATE and "Screen &amp; System Audio Recording" in TEMPLATE
+def test_the_page_offers_only_the_windows_download():
+    page = render([release("v0.12.0")])
+    assert "Mac" not in page and ".dmg" not in page and "mac-download" not in page

@@ -287,7 +287,6 @@ def test_pin_window_zoom_fade_and_close(qapp, white_image):
 def test_second_launch_hands_command_to_running_instance(qapp, monkeypatch):
     """A second SnipForge process (e.g. a taskbar click) passes its command to the running one."""
     import subprocess
-    import sys
     import time
 
     from PySide6.QtNetwork import QLocalSocket
@@ -334,8 +333,6 @@ def test_selftest_report(tmp_path, monkeypatch, qapp):
     assert data["passed"] and data["checks"]["editor"]["ok"] and data["checks"]["icons"]["ok"]
     assert data["checks"]["theme"]["ok"] and "snipforge" in data["checks"]["theme"]["detail"]
     assert data["checks"]["app_folders"]["ok"], data["checks"]["app_folders"]  # license texts and the cache
-    screen = data["checks"]["screen_access"]  # macOS's permission check; Windows needs none
-    assert screen["ok"] and screen["required"] is (sys.platform == "darwin"), screen
     assert data["checks"]["video"]["ok"] and data["checks"]["video"]["required"]  # the recorder's encoder
     editor = data["checks"]["video_editor"]  # the video editor and Pillow's GIF writer
     assert editor["ok"] and editor["required"] and "12 frames" in editor["detail"]
@@ -360,27 +357,26 @@ def test_selftest_reports_failures(tmp_path, monkeypatch, qapp):
     assert selftest.run(str(tmp_path / "r.json")) == 1
 
 
-def test_selftest_on_a_mac_skips_the_windows_only_checks(tmp_path, monkeypatch, qapp, on_a_mac):
+def test_selftest_off_windows_skips_the_windows_only_checks(tmp_path, monkeypatch, qapp, off_windows):
     import json
 
     from snipforge import selftest
 
     def windows_only():
-        raise AssertionError("a Windows-only check ran on a Mac")
+        raise AssertionError("a Windows-only check ran off Windows")
 
-    on_a_mac(selftest)
+    off_windows(selftest)
     for name in ("_theme", "_editor", "_library", "_icons", "_windows", "_share", "_video", "_video_editor",
-                 "_recorder_process", "_screen_access", "_fonts", "_app_folders", "_startup_imports", "_speed"):
+                 "_recorder_process", "_fonts", "_app_folders", "_startup_imports", "_speed"):
         monkeypatch.setattr(selftest, name, lambda: "ok")
     for name in ("_ocr", "_search_index", "_hotkey"):
         monkeypatch.setattr(selftest, name, windows_only)
     report = tmp_path / "r.json"
     assert selftest.run(str(report)) == 0
     data = json.loads(report.read_text(encoding="utf-8"))
-    assert data["platform"] == "darwin" and data["passed"]
+    assert data["platform"] == "linux" and data["passed"]
     skipped = {name: check for name, check in data["checks"].items() if check["detail"].startswith("skipped")}
     assert sorted(skipped) == ["hotkey", "ocr", "search_index"]
     assert not any(check["required"] for check in skipped.values())
-    assert all(data["checks"][name]["required"] for name in ("theme", "editor", "library", "icons", "screen_access",
-                                                             "fonts", "app_folders"))
-    assert data["checks"]["video"]["ok"] and data["checks"]["video"]["required"]  # macOS CI encodes H.264 too
+    assert all(data["checks"][name]["required"] for name in ("theme", "editor", "library", "icons", "app_folders"))
+    assert data["checks"]["video"]["ok"] and data["checks"]["video"]["required"]

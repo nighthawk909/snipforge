@@ -3,11 +3,7 @@
 Where SnipForge is going and how far it's got. Every PR that finishes something ticks its box here
 (the main session keeps this file; other sessions say which box their PR ticks).
 
-**The plan:** finish the Windows version first, then port everything to the Mac in one go. Until
-then the Mac version must keep building and starting (CI checks every PR), Windows code keeps its
-operating-system calls behind the platform layer so the port stays mechanical, and features that
-aren't on the Mac yet step aside there ([CROSS-PLATFORM.md](CROSS-PLATFORM.md),
-[PARITY.md](PARITY.md)).
+**The plan:** SnipForge is Windows only. The Mac version was dropped (see Mac port, at the end).
 
 ## Windows
 
@@ -83,9 +79,9 @@ SnagIt's does. Built in this order:
 
 ### Across the app
 - [x] Privacy: private-window titles never kept, in many browsers and languages (#65, #70, #77)
-- [x] Windows and Mac parity rules, tracker and skill (#75)
-- [x] The Mac version is built, installed and started for every PR (#76)
-- [x] Every release includes the Mac version, with a Mac download on the page (#80)
+- [x] ~~Windows and Mac parity rules, tracker and skill (#75)~~ dropped with the Mac version
+- [x] ~~The Mac version is built, installed and started for every PR (#76)~~ dropped
+- [x] ~~Every release includes the Mac version, with a Mac download on the page (#80)~~ dropped
 - [x] Code-signing pipeline ready (#24); waiting on signing itself (below)
 
 ## Releases
@@ -111,23 +107,8 @@ turns each item into an issue labelled `feedback`, a tested fix and a PR.
 ## Waiting on the maintainer
 - [ ] Free code signing (SignPath for open source), so Windows stops warning on install
 - [ ] A default "Start recording" shortcut: Win+Shift+R would mean widening the keyboard hook's rule
-- [ ] Make the macOS CI check required for merging
 - [ ] Offering SnipForge through Software Center or a company share
-- [ ] A coworker with a Mac to run the [Mac test plan](MAC-PLAN.md#test-plan-for-a-coworker-with-a-mac)
 
-## Mac port (after Windows)
-The macOS API for each step is in [MAC-PLAN.md](MAC-PLAN.md); [PARITY.md](PARITY.md) tracks every
-feature. Today the Mac version has the shared core (editor, Library, Settings), Area and Full
-screen snips with the Screen Recording check, and Mac wording; the other operating-system pieces
-come in the phases below. It's in every release as a .dmg.
-- [x] Phase 1: an app people can try: Screen Recording check, Mac wording and fonts, back when
-  reopened (#90)
-- [ ] Phase 2: click a window to snip it, and where each snip came from
-- [ ] Phase 3: the snip shortcut and shortcuts of your own
-- [ ] Phase 4: Grab text and search inside snips (Vision)
-- [ ] Phase 5: Share: the share sheet, email, OneDrive
-- [ ] Phase 6: start at sign-in
-- [ ] Phase 7: the pointer in snips, the countdown, scrolling capture
-- [ ] Phase 8: updates that install themselves, and IT policy
-- [ ] Phase 9: recording: screen and computer sound (ScreenCaptureKit), microphone, webcam
-- [ ] A Mac tester runs the test plan
+## Mac port (dropped)
+SnipForge is Windows only now. The Mac version (first released in 0.12.0, phase 1 of its port in
+#90) was dropped with the rest of its planned phases, and its code, builds and docs were removed.

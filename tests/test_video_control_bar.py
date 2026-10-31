@@ -94,7 +94,7 @@ def test_an_unanswered_discard_goes_back_to_how_it_was(qapp, monkeypatch):
     bar, recorder = make_bar()
     QTest.mouseClick(bar.discard_button, Qt.LeftButton)
 
-    # Wait for it to disarm rather than a fixed time: a busy CI Mac can run a 10 ms timer late.
+    # Wait for it to disarm rather than a fixed time: a busy CI machine can run a 10 ms timer late.
     for _ in range(200):
         if bar.discard_button.text() != " Discard?":
             break

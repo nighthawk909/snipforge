@@ -144,15 +144,13 @@ def glyph(kind: str, colour: str, size: int = 32) -> QIcon:
 
 
 def reveal(path: Path) -> bool:
-    """Show `path` selected in Explorer (or Finder on a Mac); False if that couldn't start."""
+    """Show `path` selected in Explorer; False if that couldn't start."""
     try:
         if sys.platform == "win32":
             # Explorer by its full path, so no explorer.exe in the current folder can stand in for it.
             # A string, not a list: Explorer wants /select,"path" exactly, which list quoting changes.
             explorer = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
             subprocess.Popen(f'"{explorer}" /select,"{os.path.normpath(path)}"')  # no shell; a file we just wrote
-        elif sys.platform == "darwin":
-            subprocess.Popen(["/usr/bin/open", "-R", str(path)])
         else:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
     except OSError as exc:

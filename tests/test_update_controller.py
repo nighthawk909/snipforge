@@ -209,14 +209,6 @@ def test_managed_installs_are_offered_not_downloaded(make):
     assert "IT" in h.c.state.message and h.c.install_blocker(h.c.state.release)
 
 
-def test_a_mac_is_told_to_install_the_dmg_by_hand(make):
-    h = make([rel("0.6.0")], install_mode="by-hand", mode="ask")
-    h.c.check_now()
-    assert h.kinds() == ["checking", "available"] and h.source.downloads == []
-    blocker = h.c.install_blocker(h.c.state.release)
-    assert "SnipForge-0.6.0.dmg" in blocker and "Applications" in blocker and "IT" not in blocker
-
-
 # --- installing ---------------------------------------------------------------------------
 def test_auto_mode_installs_on_next_start_and_shows_what_changed(make):
     first = make([rel("0.6.0", notes="Faster crop"), rel("0.5.0")], mode="auto")

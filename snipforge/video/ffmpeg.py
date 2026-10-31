@@ -29,7 +29,7 @@ AV_TIME_BASE = 1_000_000
 AVMEDIA_TYPE_VIDEO, AVMEDIA_TYPE_AUDIO = 0, 1
 AVERROR_EOF = -0x20464F45  # FFERRTAG('E', 'O', 'F', ' ')
 AVERROR_INVALIDDATA = -0x41444E49  # FFERRTAG('I', 'N', 'D', 'A')
-AVERROR_EAGAIN = -errno.EAGAIN  # AVERROR(EAGAIN): 11 on Windows, 35 on macOS
+AVERROR_EAGAIN = -errno.EAGAIN  # AVERROR(EAGAIN): 11 on Windows
 AVSEEK_FLAG_BACKWARD = 1
 AV_DISPOSITION_ATTACHED_PIC = 0x400  # a cover picture, not video
 FORMATS = b"mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi"  # the containers SnipForge reads
@@ -138,15 +138,15 @@ def check_versions(found: dict[str, int]) -> None:
 
 
 def _library_files() -> dict[str, Path]:
-    """Where Qt keeps each library: next to Qt's DLLs on Windows, in Qt/lib (as libavformat.63.dylib
-    and so on) on macOS. Checked by version once loaded, whatever the name."""
+    """Where Qt keeps each library: next to Qt's DLLs on Windows, in Qt/lib (as libavformat.so.63
+    and so on) elsewhere. Checked by version once loaded, whatever the name."""
     folder = _folder()
     if sys.platform == "win32":
         return {name: folder / filename for name, filename in WINDOWS_NAMES.items()}
     found = {}
     lib = folder / "Qt" / "lib"
     for name, major in TESTED.items():
-        patterns = (f"lib{name}.{major}*.dylib", f"lib{name}.so.{major}*")
+        patterns = (f"lib{name}.so.{major}*",)
         matches = [m for p in patterns for m in sorted(lib.glob(p))]
         matches = matches or [m for p in patterns for m in sorted(folder.rglob(p))]
         if not matches:

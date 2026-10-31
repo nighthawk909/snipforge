@@ -252,7 +252,7 @@ def _draw_shape(painter: QPainter, shape: PointerShape, state: PointerState) -> 
 
 
 def system_source() -> PointerSource:
-    """This computer's pointer: Windows', or none elsewhere until the Mac version fills it in."""
+    """This computer's pointer: Windows', or none elsewhere."""
     return _Win32Source() if sys.platform == "win32" else _NoPointer()
 
 

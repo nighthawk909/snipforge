@@ -311,7 +311,7 @@ def _map_upright(item, state: dict, pos: QPointF, remap: Remap) -> None:
     elif state["kind"] == "text":  # positioned by its top-left corner; its size comes from the font
         center = remap.map(pos + item.boundingRect().center())
         # Measured with the new font, not scaled: text doesn't grow exactly in step with its font
-        # size, and how far it strays depends on the font (a Mac has no Segoe UI, for one).
+        # size, and how far it strays depends on the font.
         font = QFont(item.font())
         font.setPointSize(int(state["style"]["font_size"]))
         document = item.document().clone()

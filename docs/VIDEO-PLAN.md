@@ -28,7 +28,6 @@ Windows itself took to play the test beep (details below).
 - [Installer size and startup](#installer-size-and-startup)
 - [Licenses and patents](#licenses-and-patents)
 - [IT review](#it-review)
-- [Mac outlook](#mac-outlook)
 - [Risks](#risks)
 - [Build plan](#build-plan)
 - [Decisions](#decisions)
@@ -122,7 +121,7 @@ Things the prototype found out about Qt 6.12 that the design depends on:
 
 | Option | Verdict |
 |---|---|
-| **Qt Multimedia's `QMediaRecorder`, fed with `QVideoFrameInput` and `QAudioBufferInput`** (chosen) | Already part of PySide6; the same code runs on macOS. Uses Qt's bundled LGPL FFmpeg 9.0.1, which encodes H.264 with Windows' Media Foundation encoder and AAC with FFmpeg's encoder (or Windows' AAC encoder, below). Measured fast enough for 1080p30 and 720p60. |
+| **Qt Multimedia's `QMediaRecorder`, fed with `QVideoFrameInput` and `QAudioBufferInput`** (chosen) | Already part of PySide6. Uses Qt's bundled LGPL FFmpeg 9.0.1, which encodes H.264 with Windows' Media Foundation encoder and AAC with FFmpeg's encoder (or Windows' AAC encoder, below). Measured fast enough for 1080p30 and 720p60. |
 | Media Foundation directly (`IMFSinkWriter` via ctypes) | Can use the graphics card's hardware encoder and High profile. Windows-only and several hundred lines of COM. **Kept in reserve** behind the same encoder interface, if coworkers' laptops struggle at 1080p. |
 | A bundled ffmpeg.exe (LGPL build) | +30-80 MB, a second copy of FFmpeg, a process to manage, and nobody to build it but us. Not needed: Qt's FFmpeg libraries do the same jobs. |
 
@@ -140,7 +139,7 @@ Things the prototype found out about Qt 6.12 that the design depends on:
 
 ### Webcam
 
-**Qt's `QCamera`** (Media Foundation on Windows, AVFoundation on macOS) into a `QVideoSink`; each
+**Qt's `QCamera`** (Media Foundation on Windows) into a `QVideoSink`; each
 camera frame is drawn into the recording as a rounded picture-in-picture. No extra dependency. The
 prototype has it (`--webcam`), but **it wasn't run on the test PC**, so as not to switch on the
 maintainer's camera without asking; it's one line to try (see the prototype README).
@@ -232,29 +231,6 @@ What `docs/IT-REVIEW.md` gains when recording ships (none of it needs admin righ
   SnipForge only ever gives it local file paths and limits it to the `file` protocol
   (`protocol_whitelist`, and `QT_FFMPEG_PROTOCOL_WHITELIST=file` for Qt's own player).
 
-## Mac outlook
-
-The choices above were made so the Mac version reuses most of the work
-(`docs/MAC-PLAN.md`, in the Mac groundwork pull request #32, covers the rest of the Mac port).
-
-| Part | Windows | macOS | Shared? |
-|---|---|---|---|
-| Choosing the area | freeze-frame overlay | the same overlay | Yes |
-| Screen frames | DXGI Desktop Duplication | ScreenCaptureKit `SCStream` through PyObjC (MIT), with `sourceRect` for the area, `showsCursor = false` so we draw the pointer, our own windows excluded with `SCContentFilter` | No (one module each) |
-| System audio | WASAPI loopback | the same `SCStream` (`capturesAudio`, macOS 13+) | No |
-| Microphone | WASAPI | `SCStream` `captureMicrophone` (macOS 15+), or `QAudioSource` / AVFoundation on macOS 14 | No |
-| Pointer and clicks | `GetCursorInfo`, `GetAsyncKeyState` | `NSCursor` image, `CGEventSourceButtonState` (polling, no permission) | No (behind `pointer.py`) |
-| Mixer, compositor, control bar, webcam (QCamera), pause | | | **Yes** |
-| Encoding | Qt `QMediaRecorder` | Qt `QMediaRecorder`: confirmed by the macOS build workflow (the packaged app's self-test records H.264 + AAC on Apple silicon and on Intel under Rosetta; Qt's Mac build is the same FFmpeg 9.0.1 LGPL). Fallback if ever needed: `AVAssetWriter` through PyObjC | **Yes** |
-| Trim, GIF, editor | Qt's FFmpeg via ctypes | the same, loading `libavformat.63.dylib` and so on from `PySide6/Qt/lib` (works in the macOS build workflow) | **Yes** |
-
-Permissions on the Mac: Screen & System Audio Recording (already needed for snips), Microphone and
-Camera (usage descriptions in `Info.plist`). Without the paid Apple account the app is ad-hoc
-signed, so, as MAC-PLAN.md explains, macOS may ask for these again after an update.
-
-That is also why the Windows-only shortcuts weren't taken: Media Foundation's `IMFSinkWriter` for
-encoding, or a Windows-only ffmpeg.exe, would each be a second encoder to write for the Mac.
-
 ## Risks
 
 | Risk | What the plan does |
@@ -263,7 +239,6 @@ encoding, or a Windows-only ffmpeg.exe, would each be a second encoder to write 
 | CPU on older laptops (Windows' software H.264 encoder) | Default output capped at 1080p / 30 fps; frames dropped, never queued, so the file stays in sync; the control bar warns when frames are being dropped. If field testing shows trouble, add the Media Foundation hardware encoder behind the encoder interface. |
 | Crash or power loss mid-recording | **Decided in the recorder step: MP4 written directly.** Tested the alternative, AVI (H.264, written as it goes): Qt flushes it 256 KB at a time, so a recording killed at 4 s was unreadable and one killed at 9 s lost its first frame and its last second, and still screens compress so well that 256 KB can be 10-20 s; its timestamps also need repairing. Instead the recorder runs in its own process (a crash in the rest of SnipForge can't touch it) and finishes the file when Windows announces sleep, shutdown or sign-out, which covers a laptop battery running out. A hard power cut or the recorder itself crashing still loses the recording. |
 | Qt's recorder and player now and then misbehaved in the test runner: Qt's player sometimes loaded a fresh clip with no tracks or stalled before its first frame, and in about 1 run in 65 a clip read back as a different format | Files are checked with FFmpeg directly, not Qt's player (the editor step must test the player the same way). After recorders were made to always shut down and let go of their file, the stress test (`pytest -m stress`: 200 recordings, every file checked) passed four times in a row, 800 recordings, none bad; the recorder also checks every real recording before reporting it finished. |
-| On macOS CI, Qt 6.12 crashed (segfault) while deleting a recorder that had failed or been abandoned (the two tests of those paths are Windows-only for now) | Reproduce on a Mac in the Mac phase; the recorder process isolates such a crash from the rest of SnipForge either way. |
 | Windows "N" editions (sold in Europe) ship without Media Foundation, so without the H.264 encoder | **Done (step 9, `support.py`):** the self-test and the recorder check for it; recording explains how to add the free Media Feature Pack instead of failing. |
 | Audio clocks drift from the system clock (up to ~0.01-0.1%, up to a few seconds an hour) | The mixer (`snipforge/video/mixer.py`) keeps each source within 2 ms of its timestamps by adding one sample (the average of its neighbours) or dropping one, in the middle of a 10 ms packet: inaudible, and enough for drift up to 0.2%. Tested over a simulated minute both ways, then for an hour (`scripts/soak_recording.py`): with clocks 0.1% fast and slow, beeps stayed within 4 ms of their flashes throughout. |
 | A wrong audio timestamp (Windows flags some, virtual and remote-desktop devices can be off) | The mixer never trusts a stamp from the future or one that jumps backwards: the packet follows on from the last one, so one bad stamp can't silence a source. Packets that arrive after their time was handed to the encoder are counted (`late_frames`); the recorder keeps 0.25 s back for them. |
@@ -407,10 +382,9 @@ recording UI appears in step 6; before that the pieces are tested on their own.
    FFmpeg (the MP4's index, kept in memory until the file is finished, would be about 15 MB an hour
    of it by estimate).
 
-   **Step 9 is done on Windows (2026-10-18).** The platform layer is in place for the Mac's
-   recording phase (`power.py` / `_power_win32.py`; `wasapi.py` and `dxgi.py` are the Windows
-   capture), and the video tests check what holds on any machine, so they pass on the macOS runner
-   too. What's left can only be checked by a person, on real hardware:
+   **Step 9 is done (2026-10-18).** The Windows parts sit behind small modules (`power.py` /
+   `_power_win32.py`; `wasapi.py` and `dxgi.py` are the capture), and the video tests check what
+   holds on any machine. What's left can only be checked by a person, on real hardware:
 
    - [ ] **An hour of the real thing:** `python scripts/soak_recording.py --minutes 60 --real-screen
      --real-sound` on a PC where recording the screen and microphone for an hour is fine.
@@ -444,6 +418,4 @@ Approved by the maintainer on 2026-10-17, as recommended:
 4. **Pillow writes GIFs** (+0.9 MB).
 5. **The recorder runs as its own process** (`SnipForge.exe --record`).
 
-Testing on a Mac: the macOS build workflow makes the `.dmg`; a coworker with a Mac installs it and
-reports back, using the test plan in `docs/MAC-PLAN.md`. The webcam and choosing an area with the
-mouse are tried by hand on Windows.
+The webcam and choosing an area with the mouse are tried by hand on Windows.

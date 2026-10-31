@@ -1,10 +1,8 @@
 # Third-party software in SnipForge builds
 
-SnipForge's own code is MIT licensed (`LICENSE.txt`). The Windows and Mac builds bundle the
-components below, each under its own license (pywin32 and pywinrt only in the Windows build, PyObjC
-only in the Mac build). License texts are in the `licenses` folder next to `SnipForge.exe` (default
-install folder: `%LOCALAPPDATA%\Programs\SnipForge`), or in `SnipForge.app/Contents/Resources` on a
-Mac.
+SnipForge's own code is MIT licensed (`LICENSE.txt`). The Windows build bundles the components
+below, each under its own license. License texts are in the `licenses` folder next to
+`SnipForge.exe` (default install folder: `%LOCALAPPDATA%\Programs\SnipForge`).
 
 | Component | Version | Used for | License |
 |---|---|---|---|
@@ -15,7 +13,6 @@ Mac.
 | [Pillow](https://python-pillow.github.io/) (its core and GIF writer only) | 12.3.0 | writing GIFs in the video editor | MIT-CMU (HPND) (`licenses/Pillow-MIT-CMU.txt`) |
 | [pywin32](https://github.com/mhammond/pywin32) | 312 | Outlook draft, Explorer share commands | PSF License 2.0 |
 | [pywinrt](https://github.com/pywinrt/pywinrt) (`winrt-*` packages) | 3.2.1 | Windows built-in text recognition (OCR) | MIT |
-| [PyObjC](https://github.com/ronaldoussoren/pyobjc) (`pyobjc-core`, `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz`), Mac build only | 12.2.2 | macOS's own APIs (the Screen Recording permission check) | MIT (`licenses/PyObjC-MIT.txt`) |
 | [Lucide](https://lucide.dev/) icons (path data embedded in `snipforge/icons.py`) | 1.49.0 | toolbar and menu icons | ISC (`licenses/Lucide-ISC.txt`) |
 | [PyInstaller](https://pyinstaller.org/) bootloader | 6.22.3 | starts `SnipForge.exe` | GPL-2.0-or-later with the PyInstaller bootloader exception (allows distribution with any program) |
 

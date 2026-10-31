@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "snipforge"
 version = "0.17.0"
-description = "Open-source SnagIt-style screenshot and markup tool for Windows and macOS"
+description = "Open-source SnagIt-style screenshot and markup tool for Windows"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "nighthawk909" }]
@@ -22,7 +22,6 @@ dependencies = [
     "winrt-Windows.Foundation>=2.0; sys_platform == 'win32'",
     "winrt-Windows.Foundation.Collections>=2.0; sys_platform == 'win32'",
     "winrt-Windows.Globalization>=2.0; sys_platform == 'win32'",
-    "pyobjc-framework-Quartz>=12; sys_platform == 'darwin'",
 ]
 
 [project.urls]
@@ -44,7 +43,6 @@ testpaths = ["tests"]
 markers = [
     "desktop: drives real Windows features (windows, share sheet, hook); run with -m desktop",
     "windows: needs Windows itself (registry, Explorer, Win32); skipped on other platforms",
-    "mac: needs macOS itself (AppKit, Quartz, Vision); skipped on other platforms",
     "stress: long runs that look for rare failures (hundreds of recordings); run with -m stress",
 ]
 addopts = "-m 'not desktop and not stress'"
@@ -66,7 +64,7 @@ ignore = [
 [tool.ruff.lint.isort]
 # The scripts' sibling modules: "build" is also the name of a PyPI package, installed on some machines
 # and not others, so without this the import order would depend on the machine.
-known-first-party = ["snipforge", "build", "universal"]
+known-first-party = ["snipforge", "build"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "B", "E731"]

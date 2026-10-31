@@ -1,5 +1,5 @@
-"""Owns the active theme: reads the preferences, follows Windows' (or macOS's) light/dark and
-high-contrast settings, applies it app-wide."""
+"""Owns the active theme: reads the preferences, follows Windows' light/dark and high-contrast
+settings, applies it app-wide."""
 from __future__ import annotations
 
 import logging
@@ -22,8 +22,7 @@ MODE_KEY = "appearance/theme"
 ACCENT_KEY = "appearance/accent"
 PREFERENCES = ("system", "light", "dark")
 def _asset_dir() -> Path:
-    """Where the stylesheet's little SVGs are written: %LOCALAPPDATA%\\SnipForge\\cache\\theme, or
-    ~/Library/Caches/SnipForge/theme on a Mac."""
+    """Where the stylesheet's little SVGs are written: %LOCALAPPDATA%\\SnipForge\\cache\\theme."""
     return cache_dir() / "theme"
 
 

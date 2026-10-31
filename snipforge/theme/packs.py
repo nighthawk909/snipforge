@@ -1,7 +1,6 @@
 """Theme packs: JSON files that add an accent (and optionally a header band).
 
-Organizations ship one with their build (in a `themes` folder next to SnipForge.exe, or in
-SnipForge.app's Contents/Resources on a Mac), or a person
+Organizations ship one with their build (in a `themes` folder next to SnipForge.exe), or a person
 drops one into their own themes folder. Packs are data only: every value is validated, colors
 must be plain #RRGGBB and readable, and a bad pack is skipped with a log message, never fatal.
 
@@ -144,8 +143,8 @@ def discover_packs(folders: Iterable[Path]) -> list[ThemePack]:
 
 
 def pack_folders() -> list[Path]:
-    """Where packs come from: shipped with the installed app (for IT builds; next to SnipForge.exe,
-    or in SnipForge.app/Contents/Resources), then the user's own folder."""
+    """Where packs come from: shipped with the installed app (for IT builds; next to SnipForge.exe),
+    then the user's own folder."""
     from PySide6.QtCore import QStandardPaths
 
     from ..bundle import resources_dir

@@ -2,7 +2,6 @@
 active tool, with only the sections that tool uses."""
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
@@ -103,8 +102,8 @@ IMAGE_ACTIONS = (
 
 
 def alt_key() -> str:
-    """What the Alt key is called here: Option on a Mac."""
-    return "Option" if sys.platform == "darwin" else "Alt"
+    """What the Alt key is called."""
+    return "Alt"
 
 
 class Swatch(QPushButton):
