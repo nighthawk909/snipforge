@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFont
+from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -23,6 +23,19 @@ from . import diagnostics, project
 
 log = logging.getLogger(__name__)
 BUG_FORM = f"{project.REPO_URL}/issues/new?template=bug_report.yml"
+REPORT_FAMILIES = ("Cascadia Mono", "Consolas")  # Windows 11's, then Windows 10's
+
+
+def report_font() -> QFont:
+    """The report's fixed-width font: one family, the first of REPORT_FAMILIES that's installed. A
+    list of families makes Qt look up every fallback font the first time the text is measured
+    (theme.styles.ui_font)."""
+    font = QFont(next((f for f in REPORT_FAMILIES if QFontDatabase.hasFamily(f)), REPORT_FAMILIES[-1]))
+    font.setStyleHint(QFont.Monospace)
+    font.setPointSize(9)
+    return font
+
+
 _open: list[ReportDialog] = []  # the one on screen, kept alive while it's open
 
 
@@ -63,11 +76,7 @@ class ReportDialog(QDialog):
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
         self.preview.setLineWrapMode(QPlainTextEdit.WidgetWidth)
-        mono = QFont()
-        mono.setFamilies(["Cascadia Mono", "Consolas", "Menlo", "Monaco"])  # Windows, then the Mac
-        mono.setStyleHint(QFont.Monospace)
-        mono.setPointSize(9)
-        self.preview.setFont(mono)
+        self.preview.setFont(report_font())
         self.preview.setAccessibleName("The selected part of the report")
         self.contents.currentRowChanged.connect(self._show)
         body.addWidget(self.contents)

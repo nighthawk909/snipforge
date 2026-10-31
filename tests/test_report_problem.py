@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
+from PySide6.QtGui import QFont
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -592,3 +593,22 @@ def test_settings_about_opens_the_report(qapp, tmp_path, opened):
     QTest.mouseClick(button, Qt.LeftButton, Qt.NoModifier, QPoint(5, 5))
     assert opened == [tmp_path]
     window.close()
+
+
+@pytest.mark.parametrize(("installed", "family"), [
+    ({"Cascadia Mono", "Consolas"}, "Cascadia Mono"),  # Windows 11
+    ({"Consolas"}, "Consolas"),  # Windows 10
+    (set(), "Consolas"),  # no fonts to ask about (Qt's offscreen platform)
+])
+def test_the_report_shows_in_one_fixed_width_family(monkeypatch, qapp, installed, family):
+    """One family, never a list: a list makes Qt look up every fallback font the first time the
+    report's text is measured, a pause before the window shows (as theme.styles.ui_font)."""
+    class FontDatabase:
+        @staticmethod
+        def hasFamily(name):  # noqa: N802 - Qt API
+            return name in installed
+
+    monkeypatch.setattr(report_dialog, "QFontDatabase", FontDatabase)
+    font = report_dialog.report_font()
+    assert font.families() == [family]
+    assert font.pointSize() == 9 and font.styleHint() == QFont.Monospace
