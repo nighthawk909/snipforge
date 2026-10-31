@@ -4,8 +4,8 @@ Win+Shift+S is reserved by the shell, so RegisterHotKey cannot claim it. A
 WH_KEYBOARD_LL hook sees the keystroke first and can swallow it, which stops
 the built-in Snipping Tool from ever launching.
 
-Windows only: elsewhere `HotkeyListener.start()` returns False and the app offers its tray (menu
-bar) icon instead. The macOS shortcut is planned in docs/MAC-PLAN.md.
+Windows only: elsewhere `HotkeyListener.start()` returns False and the app offers its tray icon
+instead.
 """
 from __future__ import annotations
 

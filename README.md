@@ -16,13 +16,6 @@ editor with arrows, callouts, stamps, blur and more.
 3. To pin it to the taskbar: open Start, right-click **SnipForge**, choose **Pin to taskbar**.
    (Windows doesn't let apps pin themselves.)
 
-**On a Mac** (macOS 14 Sonoma or later, Apple silicon or Intel): every release includes a Mac version,
-an early one for now ([what works on a Mac](docs/PARITY.md)).
-[Download SnipForge for Mac](https://github.com/nighthawk909/snipforge/releases/latest/download/SnipForge.dmg),
-open the .dmg and drag SnipForge to **Applications**. It isn't notarized by Apple yet, so the first
-time macOS needs **System Settings > Privacy & Security > Open Anyway**; snipping needs
-**Screen & System Audio Recording** turned on for SnipForge there too.
-
 Where SnipForge is going, with what's done ticked off: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Each [release](https://github.com/nighthawk909/snipforge/releases) lists SHA-256 checksums so you
@@ -201,9 +194,6 @@ python scripts/build.py --installer # SnipForge.exe, portable zip and installer 
 
 To run your organization's own copy (for example on GitHub Enterprise), see
 [docs/PORTING.md](docs/PORTING.md).
-
-A Mac version is on the way: [docs/MAC-PLAN.md](docs/MAC-PLAN.md) has what works on macOS today,
-how to build the test `.dmg`, and what's left.
 
 ## Contributing
 

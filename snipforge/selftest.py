@@ -4,9 +4,7 @@ Exercises the pieces that break when packaging goes wrong (Qt plugins, theme, SV
 Windows OCR, the keyboard hook, Explorer share commands) and writes a JSON report. Exit code 0
 means every required check passed. CI runs this against the built exe before publishing.
 
-On a Mac (docs/MAC-PLAN.md) the Windows-only checks are reported as skipped rather than required,
-until each feature has its macOS version; the Mac's own (the Screen Recording check, files in
-Contents/Resources) are required there.
+Run from source off Windows, the Windows-only checks are reported as skipped rather than required.
 """
 from __future__ import annotations
 
@@ -95,12 +93,12 @@ def _library() -> str:
 
 
 def _not_on_this_platform() -> str:
-    return f"skipped: Windows only for now ({sys.platform}, see docs/MAC-PLAN.md)"
+    return f"skipped: needs Windows (this is {sys.platform})"
 
 
 def _app_folders() -> str:
-    """The license texts are where About and Settings say (next to SnipForge.exe, or in
-    SnipForge.app's Contents/Resources), and the theme's cache is in the platform's cache folder."""
+    """The license texts are where About and Settings say (next to SnipForge.exe), and the theme's
+    cache is in SnipForge's cache folder."""
     from .bundle import cache_dir, resources_dir
     from .theme.manager import ASSET_DIR
 
@@ -114,8 +112,8 @@ def _app_folders() -> str:
 
 
 def _fonts() -> str:
-    """The interface and fixed-width fonts SnipForge asks for are there (a Mac has no Segoe UI or
-    Consolas: snipforge/fonts.py picks its own)."""
+    """The interface and fixed-width fonts SnipForge asks for (snipforge/fonts.py) are there, and the
+    fixed-width one really is fixed-width."""
     from PySide6.QtGui import QFontInfo
 
     from .fonts import mono_font
@@ -124,19 +122,6 @@ def _fonts() -> str:
     if not mono.fixedPitch():
         raise RuntimeError(f"the fixed-width font came out as {mono.family()}, which isn't fixed-width")
     return f"interface: {ui.family()}; fixed-width: {mono.family()}"
-
-
-def _screen_access() -> str:
-    """macOS's Screen Recording check made it into the build (PyObjC's Quartz) and answers. CI can't
-    grant the permission, so either answer passes."""
-    from . import _screen_access_mac
-
-    allowed = _screen_access_mac.preflight()
-    return f"Screen Recording permission: {'allowed' if allowed else 'not allowed yet'}"
-
-
-def _no_screen_permission() -> str:
-    return f"skipped: {sys.platform} needs no permission to capture the screen"
 
 
 def _theme() -> str:
@@ -357,13 +342,12 @@ def _tls() -> str:
 
 
 def run(report_path: str) -> int:
-    windows, mac = sys.platform == "win32", sys.platform == "darwin"
+    windows = sys.platform == "win32"
     results: dict = {}
     _check(results, "startup_imports", _startup_imports)
     _check(results, "theme", _theme)
     _check(results, "app_folders", _app_folders)
-    _check(results, "fonts", _fonts, required=mac)
-    _check(results, "screen_access", _screen_access if mac else _no_screen_permission, required=mac)
+    _check(results, "fonts", _fonts, required=False)
     _check(results, "editor", _editor)
     _check(results, "save_formats", _save_formats)
     _check(results, "library", _library)

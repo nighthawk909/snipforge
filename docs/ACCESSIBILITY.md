@@ -3,11 +3,9 @@
 SnipForge can be used from the keyboard: taking a snip, marking it up, cropping, saving and sharing
 it, the Library and Settings. A few things follow the pointer and need a mouse, pen or touch: drawing
 freehand, Smart Move, Cut out and choosing Edit text's line (see the editor below). Every control has
-a name a screen reader (Narrator, NVDA, JAWS; VoiceOver on a Mac) can read, and SnipForge follows
+a name a screen reader (Narrator, NVDA, JAWS) can read, and SnipForge follows
 the system's high-contrast setting. This page lists the keys and what to expect, for people who use
 them and for IT reviews.
-
-On a Mac, Ctrl in the keys below is ⌘.
 
 ## Seeing where the keyboard is
 
@@ -20,10 +18,9 @@ switches, check boxes, lists and the Library card you're on.
 With a Windows contrast theme on (Settings > Accessibility > Contrast themes), SnipForge draws its
 windows in that theme's colors: its background, text and highlight. What's selected, checked or
 focused is marked with the highlight color and a border, not with shades of gray. If a theme's text
-can't be read on its background, SnipForge uses black and white instead. On a Mac, Increase contrast
-(System Settings > Accessibility > Display) switches SnipForge to black and white (macOS has no
-contrast colors for apps to read). While it's on, Settings › Appearance says so, the editor hides its
-light/dark switch, and your light/dark and accent choices come back when it's off.
+can't be read on its background, SnipForge uses black and white instead. While it's on, Settings ›
+Appearance says so, the editor hides its light/dark switch, and your light/dark and accent choices
+come back when it's off.
 
 Your snips and the markup on them keep their own colors: they're your content.
 
@@ -109,7 +106,7 @@ the pointer is on.
 
 Every button, tool, switch, slider, list and text box has a name, and icon-only buttons are named
 for what they do. The snip itself is "Snip", described with the keys above. SnipForge uses Qt's
-accessibility support, which talks to Windows UI Automation and to the Mac's accessibility API.
+accessibility support, which talks to Windows UI Automation.
 
 ## Checked how
 

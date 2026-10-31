@@ -1,8 +1,8 @@
 """The system's high-contrast setting: Windows' contrast themes (Settings > Accessibility > Contrast
-themes) and the Mac's Increase contrast. While it's on, SnipForge draws its windows in the system's
-own colors (on Windows) or in black and white (elsewhere), and the light/dark and accent choices
-wait until it's off. Qt reports the setting on both platforms; the colors on Windows come from
-_contrast_win32.py. Snips and markup keep their colors: they're your content.
+themes). While it's on, SnipForge draws its windows in the system's own colors (or in black and
+white, if those can't be read), and the light/dark and accent choices wait until it's off. Qt
+reports the setting; the colors come from _contrast_win32.py. Snips and markup keep their colors:
+they're your content.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class SystemColors:
     link: str            # accent-colored text
 
 
-# Black and white, for the Mac (and if Windows' colors can't be read).
+# Black and white, if Windows' colors can't be read (and off Windows).
 DARK =SystemColors(window="#000000", text="#FFFFFF", highlight="#1AEBFF", highlight_text="#000000",
                     button="#000000", button_text="#FFFFFF", disabled="#A6A6A6", link="#FFFF00")
 LIGHT = SystemColors(window="#FFFFFF", text="#000000", highlight="#37006E", highlight_text="#FFFFFF",

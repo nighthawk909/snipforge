@@ -436,15 +436,13 @@ def test_parse_manifest_valid():
         entry("0.6.5-mac", assets=[{"platform": "macos", "name": "SnipForge-0.6.5.dmg", "sha256": SHA_C}]),
     )
     found = update_sources.parse_manifest(json.dumps(data).encode(), r"\\srv\apps\SnipForge")
-    assert [r.version for r in found] == ["0.7.0-beta.1", "0.6.0"]  # newest first; mac-only release left out
+    # newest first; another platform's installers (an older feed's Mac entries) are left out
+    assert [r.version for r in found] == ["0.7.0-beta.1", "0.6.0"]
     beta, stable = found
     assert beta.prerelease and beta.sha256 == "b" * 64 and beta.installer_name == "SnipForge-0.7.0-beta.1-setup.exe"
     assert beta.installer_url == r"\\srv\apps\SnipForge\SnipForge-0.7.0-beta.1-setup.exe"
     assert stable.published == dt.datetime(2026, 10, 20, 15, 0, tzinfo=dt.UTC) and stable.notes == "Notes 0.6.0"
     assert stable.sums_url is None and stable.page == ""
-    mac = update_sources.parse_manifest(data, "https://it.example.com/snipforge/", platform="macos")
-    assert [r.installer_url for r in mac] == ["https://it.example.com/snipforge/SnipForge-0.7.0-beta.1.dmg",
-                                              "https://it.example.com/snipforge/SnipForge-0.6.5.dmg"]
 
 
 @pytest.mark.windows
@@ -870,7 +868,7 @@ def test_file_transport_times_out_when_a_share_stops_answering(qapp, tmp_path, m
     monkeypatch.setattr(update_transport, "_read", stuck)
     results, done = collect()
     # Owned by the app, so the worker thread never holds the last reference: deleting the transport
-    # (and its main-thread timer) from the worker crashed the macOS test run.
+    # (and its main-thread timer) from the worker crashed a test run.
     transport = update_transport.FileTransport(qapp)
     transport.get(str(feed), timeout_ms=150, max_bytes=10, done=done)
     assert spin(lambda: results and seen)
@@ -887,18 +885,11 @@ def test_install_mode():
     assert update_platform.install_mode(r"C:\Program Files\SnipForge\SnipForge.exe", frozen=True) == "all-users"
 
 
-def test_a_mac_app_updates_by_hand_until_it_can_install_a_dmg(monkeypatch):
-    monkeypatch.setattr(update_platform, "PLATFORM", "macos")
-    app = "/Applications/SnipForge.app/Contents/MacOS/SnipForge"
-    assert update_platform.install_mode(app, frozen=True) == "by-hand"
-    assert update_platform.install_mode(frozen=False) == "source"
-
-
 @pytest.mark.windows
-def test_installer_names_by_platform():
+def test_installer_names():
     assert update_platform.installer_version("SnipForge-0.6.0-beta.1-setup.exe") == "0.6.0-beta.1"
     assert update_platform.installer_version("SnipForge-0.6.0-portable.zip") is None
-    assert update_platform.installer_version("SnipForge-0.6.0.dmg", platform="macos") == "0.6.0"
+    assert update_platform.installer_version("SnipForge-0.6.0.dmg") is None
     assert update_platform.installer_suffix_ok("SnipForge-0.6.0-setup.exe")
     assert not update_platform.installer_suffix_ok("SnipForge-0.6.0.dmg")
 

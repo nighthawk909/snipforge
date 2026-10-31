@@ -15,7 +15,7 @@ def test_scroll_needs_at_least_one_notch():
 
 
 def test_available_only_on_windows(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(sys, "platform", "linux")
     assert scroll_input.available() is False
     monkeypatch.setattr(sys, "platform", "win32")
     assert scroll_input.available() is True

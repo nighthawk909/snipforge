@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 from dataclasses import replace
-from pathlib import Path
 
 from PySide6.QtCore import QLocale, QMimeData, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage, QKeySequence, QShortcut
@@ -209,9 +208,6 @@ class HomeWindow(QMainWindow):
         # Only while the grid has focus, so typing in the search box never stars or tags anything.
         for keys, slot in (("F", self._favorite_current), ("T", self._tags_current)):
             QShortcut(QKeySequence(keys), self.grid, slot, Qt.WidgetShortcut)
-        if trash_keys := wording.trash_shortcut():  # ⌘⌫ on a Mac, as in Finder
-            QShortcut(QKeySequence(trash_keys), self.grid, lambda: self._trash(self.grid.selected_ids()),
-                      Qt.WidgetShortcut)
 
     def _retheme(self, _theme=None) -> None:
         self._search_icon.setIcon(icon("search"))
@@ -490,9 +486,7 @@ class HomeWindow(QMainWindow):
                            lambda: self.toggle_favorite(entry_id))
             menu.addAction(icon("tag"), "Tags…\tT", lambda: self.edit_tags(entry_id))
         menu.addSeparator()
-        trash_keys = wording.trash_shortcut()
-        hint = f"\t{wording.keys(trash_keys)}" if trash_keys else ""
-        menu.addAction(icon("trash"), f"Move to {wording.trash()}{hint}", lambda: self._trash(ids))
+        menu.addAction(icon("trash"), f"Move to {wording.trash()}", lambda: self._trash(ids))
         self._show_menu(menu, self.grid.viewport().mapToGlobal(pos))
 
     @staticmethod
@@ -551,7 +545,7 @@ class HomeWindow(QMainWindow):
         self._after_change()
 
     def _trash_question(self, ids: list[str]) -> str | None:
-        """What to ask before moving these to the Recycle Bin (the Trash on a Mac): many at once, or
+        """What to ask before moving these to the Recycle Bin: many at once, or
         recordings with trimmed copies or GIFs saved beside them (which go too); None to go ahead."""
         exports = [name for entry_id in ids if (entry := self._library.get(entry_id))
                    for name in self._library.exports(entry)]
@@ -564,17 +558,15 @@ class HomeWindow(QMainWindow):
                 f"{named}.")
 
     def _open_recycle_bin(self) -> None:
-        """The Recycle Bin, or the Trash in Finder on a Mac."""
+        """The Windows Recycle Bin."""
         try:
             if sys.platform == "win32":
                 os.startfile("shell:RecycleBinFolder")  # noqa: S606 - opens the Windows Recycle Bin
-            else:
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path.home() / ".Trash")))  # Finder
         except OSError as exc:
             log.info("Couldn't open the %s: %s", wording.trash(), exc)
 
     def _reveal(self, path) -> None:
-        """Our own folder, in File Explorer or Finder."""
+        """Our own folder, in File Explorer."""
         try:
             path.mkdir(parents=True, exist_ok=True)
             opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))

@@ -87,7 +87,7 @@ def test_pointer_on_another_monitor_leaves_this_one_alone():
 
 
 def test_grab_is_nothing_off_windows(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(sys, "platform", "linux")
     assert pointer.grab() is None
 
 

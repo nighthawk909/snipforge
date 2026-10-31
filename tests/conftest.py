@@ -17,32 +17,30 @@ collect_ignore = [] if sys.platform == "win32" else ["desktop"]
 
 
 def pytest_collection_modifyitems(config, items):
-    """Tests marked `windows` need Windows itself (registry, Explorer, Win32), and tests marked `mac`
-    need macOS (AppKit, Quartz, Vision): each is skipped on the other platform
-    (docs/CROSS-PLATFORM.md)."""
-    skips = {"windows": (sys.platform != "win32", "needs Windows (docs/CROSS-PLATFORM.md)"),
-             "mac": (sys.platform != "darwin", "needs macOS (docs/CROSS-PLATFORM.md)")}
+    """Tests marked `windows` need Windows itself (registry, Explorer, Win32): they're skipped elsewhere."""
+    if sys.platform == "win32":
+        return
     for item in items:
-        for marker, (skipped, reason) in skips.items():
-            if skipped and item.get_closest_marker(marker):
-                item.add_marker(pytest.mark.skip(reason=reason))
+        if item.get_closest_marker("windows"):
+            item.add_marker(pytest.mark.skip(reason="needs Windows"))
 
 
-class _MacSys:
-    """`sys` as a module sees it on a Mac; everything but `platform` is the real one."""
-    platform = "darwin"
+class _OtherSys:
+    """`sys` as a module sees it off Windows (on Linux); everything but `platform` is the real one."""
+    platform = "linux"
 
     def __getattr__(self, name):
         return getattr(sys, name)
 
 
 @pytest.fixture
-def on_a_mac(monkeypatch):
-    """Call it with the modules whose platform checks should see a Mac. Only theirs: pytest itself
-    has to keep seeing the real platform."""
+def off_windows(monkeypatch):
+    """Call it with the modules whose platform checks should see another system than Windows, to
+    prove their Windows-only parts stand aside there. Only theirs: pytest itself has to keep seeing
+    the real platform."""
     def pretend(*modules):
         for module in modules:
-            monkeypatch.setattr(module, "sys", _MacSys())
+            monkeypatch.setattr(module, "sys", _OtherSys())
     return pretend
 
 

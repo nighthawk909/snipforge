@@ -12,7 +12,7 @@ from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import __version__, logs, prefs, preset_output, presets, project, screen_access, theme, wording
+from . import __version__, logs, prefs, preset_output, presets, project, theme, wording
 from .capture import CaptureSession, on_screen
 from .home import HomeWindow
 from .hotkey import SUPPORTED as HOTKEYS_SUPPORTED
@@ -21,7 +21,6 @@ from .indexer import TextIndexer
 from .library import DocumentUnreadable, Library
 from .pin import PinWindow
 from .privacy import CHECK_VERSION as PRIVACY_CHECK
-from .reopen import ReopenWatcher
 from .settings_window import SECTIONS, SettingsWindow
 from .shortcuts import GlobalShortcuts
 from .shortcuts import label as shortcut_label
@@ -109,9 +108,6 @@ class SnipForgeApp:
         QTimer.singleShot(EDITOR_PRELOAD_MS, _load_editor)
         app.aboutToQuit.connect(self.indexer.close)
         app.aboutToQuit.connect(self._stop_recording_on_quit)
-        self._reopen = ReopenWatcher(app)  # a Mac: opened again from Finder or the Dock
-        self._reopen.reopened.connect(self.show_home)
-        QTimer.singleShot(0, screen_access.warm_up)  # a Mac's permission check, ready for the first snip
 
     def _forget_private_titles(self) -> None:
         """Once per version of the private-window check, in the background: clear private
@@ -177,9 +173,7 @@ class SnipForgeApp:
         menu.addAction("Quit", self._app.quit)
         self._menu = menu
         self._tray.setContextMenu(menu)
-        if sys.platform != "darwin":  # a Mac menu bar icon opens its menu on click, and New snip is in it
-            self._tray.activated.connect(
-                lambda reason: self.capture() if reason == QSystemTrayIcon.Trigger else None)
+        self._tray.activated.connect(lambda reason: self.capture() if reason == QSystemTrayIcon.Trigger else None)
         self._tray.show()
         if not self._hook_ok and HOTKEYS_SUPPORTED:
             self._tray.showMessage("SnipForge", "Couldn't install the keyboard hook, so Win+Shift+S "
@@ -215,8 +209,7 @@ class SnipForgeApp:
                 if on and HOTKEYS_SUPPORTED]
         if own := self._shortcuts.bindings().get("snip"):
             keys.append(shortcut_label(own))
-        click = "click this icon, then New snip" if sys.platform == "darwin" else "click this icon to snip"
-        how = " or ".join(keys) if keys else click
+        how = " or ".join(keys) if keys else "click this icon to snip"
         self._tray.setToolTip(f"SnipForge {__version__} — {how}")
 
     def check_updates(self) -> None:
@@ -304,8 +297,6 @@ class SnipForgeApp:
         if self._session is not None:
             self._session.snip_now()  # pressed again during a countdown: don't wait
             return
-        if not screen_access.ready_to_snip():  # a Mac without Screen Recording: explained instead
-            return
         # R switches a snip to recording, unless one is under way already
         on_area = self._record_area if self._recording is None else None
         self._start(CaptureSession(self._on_captured, on_area=on_area, on_manage_presets=self.manage_presets))
@@ -319,8 +310,6 @@ class SnipForgeApp:
         if preset is None:
             self._note("That preset isn't there any more. Choose one in Settings > Capture.")
             return
-        if not screen_access.ready_to_snip():  # a Mac without Screen Recording: explained instead
-            return
         on_area = self._record_area if self._recording is None else None
         self._start(CaptureSession(self._on_captured, on_area=on_area, preset=preset,
                                    on_manage_presets=self.manage_presets))
@@ -330,7 +319,7 @@ class SnipForgeApp:
         recording, it stops the recording."""
         if self._recording is not None:
             self.stop_recording()
-        elif self._session is None and screen_access.ready_to_snip():
+        elif self._session is None:
             self._start(CaptureSession(self._on_captured, on_area=self._record_area, record=True))
 
     def stop_recording(self) -> None:
@@ -393,8 +382,6 @@ class SnipForgeApp:
             self._session.snip_now()
             return
         area = prefs.last_area()
-        if area is not None and on_screen(area) and not screen_access.ready_to_snip():
-            return  # (a normal snip, below, checks for itself)
         if area is None or not on_screen(area):
             self._note("Nothing to repeat yet: choose what to snip." if area is None
                        else "Your last snip's area isn't on screen any more, so choose what to snip.")
@@ -615,13 +602,9 @@ class SnipForgeApp:
 
 
 def about_text() -> str:
-    """What About SnipForge says, in this platform's words."""
-    if wording.on_mac():
-        made_for, licenses = "Mac", "inside SnipForge.app (Contents/Resources)"
-    else:
-        made_for, licenses = "Windows", "in the install folder"
-    return (f"<b>SnipForge {__version__}</b><br>Open-source screenshot and markup tool for {made_for}."
-            f"<br><br>Built with Python, Qt and PySide6 (LGPL-3.0). License texts are {licenses}."
+    """What About SnipForge says."""
+    return (f"<b>SnipForge {__version__}</b><br>Open-source screenshot and markup tool for Windows."
+            f"<br><br>Built with Python, Qt and PySide6 (LGPL-3.0). License texts are in the install folder."
             f"<br><br>MIT License. Your snips stay on {wording.this_computer()}. SnipForge only goes online "
             f"to check for updates (choose how in Settings) or when you use Share."
             f"<br><br><a href='{project.REPO_URL}'>{project.REPO_URL.removeprefix('https://')}</a>")

@@ -183,7 +183,7 @@ class Acquired:
 
 
 def available() -> bool:
-    """Whether this platform can duplicate the screen at all (Windows; the Mac uses ScreenCaptureKit)."""
+    """Whether this platform can duplicate the screen at all (Windows only)."""
     return sys.platform == "win32"
 
 

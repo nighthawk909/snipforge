@@ -5,8 +5,7 @@ commands you'd use by hand (IContextMenu), so they work with whatever OneDrive
 accounts are signed in, with no extra sign-in for SnipForge.
 
 The Explorer and Outlook parts are Windows only. Elsewhere no OneDrive accounts are found and the
-shell commands aren't offered; exporting a snip works everywhere (docs/MAC-PLAN.md has the
-macOS share sheet).
+shell commands aren't offered; exporting a snip works everywhere.
 """
 from __future__ import annotations
 
@@ -95,7 +94,7 @@ def _reg_value(key, name: str) -> str:
 
 def windows_shell_available() -> bool:
     """Whether Explorer's right-click commands (OneDrive, the Windows share sheet) and Outlook's
-    automation are here to use: Windows only (docs/MAC-PLAN.md has the Mac's share sheet)."""
+    automation are here to use: Windows only."""
     return sys.platform == "win32"
 
 

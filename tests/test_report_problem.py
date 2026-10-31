@@ -98,7 +98,7 @@ def test_crash_details_are_kept_only_when_the_last_run_did_not_quit_normally(ses
     assert not second.crashed_last_time and "access violation" in files.last_crash.read_text(encoding="utf-8")
 
 
-@pytest.mark.windows  # a Mac developer would get macOS's "Python quit unexpectedly" window
+@pytest.mark.windows  # elsewhere the system may show its own crash window
 def test_a_real_crash_is_found_at_the_next_start(session, tmp_path):
     code = textwrap.dedent(f"""
         import faulthandler, sys
@@ -230,13 +230,13 @@ def test_an_unwritable_folder_means_no_log_not_a_failure(tmp_path, faults):
     assert logs.setup("snipforge", blocked) is None
 
 
-def test_logs_have_a_home_on_each_platform(monkeypatch, on_a_mac):
+def test_logs_have_a_home_on_each_platform(monkeypatch, off_windows):
     monkeypatch.delenv(logs.FOLDER_VARIABLE)
     if sys.platform == "win32":
         monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\x\AppData\Local")
         assert logs.folder() == Path(r"C:\Users\x\AppData\Local\SnipForge\logs")
-    on_a_mac(logs)
-    assert logs.folder() == Path.home() / "Library" / "Logs" / "SnipForge"
+    off_windows(logs)
+    assert logs.folder() == Path.home() / ".cache" / "SnipForge" / "logs"
 
 
 # --- taking private details out -------------------------------------------------------------------

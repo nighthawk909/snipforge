@@ -221,8 +221,6 @@ def operating_system() -> str:
             return windows_version()
         except OSError:
             return platform.platform()
-    if sys.platform == "darwin":
-        return f"macOS {platform.mac_ver()[0] or platform.release()}"
     return platform.platform()
 
 

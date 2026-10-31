@@ -118,8 +118,8 @@ def test_structures_match_windows_x64_layouts():
     assert {s.__name__: ctypes.sizeof(s) for s in sizes} == {s.__name__: n for s, n in sizes.items()}
 
 
-def test_off_windows_the_screen_cant_be_duplicated(on_a_mac):
-    on_a_mac(dxgi)
+def test_off_windows_the_screen_cant_be_duplicated(off_windows):
+    off_windows(dxgi)
     assert not dxgi.available()
     assert dxgi.monitors() == []
     with pytest.raises(dxgi.DuplicationUnavailable, match="Windows"):

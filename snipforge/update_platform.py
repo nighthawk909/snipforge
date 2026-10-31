@@ -1,7 +1,6 @@
-"""The platform-specific parts of updating: installer names, install mode, policy and launching.
+"""The Windows-specific parts of updating: installer names, install mode, policy and launching.
 
-Everything else in the update engine is platform-neutral. Windows is implemented today; the macOS
-port fills in the `macos` branches (a .dmg asset, managed preferences instead of the registry).
+Everything else in the update engine is platform-neutral.
 """
 from __future__ import annotations
 
@@ -10,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PLATFORM = "macos" if sys.platform == "darwin" else "windows"
+PLATFORM = "windows"  # the platform an IT update feed lists SnipForge's installers under (update_sources.py)
 POLICY_KEY = r"Software\Policies\SnipForge"
 POLICY_VALUES = ("DisableUpdateCheck", "UpdateSource", "UpdateFeed", "UpdateMode", "UpdateChannel", "AllowRollback")
 # Per-user, silent, no reboot.
@@ -24,11 +23,8 @@ SM_SHUTTINGDOWN = 0x2000
 ASFW_ANY = 0xFFFFFFFF
 
 # How a release's installer is named on GitHub, per platform; group 1 is the version.
-_INSTALLER_NAMES = {
-    "windows": re.compile(r"^SnipForge-(.+)-setup\.exe$", re.IGNORECASE),
-    "macos": re.compile(r"^SnipForge-(.+)\.dmg$", re.IGNORECASE),
-}
-_INSTALLER_SUFFIXES = {"windows": (".exe",), "macos": (".dmg", ".pkg")}
+_INSTALLER_NAMES = {"windows": re.compile(r"^SnipForge-(.+)-setup\.exe$", re.IGNORECASE)}
+_INSTALLER_SUFFIXES = {"windows": (".exe",)}
 
 
 def installer_version(name: str, platform: str = PLATFORM) -> str | None:
@@ -43,13 +39,10 @@ def installer_suffix_ok(name: str, platform: str = PLATFORM) -> bool:
 
 
 def install_mode(executable: str | None = None, frozen: bool | None = None) -> str:
-    """'per-user' (can update itself silently), 'all-users' (IT-managed), 'by-hand' (a Mac, until it
-    can install a .dmg itself: docs/PARITY.md) or 'source'."""
+    """'per-user' (can update itself silently), 'all-users' (IT-managed) or 'source'."""
     frozen = getattr(sys, "frozen", False) if frozen is None else frozen
     if not frozen:
         return "source"
-    if PLATFORM != "windows":
-        return "by-hand"
     exe = Path(executable or sys.executable).resolve()
     local_programs = Path.home() / "AppData" / "Local" / "Programs"
     return "per-user" if local_programs in exe.parents else "all-users"
@@ -58,8 +51,6 @@ def install_mode(executable: str | None = None, frozen: bool | None = None) -> s
 def launch_installer(installer: Path, reopen: str = REOPEN_TRAY) -> str:
     """Start the verified installer detached; `reopen` is how it starts SnipForge again. Returns ""
     on success, otherwise what went wrong."""
-    if PLATFORM != "windows":
-        return "Installing updates isn't supported on this platform yet."
     args = [str(installer), *INSTALLER_ARGS, *RELAUNCH_ARGS[reopen], *_log_args()]
     try:
         subprocess.Popen(args, close_fds=True,
@@ -102,8 +93,6 @@ def _log_args() -> list[str]:
 
 def session_ending() -> bool:
     """True while Windows is signing out or shutting down (an installer started now would be killed)."""
-    if PLATFORM != "windows":
-        return False
     import ctypes
 
     try:
@@ -114,8 +103,6 @@ def session_ending() -> bool:
 
 def read_policy_hives(key: str = POLICY_KEY) -> list[dict[str, object]]:
     """Policy values from HKLM, then HKCU (highest precedence first). Empty dicts where nothing is set."""
-    if PLATFORM != "windows":
-        return []
     import winreg
 
     hives = []

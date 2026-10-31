@@ -110,7 +110,7 @@ def test_only_names_snipforge_makes_are_opened(name):
         CameraReader(name)
 
 
-def test_names_are_short_enough_for_macos():
+def test_names_are_short_enough_everywhere():
     assert len("/" + CameraWriter.__init__.__globals__["NAME_PREFIX"] + "0" * 16) <= 31
 
 

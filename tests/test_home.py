@@ -133,7 +133,7 @@ def test_tags_can_be_edited(home, lib, monkeypatch):
 def test_empty_library_explains_how_to_snip(qapp, tmp_path):
     home = HomeWindow(Library(tmp_path), lambda: None, lambda _i: None)
     home.refresh()
-    # Win+Shift+S on Windows; the menu bar icon on a Mac (tests/test_platform_guards.py)
+    # Win+Shift+S on Windows; the tray icon without the hook (tests/test_platform_guards.py)
     assert home._stack.currentIndex() == 1 and home._empty_hint.text() == snip_hint()
     assert not home._empty_button.isHidden()
 

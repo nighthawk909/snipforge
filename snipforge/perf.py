@@ -38,7 +38,7 @@ def memory_mb() -> float:
     import resource
 
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return round(peak / (MB if sys.platform == "darwin" else 1024), 1)  # bytes on macOS, KB on Linux
+    return round(peak / 1024, 1)  # KB on Linux
 
 
 def _app():
@@ -194,14 +194,13 @@ def make_library(root: Path, snips: int) -> None:
 
 
 def module_budget() -> int | None:
-    """The start-up module budget here: Windows'. The Mac's PyObjC brings modules of its own, so
-    there only the heavy ones are checked until the Mac port measures it."""
+    """The start-up module budget here: Windows'. Elsewhere only the heavy ones are checked."""
     return BUDGETS["startup_modules"] if sys.platform == "win32" else None
 
 
 def memory_budget() -> float | None:
     """The start-up memory budget here: Windows' private bytes. Elsewhere memory_mb() is the peak
-    resident size, a different measure, so it's reported, not budgeted, until the Mac port sets one."""
+    resident size, a different measure, so it's reported, not budgeted."""
     return BUDGETS["startup_memory_mb"] if sys.platform == "win32" else None
 
 

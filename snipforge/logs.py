@@ -40,11 +40,9 @@ log = logging.getLogger(__name__)
 
 
 def folder() -> Path:
-    """Where the log and crash files live: %LOCALAPPDATA%\\SnipForge\\logs, or ~/Library/Logs/SnipForge."""
+    """Where the log and crash files live: %LOCALAPPDATA%\\SnipForge\\logs."""
     if os.environ.get(FOLDER_VARIABLE):
         return Path(os.environ[FOLDER_VARIABLE])
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Logs" / "SnipForge"
     base = os.environ.get("LOCALAPPDATA") if sys.platform == "win32" else None
     return (Path(base) / "SnipForge" if base else Path.home() / ".cache" / "SnipForge") / "logs"
 

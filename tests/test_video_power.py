@@ -3,8 +3,8 @@ messages are tested in test_video_power_win32.py, and sent for real in the deskt
 from snipforge.video import power
 
 
-def test_where_it_cant_watch_yet_it_does_nothing_and_never_fails(on_a_mac, qapp):
-    on_a_mac(power)
+def test_where_it_cant_watch_yet_it_does_nothing_and_never_fails(off_windows, qapp):
+    off_windows(power)
     watch = power.SessionWatch()
     heard = []
     watch.sleeping.connect(lambda: heard.append("sleep"))
@@ -17,8 +17,8 @@ def test_where_it_cant_watch_yet_it_does_nothing_and_never_fails(on_a_mac, qapp)
     assert power.stay_awake(True) is False
 
 
-def test_events_become_signals(on_a_mac, qapp):
-    on_a_mac(power)  # no window: the events are handed in directly
+def test_events_become_signals(off_windows, qapp):
+    off_windows(power)  # no window: the events are handed in directly
     watch = power.SessionWatch()
     heard = []
     for name in ("sleeping", "ending_soon", "ending", "not_ending", "display_off", "display_on", "locked",
@@ -60,8 +60,8 @@ class FakeOs:
         self.calls.append(("close",))
 
 
-def test_the_face_hands_shutdown_and_closing_to_the_platforms_half(on_a_mac, qapp):
-    on_a_mac(power)
+def test_the_face_hands_shutdown_and_closing_to_the_platforms_half(off_windows, qapp):
+    off_windows(power)
     watch = power.SessionWatch()
     half = watch._os = FakeOs()
     watch.window_id = 4242

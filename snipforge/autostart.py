@@ -1,7 +1,6 @@
 """Start-with-Windows toggle via the per-user Run registry key.
 
-Windows only for now: elsewhere startup reads as off and turning it on explains why it can't
-(a macOS login item is planned in docs/MAC-PLAN.md).
+Windows only: elsewhere startup reads as off and turning it on explains why it can't.
 """
 from __future__ import annotations
 

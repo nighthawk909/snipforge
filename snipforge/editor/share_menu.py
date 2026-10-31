@@ -32,8 +32,8 @@ def _com_thread_init() -> None:
 
 
 def _show_in_folder(path) -> None:
-    """Opens the file's folder with the file selected: Explorer, or Finder on a Mac."""
-    subprocess.Popen(["open", "-R", str(path)] if sys.platform == "darwin" else ["explorer", f"/select,{path}"])
+    """Opens the file's folder in Explorer, with the file selected."""
+    subprocess.Popen(["explorer", f"/select,{path}"])
 
 
 class ShareController(QObject):
@@ -73,7 +73,7 @@ class ShareController(QObject):
             menu.addAction(icon("cloud"), f"OneDrive ({account.label}): share with people…",
                            lambda a=account: self.onedrive(a, share.ONEDRIVE_SHARE_VERB))
         menu.addSeparator()
-        if windows:  # the Windows share sheet; a Mac's share sheet is still to come (docs/PARITY.md)
+        if windows:  # the Windows share sheet
             menu.addAction(icon("share"), "Share to another app…", self.windows_share)
         menu.addAction(icon("folder"), "Save and show in folder", self.show_in_folder)
 

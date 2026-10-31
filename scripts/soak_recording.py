@@ -181,7 +181,7 @@ def memory_mb() -> float | None:
         import resource
 
         peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return peak / (2**20 if sys.platform == "darwin" else 2**10)
+        return peak / 2**10  # KB on Linux
     from ctypes import wintypes
 
     class Counters(ctypes.Structure):  # PROCESS_MEMORY_COUNTERS_EX

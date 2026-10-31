@@ -1,5 +1,4 @@
 """Moving, resizing and aiming markup: whatever tool is active, markup on the snip is easy to grab."""
-import sys
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent
@@ -255,12 +254,9 @@ def test_a_selected_spotlight_outlines_just_the_lit_area(qapp, white_image):
     assert spot.selection_rects() == [QRectF(40, 20, 80, 50)]
 
 
-def test_the_draw_over_hint_names_option_on_a_mac(qapp, on_a_mac):
+def test_the_draw_over_hint_names_alt(qapp):
     from snipforge.editor import panel as panel_module
     from snipforge.editor.style import DEFAULT_TOOL_STYLES
     panel = panel_module.PropertiesPanel()
     panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], False)
-    assert f"hold {'Option' if sys.platform == 'darwin' else 'Alt'}" in panel._hint.text()  # this machine
-    on_a_mac(panel_module)
-    panel.load("arrow", DEFAULT_TOOL_STYLES["arrow"], False)
-    assert "hold Option" in panel._hint.text()
+    assert "hold Alt" in panel._hint.text()

@@ -58,7 +58,7 @@ def test_starting_up_is_within_budget():
         "print(json.dumps({'startup_s': r['startup_s'], 'startup_memory_mb': r['memory_mb'],"
         " 'heavy': r['heavy_modules']}))")
     assert measured.pop("heavy") == []
-    if perf.memory_budget() is None:  # a Mac: peak resident size, reported but not budgeted yet
+    if perf.memory_budget() is None:  # off Windows: peak resident size, reported but not budgeted
         measured.pop("startup_memory_mb")
     assert perf.over_budget(measured) == []
 
@@ -68,12 +68,12 @@ def test_over_budget_names_what_is_over():
         [f"library_open_s is 9.0 (budget {perf.BUDGETS['library_open_s']})"]
 
 
-def test_memory_is_measured_on_every_platform(on_a_mac, monkeypatch):
+def test_memory_is_measured_on_every_platform(off_windows, monkeypatch):
     assert 5 < perf.memory_mb() < 4000
-    on_a_mac(perf)
+    off_windows(perf)
 
     class Usage:
-        ru_maxrss = 80 * 1024 * 1024  # bytes on macOS
+        ru_maxrss = 80 * 1024  # KB on Linux
 
     fake = type(sys)("resource")
     fake.RUSAGE_SELF = 0
@@ -92,7 +92,7 @@ def test_the_self_test_fails_when_start_up_loaded_too_much(monkeypatch):
     monkeypatch.setattr(perf, "module_budget", lambda: 10)
     with pytest.raises(RuntimeError, match="modules at start"):
         selftest._startup_imports()
-    monkeypatch.setattr(perf, "module_budget", lambda: None)  # a Mac: only the heavy ones checked
+    monkeypatch.setattr(perf, "module_budget", lambda: None)  # off Windows: only the heavy ones checked
     assert "none of the heavy ones" in selftest._startup_imports()
 
 

@@ -42,7 +42,6 @@ IN_USE = "Another app is using the camera. Close it, then try again."
 NO_PICTURE = "The camera didn't send a picture. Another app may be using it: close that app, then try again."
 WINDOWS_BLOCKED = ("Windows isn't letting apps use the camera. In Settings > Privacy & security > Camera, turn on "
                    "Camera access and Let desktop apps access your camera.")
-MAC_BLOCKED = "macOS isn't letting SnipForge use the camera. Allow it in System Settings > Privacy & Security > Camera."
 _IN_USE_WORDS = ("in use", "another", "busy")
 
 # Where Windows keeps Settings > Privacy & security > Camera: "Camera access" (for everyone on this
@@ -51,7 +50,7 @@ _CONSENT = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\C
 
 
 def blocked_message() -> str:
-    return MAC_BLOCKED if sys.platform == "darwin" else WINDOWS_BLOCKED
+    return WINDOWS_BLOCKED
 
 
 def explain(text: str, *, present: bool, blocked: bool, started: bool) -> str:
@@ -108,7 +107,7 @@ def _consent_values() -> list[str]:
 
 
 def _qt_permission_denied() -> bool:
-    """macOS (and others): Qt's own permission check. Asking for permission is for the Mac phase."""
+    """Off Windows: Qt's own permission check."""
     from PySide6.QtCore import QCameraPermission, QCoreApplication, Qt
 
     app = QCoreApplication.instance()

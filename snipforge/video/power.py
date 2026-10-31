@@ -2,10 +2,8 @@
 in time to finish its file; about the screen turning off, and being locked or unlocked, as they
 happen; and keeping the computer awake while it records.
 
-The operating system's side is in _power_win32.py (Windows: a hidden window it tells, and
-SetThreadExecutionState). On the Mac nothing is watched yet: recording is Windows-only for now
-(docs/PARITY.md), and the Mac's recording phase adds _power_mac.py (an IOPMAssertion to stay awake,
-NSWorkspace's sleep, session and screen notifications), behind this same face.
+The operating system's side is in _power_win32.py (a hidden window Windows tells, and
+SetThreadExecutionState). Elsewhere (tests off Windows) nothing is watched.
 """
 from __future__ import annotations
 
@@ -42,7 +40,7 @@ class SessionWatch(QObject):
             self.window_id = self._os.window_id
 
     def handle(self, event: str) -> None:
-        log.info("Windows says: %s", event)  # the Mac's half will say so too
+        log.info("Windows says: %s", event)
         signal = {"sleep": self.sleeping, "ending?": self.ending_soon, "ending": self.ending,
                   "not ending": self.not_ending, "display off": self.display_off, "display on": self.display_on,
                   "locked": self.locked, "unlocked": self.unlocked}.get(event)

@@ -1,6 +1,6 @@
 """Accessibility: every control has a name a screen reader can say, everything works from the
 keyboard (and you can see where the keyboard is), and SnipForge follows the system's high-contrast
-setting (Windows' contrast themes, the Mac's Increase contrast: snipforge/theme/contrast.py)."""
+setting (Windows' contrast themes: snipforge/theme/contrast.py)."""
 from __future__ import annotations
 
 import dataclasses

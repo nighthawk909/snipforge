@@ -6,7 +6,7 @@ import pytest
 
 from snipforge.video import clip, ffmpeg
 
-# Required on Windows; elsewhere (the Mac port) the run says why they were skipped.
+# Required on Windows; elsewhere the run says why they were skipped.
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not ffmpeg.available(),
                                  reason="Qt's FFmpeg isn't usable here (ffmpeg.unavailable_reason() says why)")
 

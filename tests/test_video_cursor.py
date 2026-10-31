@@ -289,8 +289,8 @@ def test_with_everything_off_nothing_is_read_or_drawn(qapp):
     assert source.calls == [] and image == frame()
 
 
-def test_off_windows_there_is_no_pointer_to_draw(qapp, on_a_mac):
-    on_a_mac(cursor)
+def test_off_windows_there_is_no_pointer_to_draw(qapp, off_windows):
+    off_windows(cursor)
     ov = cursor.PointerOverlay(AREA)
     image = frame()
     ov.draw(image, 1.0)
