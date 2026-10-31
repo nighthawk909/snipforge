@@ -3,6 +3,32 @@
 All notable changes to SnipForge. From 0.4.0 on, this file is updated automatically by
 release-please from [conventional commit](https://www.conventionalcommits.org/) messages.
 
+## [0.18.0](https://github.com/nighthawk909/snipforge/compare/v0.17.0...v0.18.0) (2026-10-31)
+
+
+### Features
+
+* **color:** pick a color from anywhere on your screen and copy its hex code ([#137](https://github.com/nighthawk909/snipforge/issues/137)) ([5344fd0](https://github.com/nighthawk909/snipforge/commit/5344fd069cb4f568dff3146209c713e8a90d292a))
+* **editor:** choose a callout's text color, or leave it on Automatic to read on any fill ([#135](https://github.com/nighthawk909/snipforge/issues/135)) ([d104784](https://github.com/nighthawk909/snipforge/commit/d1047845a333254141817bd6e61a383746b37cf2))
+* **editor:** drag the empty area around a snip to move it about the editor, or drag with the middle mouse button ([#136](https://github.com/nighthawk909/snipforge/issues/136)) ([1494b68](https://github.com/nighthawk909/snipforge/commit/1494b68d98a0b35a911c2eb1cec93a2f1ccf7973))
+* **editor:** Recent snips open in the editor you're in, keep their undo, and the strip holds still with the open snip marked ([#138](https://github.com/nighthawk909/snipforge/issues/138)) ([771e703](https://github.com/nighthawk909/snipforge/commit/771e703e06ce4b75926f52cc170071a9536d8806))
+* **editor:** remove a saved quick style with the × that shows when you point at it, or clear a tool's saved styles with Remove all ([#129](https://github.com/nighthawk909/snipforge/issues/129)) ([a268c6c](https://github.com/nighthawk909/snipforge/commit/a268c6ce61dea69f12d9222a73242669cc5fe6de))
+* **editor:** remove Beautify ([#143](https://github.com/nighthawk909/snipforge/issues/143)) ([2ba7f37](https://github.com/nighthawk909/snipforge/commit/2ba7f37dc2234c31a4ae0a7d57e58eb4860e6dda))
+* **editor:** step numbers start over from 1, close up when you delete one, start Letters at A, and restyle all at once ([#133](https://github.com/nighthawk909/snipforge/issues/133)) ([09989db](https://github.com/nighthawk909/snipforge/commit/09989db47cef51bf7dd9733b6f4b7e9f8d8fd34d))
+
+
+### Bug fixes
+
+* **capture:** the snip key keeps working after SnipForge has been busy, instead of going dead for minutes ([#132](https://github.com/nighthawk909/snipforge/issues/132)) ([2f00c62](https://github.com/nighthawk909/snipforge/commit/2f00c621cf457b68568f86165270e0fd59d666db))
+* **editor:** the properties panel fits callouts' and text's controls again, with no sideways scroll bar hiding the right edge ([#130](https://github.com/nighthawk909/snipforge/issues/130)) ([2076cb9](https://github.com/nighthawk909/snipforge/commit/2076cb9da5965a4b694d46d70e050d652df7cb97))
+* **update:** SnipForge comes back on screen after you install an update, instead of only in the tray ([#131](https://github.com/nighthawk909/snipforge/issues/131)) ([887c400](https://github.com/nighthawk909/snipforge/commit/887c400b7863db3ca008ff58a88bd70ef0469a22))
+
+
+### Performance
+
+* Report a problem opens without a pause the first time ([#140](https://github.com/nighthawk909/snipforge/issues/140)) ([5e398ac](https://github.com/nighthawk909/snipforge/commit/5e398ac991cd28897ae697002dba328d063e5850))
+* SnipForge starts a quarter of a second sooner, and its windows no longer pause the first time they show text ([#139](https://github.com/nighthawk909/snipforge/issues/139)) ([6ecc34a](https://github.com/nighthawk909/snipforge/commit/6ecc34a29eb39ad4c99e9b0a7046a66bffe81bcf))
+
 ## [0.17.0](https://github.com/nighthawk909/snipforge/compare/v0.16.0...v0.17.0) (2026-10-29)
 
 
