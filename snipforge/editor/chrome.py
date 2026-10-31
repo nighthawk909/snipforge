@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 
 from .. import theme
 from ..icons import icon
-from ..widgets import ToggleSwitch
 from ..wording import keys, redo_keys
 
 ZOOM_STEP = 1.25
@@ -194,11 +193,10 @@ class ThumbStrip(QScrollArea):
 
 
 class Tray(QWidget):
-    """Recent snips on the left; status messages, Beautify, image size and save state on the right."""
+    """Recent snips on the left; status messages, image size and save state on the right."""
 
     open_entry = Signal(str)
     open_library = Signal()
-    beautify_changed = Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -241,23 +239,14 @@ class Tray(QWidget):
         self.status.setObjectName("TrayStatus")
         self.status.setMinimumWidth(240)
         row.addWidget(self.status, 3)
-        beautify_label = QLabel("Beautify")
-        beautify_label.setToolTip("A backdrop, rounded corners and a shadow, shown around your snip here and added "
-                                  "when you copy, save, drag, pin or share")
-        row.addWidget(beautify_label)
-        self.beautify = ToggleSwitch("Beautify when copying, saving or dragging")
-        self.beautify.toggled.connect(lambda on: None if self._loading else self.beautify_changed.emit(on))
-        row.addWidget(self.beautify)
-        row.addSpacing(6)
         self._size = QLabel()
         self._size.setProperty("sfRole", "muted")
         row.addWidget(self._size)
         self._saved = QLabel()
         self._saved.setProperty("sfRole", "muted")
         row.addWidget(self._saved)
-        self._loading = False
         for w in self.findChildren(QWidget):
-            w.setFocusPolicy(Qt.TabFocus if isinstance(w, (QPushButton, QToolButton, ToggleSwitch)) else Qt.NoFocus)
+            w.setFocusPolicy(Qt.TabFocus if isinstance(w, (QPushButton, QToolButton)) else Qt.NoFocus)
 
     def _arrow(self, text: str, tip: str, direction: int) -> QToolButton:
         b = QToolButton()
@@ -356,11 +345,6 @@ class Tray(QWidget):
 
     def scroll_buttons_visible(self) -> bool:
         return self._back.isVisible() and self._forward.isVisible()
-
-    def set_beautify(self, on: bool) -> None:
-        self._loading = True
-        self.beautify.setChecked(on)
-        self._loading = False
 
     def set_image_size(self, width: int, height: int) -> None:
         self._size.setText(f"{width} × {height} px")

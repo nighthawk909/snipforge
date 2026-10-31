@@ -103,14 +103,3 @@ def test_image_section_reports_size(qapp):
     panel.load("select", None, has_selection=False)
     panel.set_image_size(1280, 720)
     assert "1280 × 720" in panel.image_size_text()
-
-
-def test_tray_beautify_switch_reports_changes_but_not_loading(qapp):
-    from snipforge.editor.chrome import Tray
-    tray = Tray()
-    seen = []
-    tray.beautify_changed.connect(seen.append)
-    tray.set_beautify(True)  # loading the saved value doesn't emit
-    assert seen == [] and tray.beautify.isChecked()
-    tray.beautify.click()
-    assert seen == [False]

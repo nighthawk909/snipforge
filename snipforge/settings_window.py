@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
 
 from . import __version__, autostart, bundle, color_text, hotkey, prefs, project, theme, wording
 from .capture_toolbar import MODES
-from .editor import beautify
 from .icons import icon
 from .preset_settings import PresetList
 from .shortcut_edit import ShortcutEdit
@@ -42,10 +41,10 @@ SECTIONS = {
     "capture": ("Capture", "monitor", "Which keys start a snip and what you see while choosing.",
                 "shortcut keyboard win shift print screen hotkey magnifier mode area window full screen "
                 "delay timer countdown pointer cursor mouse repeat last snip own custom combination library "
-                "preset presets saved copy folder beautify border torn edges color colour picker eyedropper pick "
+                "preset presets saved copy folder border torn edges color colour picker eyedropper pick "
                 "hex rgb hsl"),
     "saving": ("Saving", "save", "Where Save puts files, and in which format.",
-               "save folder format png jpg webp pdf beautify export"),
+               "save folder format png jpg webp pdf export"),
     "appearance": ("Appearance", "palette", "Light or dark, and the accent color used across SnipForge.",
                    f"theme dark light accent color match {wording.os_name().lower()}"),
     "updates": ("Updates", "refresh", "Choose how SnipForge stays up to date.",
@@ -171,7 +170,6 @@ class SettingsWindow(QMainWindow):
         self.setCentralWidget(root)
         self.show_section("general")
         theme.on_change(self._retheme)
-        beautify.switch().changed.connect(self._show_beautify)  # e.g. the editor's bottom-bar switch
 
     # ------------------------------------------------------------------ navigation
     def _build_nav(self) -> QWidget:
@@ -239,13 +237,12 @@ class SettingsWindow(QMainWindow):
         super().showEvent(e)
 
     def refresh(self) -> None:
-        """Re-read every control: things can change elsewhere (the editor's Beautify switch, startup set
-        in Windows, the theme toggle) while this window is closed."""
+        """Re-read every control: things can change elsewhere (startup set in Windows, the theme
+        toggle) while this window is closed."""
         win_shift_s, print_screen = prefs.hotkeys()
         for switch, value in ((self.startup, autostart.is_enabled()), (self.copy_on_capture, prefs.copy_on_capture()),
                               (self.key_win_shift_s, win_shift_s), (self.key_print_screen, print_screen),
-                              (self.magnifier, prefs.magnifier()), (self.include_pointer, prefs.capture_pointer()),
-                              (self.beautify, beautify.enabled())):
+                              (self.magnifier, prefs.magnifier()), (self.include_pointer, prefs.capture_pointer())):
             switch.blockSignals(True)
             switch.setChecked(value)
             switch.blockSignals(False)
@@ -488,21 +485,10 @@ class SettingsWindow(QMainWindow):
         self.format = Segmented([(fmt, FORMAT_LABELS.get(fmt, fmt.upper())) for fmt in prefs.FORMATS],
                                 value=prefs.export_format())
         self.format.changed.connect(prefs.set_export_format)
-        self.beautify = ToggleSwitch("Beautify when copying, saving or dragging")
-        self.beautify.setChecked(beautify.enabled())
-        self.beautify.toggled.connect(beautify.set_enabled)
         return stack(
             self.folder_row,
             SettingRow("File format", "PNG keeps every pixel sharp, and WebP does too in a smaller file. JPG makes "
-                       "smaller files for photos. PDF is a page the size of your snip, to print or send.", self.format),
-            SettingRow("Beautify when copying, saving or dragging",
-                       "Backdrop, rounded corners and a shadow, shown in the editor as you mark up. "
-                       "Also in the editor's bottom bar.", self.beautify))
-
-    def _show_beautify(self, on: bool) -> None:
-        self.beautify.blockSignals(True)
-        self.beautify.setChecked(on)
-        self.beautify.blockSignals(False)
+                       "smaller files for photos. PDF is a page the size of your snip, to print or send.", self.format))
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Save folder", str(prefs.export_dir()))

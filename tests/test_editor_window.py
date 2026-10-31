@@ -1,7 +1,7 @@
-"""Editor window wiring: focus, the tray, Beautify, save state and panel behavior."""
+"""Editor window wiring: focus, the tray, Copy, save state and panel behavior."""
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractButton, QApplication, QSlider, QSpinBox, QWidget
 
@@ -9,6 +9,8 @@ from snipforge.editor.style import Style
 from snipforge.editor.window import EditorWindow
 from snipforge.library import Library
 from snipforge.settings import app_settings
+from snipforge.widgets import ToggleSwitch
+from tests.test_editor import gesture
 
 
 @pytest.fixture
@@ -23,7 +25,6 @@ def editor(qapp, tmp_path, white_image):
     QApplication.processEvents()
     yield w
     w.close()
-    app_settings().remove("beautify")
 
 
 def test_clicking_panel_and_bar_controls_keeps_focus_on_the_canvas(editor):
@@ -55,16 +56,61 @@ def test_status_messages_have_room_next_to_ten_recent_snips(editor):
     assert editor.tray.status.width() >= 220
 
 
-def test_beautify_is_always_visible_and_persists(editor, white_image):
-    toggle = editor.tray.beautify
-    for tool in ("select", "rect", "callout"):
-        editor.canvas.set_tool(tool)
-        assert toggle.isVisibleTo(editor)
-    toggle.click()
-    assert app_settings().value("beautify", False, bool) is True
-    assert editor.final_image().size() != white_image.size()
-    toggle.click()
-    assert editor.final_image().size() == white_image.size()
+def ui_words(widget: QWidget) -> str:
+    """Every label, button text, accessible name and tooltip in `widget`, lower case."""
+    found = []
+    for w in (widget, *widget.findChildren(QWidget)):
+        text = getattr(w, "text", None)
+        found += [text() if callable(text) else "", w.accessibleName(), w.toolTip()]
+    return " ".join(t for t in found if isinstance(t, str)).lower()
+
+
+def test_the_bottom_bar_has_no_beautify_switch_and_closes_up(editor):
+    tray = editor.tray
+    assert not tray.findChildren(ToggleSwitch) and "beautif" not in ui_words(tray)
+    assert not hasattr(tray, "beautify") and not hasattr(tray, "beautify_changed")
+    gap = tray._size.geometry().left() - tray.status.geometry().right() - 1
+    assert gap == tray.layout().spacing()  # the image size sits right after the messages: no hole
+
+
+def test_no_beautify_command_in_the_command_palette(editor):
+    words = [" ".join(c.words()) for c in editor.commands_for_palette()]
+    assert words and not [w for w in words if "beautif" in w]
+
+
+@pytest.fixture
+def marked(qapp):
+    """200x100 white with a red square at 40,30-60,50."""
+    image = QImage(200, 100, QImage.Format_ARGB32)
+    image.fill(QColor("white"))
+    for x in range(40, 60):
+        for y in range(30, 50):
+            image.setPixelColor(x, y, QColor("#ff0000"))
+    return image
+
+
+def test_copy_hands_on_exactly_the_cropped_snip(qapp, tmp_path, marked):
+    app_settings().setValue("beautify", True)  # left by a SnipForge that had Beautify: it's never read
+    lib = Library(tmp_path)
+    w = EditorWindow(marked, lib, lib.create(marked))
+    try:
+        w.resize(1100, 700)
+        w.show()
+        QApplication.processEvents()
+        w.canvas.set_tool("crop")
+        gesture(w.canvas, (30, 20), (130, 80))  # a real drag with the Crop tool
+        w.canvas.set_tool("select")
+        assert w.canvas.crop_rect() == QRectF(30, 20, 100, 60)
+        w.copy_to_clipboard()
+        copied = QGuiApplication.clipboard().image().convertToFormat(QImage.Format_ARGB32)
+        rendered = w.canvas.render_image().convertToFormat(QImage.Format_ARGB32)
+        assert copied.size().toTuple() == (100, 60) and copied == rendered  # nothing added around it
+        assert copied.pixelColor(10, 10).name() == "#ff0000" and copied.pixelColor(0, 0).name() == "#ffffff"
+        assert w.final_image().size().toTuple() == (100, 60)
+        assert w.statusBar().currentMessage() == "Copied to clipboard"
+    finally:
+        w.close()
+        app_settings().remove("beautify")
 
 
 def test_undo_buttons_follow_the_history(editor):

@@ -1,5 +1,5 @@
 """What happens to a snip taken with a capture preset (snipforge/presets.py): its edges (a border,
-torn sides), Beautify, and where it goes: the editor, the clipboard or a folder.
+torn sides) and where it goes: the editor, the clipboard or a folder.
 
 The edges go into the snip's document in the Library, exactly as if they'd been added in the
 editor, so the Library shows them and opening the snip later keeps them editable.
@@ -12,8 +12,6 @@ from pathlib import Path
 from PySide6.QtGui import QImage
 
 from . import prefs
-from .editor import beautify
-from .editor.beautify import DEFAULT_STYLE, apply_beautify
 from .editor.edges import Edges
 from .presets import Preset
 
@@ -31,15 +29,6 @@ def with_edges(image: QImage, preset: Preset) -> tuple[dict | None, QImage]:
         return canvas.to_document(), canvas.render_image(commit=False, use_draft=False)
     finally:
         canvas.deleteLater()
-
-
-def beautify_on(preset: Preset) -> bool:
-    return preset.beautify_on(beautify.enabled())
-
-
-def final_image(rendered: QImage, preset: Preset) -> QImage:
-    """What Copy or Save hands on: the snip with its edges, framed by Beautify if it's on."""
-    return apply_beautify(rendered, DEFAULT_STYLE) if beautify_on(preset) else rendered
 
 
 def folder(preset: Preset) -> Path:

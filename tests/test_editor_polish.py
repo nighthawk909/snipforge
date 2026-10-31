@@ -1,13 +1,11 @@
-"""Polish: the eyedropper by keyboard, a clean lens edge over redactions, the Beautify preview of a torn
-edge matching the export, and the date stamp getting through a briefly locked meta.json."""
+"""Polish: the eyedropper by keyboard, a clean lens edge over redactions, and the date stamp getting
+through a briefly locked meta.json."""
 import pytest
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from snipforge.editor.beautify import DEFAULT_STYLE, apply_beautify
-from snipforge.editor.edges import Edges
 from tests.test_editor import drag, make_canvas
 
 
@@ -118,28 +116,7 @@ def test_a_lens_over_a_pixelation_matches_the_pixelation(qapp):
             assert abs(out.pixelColor(lens_px).lightness() - out.pixelColor(sx, sy).lightness()) <= 2
 
 
-# --- 3. the Beautify preview of a torn edge matches the export ------------------------------------
-def test_torn_edges_in_the_beautify_preview_match_the_export(striped):
-    big = striped.scaled(400, 200)
-    c = make_canvas(big)
-    c.set_beautify(DEFAULT_STYLE)
-    c.set_edges(Edges(torn=frozenset({"bottom"})))
-    c.set_zoom(1.0)
-    c.centerOn(QPointF(200, 100))
-    QApplication.processEvents()
-    view = c.viewport().grab().toImage()
-    export = apply_beautify(c.render_image(), DEFAULT_STYLE)
-    pad = DEFAULT_STYLE.padding
-    worst = 0
-    for x in range(30, 370, 3):
-        for y in range(186, 200):
-            v = view.pixelColor(c.mapFromScene(QPointF(x, y)))  # a whole pixel maps exactly at 100%
-            e = export.pixelColor(pad + x, pad + y)
-            worst = max(worst, abs(v.red() - e.red()), abs(v.green() - e.green()), abs(v.blue() - e.blue()))
-    assert worst <= 4
-
-
-# --- 4. the date stamp waits out a briefly locked meta.json ----------------------------------------
+# --- 3. the date stamp waits out a briefly locked meta.json ----------------------------------------
 @pytest.fixture
 def stamped_editor(qapp, tmp_path):
     from snipforge.editor.window import EditorWindow
@@ -269,21 +246,3 @@ def test_a_held_enter_picks_once_and_edits_nothing(striped):
     key(c, Qt.Key_Return)
     QApplication.sendEvent(c, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier, "", True))  # held
     assert c.editing_text_item() is None
-
-
-def test_torn_edges_match_the_export_on_a_big_snip_too(striped):
-    big = striped.scaled(3000, 700)  # bigger than the backdrop cache: drawn smaller and scaled up
-    c = make_canvas(big)
-    c.set_beautify(DEFAULT_STYLE)
-    c.set_edges(Edges(torn=frozenset({"bottom"})))
-    c.set_zoom(1.0)
-    c.centerOn(QPointF(1500, 690))
-    QApplication.processEvents()
-    view = c.viewport().grab().toImage()
-    export = apply_beautify(c.render_image(), DEFAULT_STYLE)
-    pad = DEFAULT_STYLE.padding
-    gone = [x for x in range(1300, 1700, 7) if c.render_image().pixelColor(x, 699).alpha() == 0]
-    assert gone
-    for x in gone:
-        v, e = view.pixelColor(c.mapFromScene(QPointF(x, 699))), export.pixelColor(pad + x, pad + 699)
-        assert max(abs(v.red() - e.red()), abs(v.green() - e.green()), abs(v.blue() - e.blue())) <= 4

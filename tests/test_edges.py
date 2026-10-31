@@ -5,7 +5,6 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from snipforge.editor.beautify import DEFAULT_STYLE, apply_beautify
 from snipforge.editor.canvas import Canvas
 from snipforge.editor.edges import Edges, outline
 from tests.test_editor import drag, gesture, make_canvas
@@ -79,18 +78,6 @@ def test_markup_near_a_torn_edge_is_torn_too(banded):
     c.set_edges(Edges(torn=frozenset({"bottom"})))
     out = c.render_image()
     assert min(alpha(out, x, 99) for x in range(100, 200)) == 0
-
-
-def test_beautify_shows_through_torn_edges_and_is_otherwise_unchanged(banded):
-    c = make_canvas(banded)
-    plain = apply_beautify(c.render_image(), DEFAULT_STYLE)
-    assert plain.size().toTuple() == (300 + 2 * DEFAULT_STYLE.padding, 100 + 2 * DEFAULT_STYLE.padding)
-    c.set_edges(Edges(torn=frozenset({"bottom"})))
-    torn = apply_beautify(c.render_image(), DEFAULT_STYLE)
-    assert torn.size() == plain.size()
-    pad = DEFAULT_STYLE.padding
-    gone = next(x for x in range(100, 300) if alpha(c.render_image(), x, 99) == 0)  # clear of the round corners
-    assert torn.pixelColor(pad + gone, pad + 99) != plain.pixelColor(pad + gone, pad + 99)  # backdrop shows
 
 
 def test_damaged_edges_entry_reads_as_none(banded):

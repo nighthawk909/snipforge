@@ -33,9 +33,8 @@ from ..icons import icon
 from ..library import Entry, Library
 from ..settings import app_settings
 from ..wording import keys
-from . import beautify, palette, regions
+from . import palette, regions
 from .app_stamp import stamp_parts
-from .beautify import DEFAULT_STYLE, apply_beautify
 from .canvas import MAX_ZOOM, MIN_ZOOM, Canvas, UnsupportedDocument
 from .canvas_clipboard import MARKUP_MIME
 from .chrome import ZOOM_STEP, CommandBar, Tray
@@ -73,10 +72,7 @@ def load_tool_styles(settings: QSettings) -> dict[str, Style]:
 class EditorWindow(SwitchMixin, QMainWindow):
     def __init__(self, image: QImage, library: Library, entry: Entry | None, document: dict | None = None,
                  on_new_snip=None, on_open_entry=None, on_pin=None, autosave: bool = True,
-                 on_open_library=None, beautify_on: bool | None = None, on_combine=None,
-                 on_left_snip=None) -> None:
-        """`beautify_on`: start with Beautify on or off (a capture preset's choice) instead of
-        following the switch in Settings; the switch still changes it."""
+                 on_open_library=None, on_combine=None, on_left_snip=None) -> None:
         super().__init__()
         self._library, self._entry = library, entry
         self._autosave_enabled = autosave and entry is not None
@@ -87,7 +83,6 @@ class EditorWindow(SwitchMixin, QMainWindow):
         self._on_left_snip = on_left_snip  # (entry): a snip was saved as another took its place
         self._settings = app_settings()
         self._export_path: Path | None = None
-        self._beautify = beautify.enabled() if beautify_on is None else beautify_on
 
         self.canvas = Canvas(image, load_tool_styles(self._settings))
         unsupported = False
@@ -141,10 +136,6 @@ class EditorWindow(SwitchMixin, QMainWindow):
         self.panel.style_saved.connect(
             lambda kind: self.statusBar().showMessage(f"Saved as a quick style for {TOOL_NAMES.get(kind, kind)}", 3000))
         self.panel.editing_done.connect(lambda: self.canvas.setFocus())
-        self.tray.beautify_changed.connect(beautify.set_enabled)
-        beautify.switch().changed.connect(self._show_beautify)  # from any editor or Settings
-        self.tray.set_beautify(self._beautify)
-        self.canvas.set_beautify(DEFAULT_STYLE if self._beautify else None)
         self.tray.open_entry.connect(self._open_entry)
         self.tray.open_library.connect(self._open_library)
         self.tray.library_button.setVisible(self._on_open_library is not None)
@@ -261,8 +252,6 @@ class EditorWindow(SwitchMixin, QMainWindow):
             Command("Zoom to 100%", lambda: self.canvas.set_zoom(1.0), key=keys("Ctrl+1"), keywords=("actual",)),
             Command("Zoom in", self._zoom_in, key=keys("Ctrl+="), icon="zoom_in"),
             Command("Zoom out", self._zoom_out, key=keys("Ctrl+-"), icon="zoom_out"),
-            Command("Beautify: turn off" if self._beautify else "Beautify: turn on",
-                    lambda: beautify.set_enabled(not self._beautify), keywords=("border", "shadow", "background")),
             Command("Customize tools…", self.customize_tools, icon="sliders",
                     keywords=("rail", "palette", "arrange", "hide", "favorites", "favourite")),
             Command("Hide tool labels" if p.labels else "Show tool labels",
@@ -419,14 +408,6 @@ class EditorWindow(SwitchMixin, QMainWindow):
         if manager is not None:
             manager.set_mode_preference("light" if manager.theme.dark else "dark")
 
-    def _show_beautify(self, on: bool) -> None:
-        self.tray.set_beautify(on)
-        if on != self._beautify:
-            self._beautify = on
-            for snip in {id(s): s for s in (self._current, *self._kept.values())}.values():  # every snip kept
-                snip.beautify = on
-                snip.canvas.set_beautify(DEFAULT_STYLE if on else None)
-
     def _open_entry(self, entry_id: str) -> None:
         if self._on_open_entry:
             self._on_open_entry(entry_id)
@@ -581,8 +562,7 @@ class EditorWindow(SwitchMixin, QMainWindow):
         self._on_combine(self._entry.id, self)
 
     def final_image(self) -> QImage:
-        image = self.canvas.render_image()
-        return apply_beautify(image, DEFAULT_STYLE) if self._beautify else image
+        return self.canvas.render_image()
 
     def copy_to_clipboard(self) -> None:
         editing = self.canvas.editing_text_item()
@@ -594,7 +574,7 @@ class EditorWindow(SwitchMixin, QMainWindow):
         mime = self.canvas.copy_mime(self.final_image())  # the snip, plus the selected markup for Paste
         with_markup = mime.hasFormat(MARKUP_MIME)
         QGuiApplication.clipboard().setMimeData(mime)
-        message = "Copied to clipboard with Beautify" if self._beautify else "Copied to clipboard"
+        message = "Copied to clipboard"
         if with_markup:
             message += f". {keys('Ctrl+V')} in a snip pastes the selected markup"
         self.statusBar().showMessage(message, 5000 if with_markup else 2500)
@@ -759,10 +739,8 @@ class EditorWindow(SwitchMixin, QMainWindow):
         self.save_kept_snips()  # any snip you left whose save failed then
         styles = {k: v.to_dict() for k, v in self.canvas.tool_styles.items()}
         self._settings.setValue("tool_styles", json.dumps(styles))
-        for signal, slot in ((beautify.switch().changed, self._show_beautify),
-                             (palette.notifier().changed, self._follow_palette)):
-            try:
-                signal.disconnect(slot)  # a closed editor stops following it
-            except (RuntimeError, TypeError):
-                pass  # already disconnected (closed twice)
+        try:
+            palette.notifier().changed.disconnect(self._follow_palette)  # a closed editor stops following it
+        except (RuntimeError, TypeError):
+            pass  # already disconnected (closed twice)
         super().closeEvent(e)

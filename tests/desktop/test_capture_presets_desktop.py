@@ -62,7 +62,7 @@ def test_a_copy_preset_puts_the_finished_snip_on_the_clipboard(qapp, tmp_path, m
         forge._note = lambda text: None
 
         class Taken:
-            preset = Preset("dsk2", "Copy test", border=8, beautify="off", destination="copy")
+            preset = Preset("dsk2", "Copy test", border=8, destination="copy")
             source = note = area = None
 
         image = QImage(120, 80, QImage.Format_ARGB32)

@@ -116,6 +116,7 @@ def test_the_wheel_scrolls_the_strip_and_arrows_show_when_it_overflows(forge):  
     editor = take(forge, *[f"#{n:02x}0000" for n in range(10, 22)])
     editor.resize(900, 700)
     QApplication.processEvents()
+    QApplication.processEvents()  # the strip lays its thumbs out a pass after the window's layout
     tray = editor.tray
     assert tray.can_scroll()
     bar = tray.strip_scroll_bar()
@@ -207,16 +208,6 @@ def test_edit_texts_choosing_stops_when_you_switch(forge):  # noqa: F811
     left_behind.start_choosing([left_behind.sceneRect()], lambda n: None)
     editor.tray.thumb(editor.tray.thumb_ids()[1]).click()
     assert not left_behind.choosing()
-
-
-def test_a_capture_presets_beautify_belongs_to_its_snip(forge):  # noqa: F811
-    editor = take(forge, "#ff0000")
-    plain = editor.entry_id()
-    entry = forge.library.create(snip("#00ff00"))
-    forge._open_editor(snip("#00ff00"), entry, None, beautify_on=True)
-    assert editor._beautify and editor.tray.beautify.isChecked()  # what's shown is what Copy gives
-    forge.open_entry(plain)
-    assert not editor._beautify and not editor.tray.beautify.isChecked()
 
 
 def test_a_snip_taken_while_a_dialog_is_open_gets_its_own_window(forge):  # noqa: F811

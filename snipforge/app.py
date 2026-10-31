@@ -456,13 +456,12 @@ class SnipForgeApp:
             self._home.update_entry(entry.id)
 
     def _finish_preset(self, image: QImage, entry, preset: presets.Preset) -> None:
-        """A capture preset's snip: its edges and Beautify, then the editor, the clipboard or a folder.
+        """A capture preset's snip: its edges, then the editor, the clipboard or a folder.
         It's in the Library whatever happens, so a snip that couldn't be saved isn't lost."""
         document, rendered = preset_output.with_edges(image, preset)
         kept = "" if entry is None else " It's in your Library too."
-        if prefs.copy_on_capture() and preset.destination != "copy":  # as Win+Shift+S, with its effects
-            copy = rendered if preset.destination == "editor" else preset_output.final_image(rendered, preset)
-            QGuiApplication.clipboard().setImage(copy)
+        if prefs.copy_on_capture() and preset.destination != "copy":  # as Win+Shift+S, with its edges
+            QGuiApplication.clipboard().setImage(rendered)
         if document is not None and entry is not None:
             try:
                 self.library.save(entry, document, rendered)
@@ -471,18 +470,16 @@ class SnipForgeApp:
         if entry is not None:
             self.indexer.index(entry)
         if preset.destination == "editor":
-            choice = None if preset.beautify == "settings" else preset_output.beautify_on(preset)
-            self._open_editor(image, entry, document, beautify_on=choice)
+            self._open_editor(image, entry, document)
             return
-        final = preset_output.final_image(rendered, preset)
         if preset.destination == "copy":
-            QGuiApplication.clipboard().setImage(final)
+            QGuiApplication.clipboard().setImage(rendered)
             self._note(f"Copied ({preset.name}).{kept}")
             return
         from .editor.export import ExportError, save_image
         try:
             path = preset_output.new_path(preset)
-            saved = save_image(final, path)
+            saved = save_image(rendered, path)
             problem = "" if saved else "it couldn't be written"
         except (OSError, ExportError) as exc:
             path, problem = None, str(exc)
@@ -552,19 +549,18 @@ class SnipForgeApp:
             document, autosave = None, False
         self._open_editor(image, entry, document, autosave)
 
-    def _open_editor(self, image: QImage, entry, document, autosave: bool = True,
-                     beautify_on: bool | None = None) -> None:
+    def _open_editor(self, image: QImage, entry, document, autosave: bool = True) -> None:
         """Show the snip in the editor that's open, in place (snip_switch.py). A snip that can't
         autosave (not in the Library, or its markup unreadable) gets a window of its own instead."""
         from .editor.window import EditorWindow  # loaded just after start-up (_load_editor)
 
         host = self._editor_host() if autosave and entry is not None else None
-        if host is not None and host.show_snip(image, entry, document, beautify_on):
+        if host is not None and host.show_snip(image, entry, document):
             self._bring_to_front(host)
             return
         editor = EditorWindow(image, self.library, entry, document, on_new_snip=self.capture,
                               on_open_entry=self.open_entry, on_pin=self.pin, autosave=autosave,
-                              on_open_library=self.show_home, beautify_on=beautify_on,
+                              on_open_library=self.show_home,
                               on_combine=lambda entry_id, window: self.combine([entry_id], window),
                               on_left_snip=self._snip_left)
         self._track(editor)

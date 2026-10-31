@@ -2,9 +2,7 @@
 tool's preview of the strip it will take away).
 
 They belong to the snip (saved in its document, part of every export) and are drawn by an item
-above all markup, so markup near a torn edge is torn too. Beautify (beautify.py) is separate and
-unchanged: it frames whatever the snip looks like, edges included, with a backdrop that shows
-through the torn parts.
+above all markup, so markup near a torn edge is torn too.
 """
 from __future__ import annotations
 
