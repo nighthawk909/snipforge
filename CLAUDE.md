@@ -36,6 +36,12 @@ dropped, so don't add Mac code, builds or docs. These rules make agent-driven ch
 - Keep `draft` and `force-tag-creation` together in `release-please-config.json`. GitHub only
   creates a draft's tag when it's published; without it the build can't check out the tag, and
   release-please can't find the previous release, so its next release PR lists the whole history.
+- To ship, once the maintainer has said to: `python scripts/ship.py release --wait` (or the
+  `shipper` agent, which runs it on a cheap model). It merges the release PR, so the rule below
+  applies. It waits for PRs set to auto-merge, the release PR's checks and release-please, merges the
+  exact commit it checked, waits for the Release workflow and verifies the published release.
+  `scripts/ship.py status` and `scripts/ship.py verify vX.Y.Z` only read: run them any time.
+  Day-to-day PRs ship with GitHub's auto-merge: `gh pr merge <n> --squash --auto`.
 - Ask the maintainer before merging a release PR or changing repo visibility, branch protection or
   secrets.
 
