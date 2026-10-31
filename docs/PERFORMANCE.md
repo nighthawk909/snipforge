@@ -26,8 +26,9 @@ machine whose disk is slow even for that (antivirus on a CI machine made it fift
 than on a laptop) gets twice that, plus a second, to open the window. The fixed 6 s was meant to
 leave room for GitHub's Windows runner, which took 2.3–8.0 s (3.5 s typically) to open 500 snips
 that a laptop opens in 0.2 s, and missed it three times. Reading the snips took it 0.06 s; the rest
-went on building the window, nearly all of it on the font lookup described below. The self-test also checks that Qt has a TLS back-end for update downloads
-(`tls`), since Python's own isn't packaged.
+went on building the window, nearly all of it on the font lookup described below. The self-test
+also checks that Qt has a TLS back-end for update downloads (`tls`), since Python's own isn't
+packaged.
 
 ## What changed
 
