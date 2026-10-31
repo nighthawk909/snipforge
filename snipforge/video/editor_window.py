@@ -1,4 +1,5 @@
-"""The video editor: play a recording, trim it to the frame, and save a trimmed copy or a GIF.
+"""The video editor: play a recording, trim it to the frame, cut parts out of the middle, add a
+title card or a caption (editor_edits.py), and save it as a new video or a GIF.
 
 Pictures come from two places. While playing, from Qt's player (player.py). While paused or
 scrubbing, from FFmpeg directly (frames.read), which is exact to the frame and doesn't depend on
@@ -33,7 +34,8 @@ from PySide6.QtWidgets import (
 )
 
 from .. import theme
-from . import editor_parts, ffmpeg, frame_times, gif, trim
+from . import editor_parts, ffmpeg, frame_times, gif, render, trim
+from .editor_edits import EditsMixin
 from .player import Player
 from .tasks import Task
 from .timeline import format_time
@@ -46,13 +48,17 @@ CLOSE_WAIT = 5.0  # seconds, in all, to let background work finish when the wind
 GIF_FPS, GIF_WIDTH = 12, 960
 
 
-class VideoEditorWindow(QMainWindow):
+class VideoEditorWindow(EditsMixin, QMainWindow):
+    GIF_FPS, GIF_WIDTH = GIF_FPS, GIF_WIDTH
+
     def __init__(self, path: str | os.PathLike, *, player=None, trim_copy=trim.copy, export_gif=gif.export_gif,
+                 render_video=render.Render, export_edited_gif=render.export_edited_gif,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.path = Path(os.path.abspath(path))
         self.frames = frame_times.read(self.path)  # FFmpegError if it isn't a video we can read
         self._trim_copy, self._export_gif = trim_copy, export_gif
+        self._render_video, self._export_edited_gif = render_video, export_edited_gif
         self._playing = False
         self._play_from = 0  # the frame playing started at; earlier ones the player sends aren't shown
         self._job: Task | None = None
@@ -71,6 +77,7 @@ class VideoEditorWindow(QMainWindow):
         self._stills = editor_parts.StillFrames(self.path, self.frames, self)
         self._stills.shown.connect(self._on_still)
         self._stills.failed.connect(self._on_still_failed)
+        self._build_edits()
         self._thumbs = Task(editor_parts.thumbnail_work(self.path, self.frames.end), item=self._on_thumbnail,
                             failed=self._on_thumbnails_failed, name="snipforge-video-thumbnails").start()
         QApplication.instance().aboutToQuit.connect(self._stop_work)  # a tray Quit doesn't close windows
@@ -95,6 +102,7 @@ class VideoEditorWindow(QMainWindow):
         inner.addLayout(self._transport_row())
         self.timeline = TimelineStrip(self.frames)
         self.timeline.range_edited.connect(self._on_edited)
+        self.timeline.range_edited.connect(self._range_edited)
         self.timeline.playhead_edited.connect(self._on_edited)
         self.timeline.play_toggled.connect(self.toggle_play)
         inner.addWidget(self.timeline)
@@ -112,12 +120,15 @@ class VideoEditorWindow(QMainWindow):
         title = QLabel(self.path.name)
         title.setProperty("sfRole", "heading")
         row.addWidget(title, 1)
-        self.gif_button = self._button("Export GIF", self.export_gif, "Make a GIF of the part you're keeping",
+        self.title_button = self._button("Title…", self.edit_title, "A title card shown before the video", "outline")
+        self.caption_button = self._button("Caption…", self.edit_caption, "Words along the bottom of the video",
+                                           "outline")
+        self.gif_button = self._button("Export GIF", self.export_gif, "Make a GIF of what you're keeping",
                                        "outline")
-        self.save_button = self._button("Save trimmed copy", self.save_trimmed_copy,
-                                        "Save the part you're keeping as a new video next to this one", "primary")
-        row.addWidget(self.gif_button)
-        row.addWidget(self.save_button)
+        self.save_button = self._button("Save video", self.save_video,
+                                        "Save what you're keeping as a new video next to this one", "primary")
+        for button in (self.title_button, self.caption_button, self.gif_button, self.save_button):
+            row.addWidget(button)
         return bar
 
     def _transport_row(self) -> QHBoxLayout:
@@ -128,8 +139,12 @@ class VideoEditorWindow(QMainWindow):
         self.time_label = QLabel()
         self.range_label = QLabel()
         self.range_label.setProperty("sfRole", "secondary")
+        self.cut_button = self._button("Cut out", self.cut_selection,
+                                       "Cut the chosen part out of the video (X). Shift+drag on the timeline, or "
+                                       "[ and ], to choose it; Delete in a cut puts it back", "outline")
         row.addWidget(self.play_button)
         row.addWidget(self.time_label)
+        row.addWidget(self.cut_button)
         row.addStretch(1)
         row.addWidget(self.range_label)
         return row
@@ -171,13 +186,14 @@ class VideoEditorWindow(QMainWindow):
         return self._playing
 
     def _refresh(self) -> None:
-        r, head = self.timeline.range, self.timeline.playhead
+        head = self.timeline.playhead
         self.time_label.setText(f"{format_time(self.frames.boundary(head))} / {format_time(self.frames.end)}")
-        self.range_label.setText("Drag the handles to choose what to keep" if r.is_whole else
-                                 f"Keeping {format_time(r.start)} to {format_time(r.end)} ({format_time(r.seconds)})")
+        self.range_label.setText(self._describe())
         busy = self._job is not None
-        self.save_button.setEnabled(not busy and not r.is_whole)
-        self.gif_button.setEnabled(not busy)
+        self.save_button.setEnabled(not busy and not self.edit.is_whole)
+        self.cut_button.setEnabled(not busy and self.timeline.selection is not None)
+        for button in (self.gif_button, self.title_button, self.caption_button):
+            button.setEnabled(not busy)
 
     def _set_playing(self, playing: bool) -> None:
         self._playing = playing
@@ -201,6 +217,9 @@ class VideoEditorWindow(QMainWindow):
             return
         r, head = self.timeline.range, self.timeline.playhead
         start = head if r.first <= head < r.last else r.first  # from the in point when at or past the end
+        cut = self.edit.cut_at(start)
+        if cut is not None and cut[1] < r.stop:
+            start = cut[1]  # from just after a cut
         self.timeline.set_playhead(start)
         self._play_from = start
         self._set_playing(True)
@@ -214,13 +233,16 @@ class VideoEditorWindow(QMainWindow):
         index, r = self.frames.index_at(seconds), self.timeline.range
         if not self._playing or index < self._play_from:
             return  # late, or from before where playing started (Qt's player can start a little early)
-        if index >= r.stop:  # reached the out point: stop on the last frame kept
+        cut = self.edit.cut_at(index)
+        if cut is not None and self._skip_cut(index):
+            return  # playing goes on after the cut (editor_edits.py)
+        if index >= r.stop or cut is not None:  # the end of what's kept: stop on its last frame
             self._pause()
-            self.timeline.set_playhead(r.last)
+            self.timeline.set_playhead(r.last if index >= r.stop else max(r.first, cut[0] - 1))
             self._refresh()
-            self._stills.request(r.last)
+            self._stills.request(self.timeline.playhead)
             return
-        self.view.set_image(image)
+        self.view.set_image(self._frame_shown(image))
         self.timeline.set_playhead(index)
         self.time_label.setText(f"{format_time(self.frames.boundary(index))} / {format_time(self.frames.end)}")
 
@@ -240,7 +262,7 @@ class VideoEditorWindow(QMainWindow):
 
     def _on_still(self, _index: int, image: QImage) -> None:
         if not self._playing:
-            self.view.set_image(image)
+            self.view.set_image(self._frame_shown(image))
 
     def _on_still_failed(self, message: str) -> None:
         self._set_status(f"Couldn't show that frame: {message}", error=True)
@@ -254,19 +276,11 @@ class VideoEditorWindow(QMainWindow):
 
     # ------------------------------------------------------------------ saving
     def save_trimmed_copy(self) -> None:
-        r = self.timeline.range
-        dst = editor_parts.next_free_name(self.path, "trimmed", ".mp4")
-        self._start_job(lambda task: self._trim_copy(self.path, dst, start=r.start, end=r.export_end), dst,
-                        "Saving the trimmed copy…")
+        self.save_video()  # editor_edits.py: a copy when it's only trimmed, encoded again when it's edited
 
     def export_gif(self) -> None:
-        r = self.timeline.range
         dst = editor_parts.next_free_name(self.path, None, ".gif")
-
-        def work(task):
-            return self._export_gif(self.path, dst, start=r.start, end=r.export_end, fps=GIF_FPS, width=GIF_WIDTH,
-                                    progress=task.report, cancel=lambda: task.is_cancelled)
-        self._start_job(work, dst, "Making the GIF…", cancellable=True)
+        self._start_job(self.gif_work(dst), dst, "Making the GIF…", cancellable=True)
 
     def _start_job(self, work, dst: Path, message: str, cancellable: bool = False) -> None:
         """One save or export at a time, on its own thread; its buttons wait until it's done. A
@@ -329,8 +343,9 @@ class VideoEditorWindow(QMainWindow):
         super().closeEvent(event)
 
     def _stop_making_gif(self) -> bool:
-        answer = QMessageBox.question(self, "SnipForge", "The GIF isn't finished yet. Stop making it and close?",
-                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        question = ("The edited video isn't saved yet. Stop saving it and close?" if self._render is not None
+                    else "The GIF isn't finished yet. Stop making it and close?")
+        answer = QMessageBox.question(self, "SnipForge", question, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         return answer == QMessageBox.Yes
 
     def _stop_work(self) -> None:
