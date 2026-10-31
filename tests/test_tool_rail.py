@@ -1,6 +1,6 @@
 """The editor's tool rail: every tool always has a visible button, however short the window."""
 import pytest
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QToolButton
 
@@ -191,14 +191,17 @@ def test_labels_show_when_there_is_room_and_step_aside_when_not(make_editor):
 def test_the_rail_can_be_on_the_right(make_editor):
     editor = make_editor(1440, 900)
     rail, canvas = editor.tool_rail, editor.canvas
-    assert rail.x() < canvas.x()
+
+    def left(widget) -> int:  # in the window: the canvas sits inside the editor's stack of snips
+        return widget.mapTo(editor, QPoint(0, 0)).x()
+    assert left(rail) < left(canvas)
     palette_store.save(Palette().with_changes(side="right"))
     QApplication.processEvents()
-    assert rail.x() > canvas.x() and rail.property("side") == "right"
-    assert rail.x() + rail.width() <= editor.width()
+    assert left(rail) > left(canvas) and rail.property("side") == "right"
+    assert left(rail) + rail.width() <= editor.width()
     palette_store.save(Palette())
     QApplication.processEvents()
-    assert rail.x() < canvas.x() and rail.property("side") == "left"
+    assert left(rail) < left(canvas) and rail.property("side") == "left"
 
 
 def test_the_right_click_menu_edits_the_palette(make_editor):

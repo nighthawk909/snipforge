@@ -177,7 +177,7 @@ def test_a_new_snip_replaces_the_open_editor(forge, white_image):
     forge._on_captured(white_image)
     QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     editors = _editors(forge)
-    assert len(editors) == 1 and editors[0] is not first
+    assert len(editors) == 1 and editors[0] is first  # the same editor, showing the new snip
     assert len(forge.library.entries()) == 2
     older = min(forge.library.entries(), key=lambda e: e.created)
     assert forge.library.load_document(older) is not None  # its rectangle was saved as it closed
